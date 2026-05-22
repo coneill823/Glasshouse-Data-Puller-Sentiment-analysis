@@ -11,6 +11,7 @@ Available services:
 """
 import json
 import logging
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, date
 from typing import Dict, Generator, List, Optional, Tuple
 
@@ -26,14 +27,14 @@ _HISTORY_START = date(2007, 1, 1)   # AIMS data begins ~2007
 
 def _date_chunks(from_date: Optional[str] = None,
                  chunk_months: int = 6) -> Generator[Tuple[str, str], None, None]:
-    """Yield (start, end) pairs in DD/MM/YYYY format covering from_date to today."""
+    """Yield (start, end) pairs in ISO YYYY-MM-DD format covering from_date to today."""
     start = datetime.strptime(from_date, "%Y-%m-%d").date() if from_date else _HISTORY_START
     end = date.today()
     current = start
     delta = timedelta(days=chunk_months * 30)
     while current < end:
         chunk_end = min(current + delta, end)
-        yield current.strftime("%d/%m/%Y"), chunk_end.strftime("%d/%m/%Y")
+        yield current.strftime("%Y-%m-%d"), chunk_end.strftime("%Y-%m-%d")
         current = chunk_end + timedelta(days=1)
 
 
@@ -97,8 +98,36 @@ class NIAssemblyScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def fetch_register_of_interests(self, members: List[Dict]) -> List[Dict]:
-        data = self._asmx("register", "GetAllRegisteredInterests_JSON")
-        rows = _first_list(data)
+        # Try JSON variant first, fall back to XML
+        rows = []
+        for method in ("GetAllRegisteredInterests_JSON", "GetAllRegisteredInterests"):
+            url = f"{_BASE}/register.asmx/{method}"
+            resp = self._get(url)
+            if not resp:
+                continue
+            ct = resp.headers.get("Content-Type", "")
+            if "json" in ct or method.endswith("_JSON"):
+                try:
+                    rows = _first_list(resp.json())
+                    if rows:
+                        break
+                except Exception:
+                    pass
+            # Parse as XML
+            try:
+                root = ET.fromstring(resp.text)
+                # Strip namespace for easier searching
+                for elem in root.iter():
+                    if "}" in elem.tag:
+                        elem.tag = elem.tag.split("}", 1)[1]
+                rows = []
+                for interest in root.iter("RegisteredInterest"):
+                    rows.append({k.tag: k.text for k in interest})
+                if rows:
+                    break
+            except ET.ParseError:
+                pass
+
         lookup = self._member_lookup(members)
         records = []
         for item in rows:
