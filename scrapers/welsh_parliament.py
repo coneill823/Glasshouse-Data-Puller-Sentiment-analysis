@@ -45,11 +45,14 @@ _INTEREST_PATHS = [
 
 # record.senedd.wales paths (capitalisation varies by version)
 _PLENARY_PATHS = [
-    "/en/plenary/",
-    "/en/Plenary/",
+    "/en/plenary/plenary-sessions/",
+    "/en/plenary/plenary-session/",
+    "/en/plenary/sessions/",
+    "/en/Plenary/Plenary-Sessions/",
     "/en/business/plenary/",
     "/en/Business/Plenary/",
     "/en/Business/Plenary",
+    "/en/plenary/",
 ]
 _DIVISION_PATHS = [
     "/en/plenary/divisions/",
@@ -275,11 +278,16 @@ class WelshParliamentScraper(BaseScraper):
                 links_found = []
                 for link in soup.select("a[href]"):
                     href = link.get("href", "")
-                    if re.search(r"/\d{4}-\d{2}-\d{2}|/\d+", href):
+                    # Only follow real http/https or path-based links (filter out tel:, mailto:, javascript:, etc.)
+                    if not href or not (href.startswith("/") or href.startswith("http")):
+                        continue
+                    if re.search(r"/\d{4}-\d{2}-\d{2}|/\d+|question|oral|written", href, re.I):
                         links_found.append(href)
 
                 if not links_found:
-                    logger.warning(f"[Welsh Parliament] Questions index loaded but no question links found: {url}")
+                    body = soup.find("body")
+                    snippet = body.get_text(separator=" ", strip=True)[:600] if body else ""
+                    logger.warning(f"[Welsh Parliament] Questions index loaded but no question links found: {url} — snippet: {snippet}")
                     continue
 
                 logger.info(f"[Welsh Parliament] Questions: found {len(links_found)} links at {url}")
@@ -337,7 +345,9 @@ class WelshParliamentScraper(BaseScraper):
         session_links = []
         for link in soup.select("a[href]"):
             href = link.get("href", "")
-            if re.search(r"[Pp]lenary[/.].*\d{4}|\d{4}-\d{2}-\d{2}", href):
+            if not href or not (href.startswith("/") or href.startswith("http")):
+                continue
+            if re.search(r"[Pp]lenary[/.].*\d{4}|\d{4}-\d{2}-\d{2}|/\d{4}/\d{2}", href):
                 full_url = href if href.startswith("http") else f"{_RECORD}{href}"
                 session_links.append(full_url)
         session_links = list(dict.fromkeys(session_links))
@@ -437,6 +447,9 @@ class WelshParliamentScraper(BaseScraper):
                 continue
 
             detail_href = link_el["href"]
+            # Skip non-HTTP links (tel:, mailto:, javascript:, etc.)
+            if not detail_href or not (detail_href.startswith("/") or detail_href.startswith("http")):
+                continue
             detail_url = detail_href if detail_href.startswith("http") else f"{_RECORD}{detail_href}"
             detail_soup = self._html_get(detail_url)
             if not detail_soup:

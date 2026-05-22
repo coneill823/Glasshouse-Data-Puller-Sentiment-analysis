@@ -1,9 +1,15 @@
 """
-Scottish Parliament scraper using the public OData API.
-API documentation: https://data.parliament.scot/api/
+Scottish Parliament scraper.
+
+Members are fetched from the public OData API at https://data.parliament.scot/api.
+All other entity endpoints on that API return 404; interests, questions, plenary,
+and votes are scraped from https://www.parliament.scot with a browser User-Agent.
 """
 import logging
+import re
 from typing import Dict, List, Optional
+
+from bs4 import BeautifulSoup
 
 from .base_scraper import BaseScraper
 from config import PARLIAMENTS
@@ -11,7 +17,14 @@ from config import PARLIAMENTS
 logger = logging.getLogger(__name__)
 
 _CFG = PARLIAMENTS["scottish_parliament"]
-_API = _CFG["api_base"]  # https://data.parliament.scot/api
+_API = _CFG["api_base"]          # https://data.parliament.scot/api
+_WEB = "https://www.parliament.scot"
+
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
 
 
 class ScottishParliamentScraper(BaseScraper):
@@ -70,6 +83,24 @@ class ScottishParliamentScraper(BaseScraper):
         return [], candidates[0]
 
     # ------------------------------------------------------------------
+    # HTML helper — uses browser UA so parliament.scot doesn't block us
+    # ------------------------------------------------------------------
+
+    def _html_get(self, url: str, params: Optional[Dict] = None) -> Optional[BeautifulSoup]:
+        saved = dict(self.session.headers)
+        self.session.headers.update({
+            "User-Agent": _BROWSER_UA,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-GB,en;q=0.9",
+        })
+        resp = self._get(url, params=params)
+        self.session.headers.clear()
+        self.session.headers.update(saved)
+        if not resp:
+            return None
+        return BeautifulSoup(resp.text, "lxml")
+
+    # ------------------------------------------------------------------
     # Members (MSPs)
     # ------------------------------------------------------------------
 
@@ -92,119 +123,163 @@ class ScottishParliamentScraper(BaseScraper):
         return {m["id"]: m for m in members}
 
     # ------------------------------------------------------------------
-    # Register of interests
+    # Register of interests — scraped from parliament.scot
+    # (data.parliament.scot/api does not expose this entity publicly)
     # ------------------------------------------------------------------
 
     def fetch_register_of_interests(self, members: List[Dict]) -> List[Dict]:
-        rows, _ = self._odata_try([
-            "MemberInterests", "RegisteredInterests", "Interests",
-            "MemberRegisteredInterests", "RegisterOfInterests",
-        ])
-        lookup = self._member_lookup(members)
+        url = f"{_WEB}/msps/members-interests/register-of-interests"
+        soup = self._html_get(url)
         records = []
-        for item in rows:
-            pid = str(item.get("PersonId", item.get("MemberID", "")))
-            member = lookup.get(pid, {
-                "id": pid,
-                "name": item.get("MemberName", ""),
-                "party": "",
-                "constituency": "",
-                "role": "MSP",
-            })
-            desc = item.get("InterestDescription", item.get("Description", item.get("Interest", "")))
-            if not desc:
+        if not soup:
+            logger.warning(f"[Scottish Parliament] Could not load register of interests: {url}")
+            return records
+
+        member_lookup = {m["name"].lower(): m for m in members}
+
+        # The page lists each MSP followed by their categories and interests
+        for section in soup.select("details, .member-interests, article, section"):
+            name_el = section.select_one("summary, h2, h3, h4, .msp-name, [class*='name']")
+            if not name_el:
                 continue
-            records.append(self._make_record(
-                data_type="register_of_interests",
-                member=member,
-                date=item.get("RegisteredDate", item.get("Date", "")),
-                text=desc,
-                title=item.get("CategoryName", item.get("Category", "")),
-                metadata={
-                    "category": item.get("CategoryName", item.get("Category", "")),
-                    "interest_id": str(item.get("MemberInterestId", item.get("Id", ""))),
-                },
-                source_url=f"{_API}/MemberInterests",
-            ))
+            member_name = name_el.get_text(strip=True)
+            member = member_lookup.get(member_name.lower(), {
+                "id": "", "name": member_name, "party": "",
+                "constituency": "", "role": "MSP",
+            })
+            for item in section.select("li, p, td"):
+                text = item.get_text(strip=True)
+                if len(text) < 5:
+                    continue
+                records.append(self._make_record(
+                    data_type="register_of_interests",
+                    member=member,
+                    date="",
+                    text=text,
+                    title="",
+                    source_url=url,
+                ))
+
+        if not records:
+            body = soup.find("body")
+            snippet = body.get_text(separator=" ", strip=True)[:500] if body else ""
+            logger.warning(f"[Scottish Parliament] 0 interest records parsed — page snippet: {snippet}")
         logger.info(f"[Scottish Parliament] {len(records)} interest records fetched")
         return records
 
     # ------------------------------------------------------------------
-    # Questions
+    # Questions — scraped from parliament.scot
     # ------------------------------------------------------------------
 
     def fetch_questions(self, from_date: Optional[str] = None) -> List[Dict]:
-        filters = None
-        if from_date:
-            filters = f"QuestionDate ge datetime'{from_date}'"
-        rows, _ = self._odata_try([
-            "Questions", "WrittenQuestions", "OralQuestions",
-            "QuestionAndAnswers", "AssemblyQuestions",
-        ], filters=filters)
         records = []
-        for q in rows:
-            q_text = q.get("QuestionText", q.get("Text", ""))
-            answer = q.get("AnswerText", q.get("Answer", ""))
-            combined = f"Question: {q_text}\n\nAnswer: {answer}" if answer else q_text
-            records.append(self._make_record(
-                data_type="question",
-                member={
-                    "id": str(q.get("PersonId", q.get("AskingMemberId", ""))),
-                    "name": q.get("AskingMemberName", q.get("MemberName", "")),
-                    "party": q.get("AskingMemberParty", q.get("Party", "")),
-                    "constituency": q.get("AskingMemberConstituency", q.get("Constituency", "")),
-                    "role": "MSP",
-                },
-                date=q.get("QuestionDate", q.get("Date", "")),
-                text=combined,
-                title=q.get("SubjectText", q.get("Subject", "")),
-                metadata={
-                    "question_id": str(q.get("QuestionID", q.get("Id", ""))),
-                    "question_type": q.get("QuestionType", "written"),
-                    "answering_body": q.get("AnsweringBody", q.get("Department", "")),
-                    "answer_text": answer,
-                },
-                source_url=f"{_API}/Questions",
-            ))
+        for path in [
+            "/chamber-and-committees/questions-and-answers/question-search",
+            "/chamber-and-committees/questions-and-answers",
+        ]:
+            url = f"{_WEB}{path}"
+            soup = self._html_get(url)
+            if not soup:
+                continue
+
+            # Log what we find so we can diagnose selector issues
+            links = [a["href"] for a in soup.select("a[href]")
+                     if a.get("href", "").startswith(("/", "http"))
+                     and re.search(r"/question|/answer|\d{4}-\d{2}-\d{2}|/\d+", a.get("href", ""), re.I)]
+
+            if not links:
+                body = soup.find("body")
+                snippet = body.get_text(separator=" ", strip=True)[:500] if body else ""
+                logger.warning(f"[Scottish Parliament] No question links at {url} — snippet: {snippet}")
+                continue
+
+            logger.info(f"[Scottish Parliament] Found {len(links)} question links at {url}")
+            for href in links[:200]:
+                full_url = href if href.startswith("http") else f"{_WEB}{href}"
+                detail = self._html_get(full_url)
+                if not detail:
+                    continue
+                date_el = detail.select_one("time[datetime], time, .date, [class*='date']")
+                date_str = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
+                if from_date and date_str and date_str[:10] < from_date:
+                    continue
+                for contrib in detail.select(".question, .answer, .contribution, .item, article"):
+                    text = contrib.get_text(strip=True)
+                    if len(text) < 10:
+                        continue
+                    speaker_el = contrib.select_one(".speaker, .msp-name, strong, b, h3")
+                    records.append(self._make_record(
+                        data_type="question",
+                        member={
+                            "id": "", "name": speaker_el.get_text(strip=True) if speaker_el else "",
+                            "party": "", "constituency": "", "role": "MSP",
+                        },
+                        date=date_str,
+                        text=text,
+                        title="",
+                        source_url=full_url,
+                    ))
+            if records:
+                break
+
         logger.info(f"[Scottish Parliament] {len(records)} question records fetched")
         return records
 
     # ------------------------------------------------------------------
-    # Plenary business (Official Reports)
+    # Plenary business — Official Report from parliament.scot
     # ------------------------------------------------------------------
 
     def fetch_plenary_business(self, from_date: Optional[str] = None) -> List[Dict]:
-        filters = None
-        if from_date:
-            filters = f"ReportDate ge datetime'{from_date}'"
-        rows, _ = self._odata_try([
-            "OfficialReportContributions", "Contributions", "MemberBusinessContributions",
-            "OfficialReport", "OralContributions", "PlenaryContributions",
-        ], filters=filters)
         records = []
-        for item in rows:
-            text = item.get("ContributionText", item.get("Text", item.get("Speech", "")))
-            if not text:
+        for path in [
+            "/chamber-and-committees/official-report/what-was-said-in-parliament",
+            "/chamber-and-committees/official-report",
+        ]:
+            url = f"{_WEB}{path}"
+            soup = self._html_get(url)
+            if not soup:
                 continue
-            records.append(self._make_record(
-                data_type="plenary_speech",
-                member={
-                    "id": str(item.get("PersonId", item.get("MemberID", ""))),
-                    "name": item.get("MemberName", item.get("Speaker", "")),
-                    "party": item.get("PartyName", item.get("Party", "")),
-                    "constituency": item.get("ConstituencyName", item.get("RegionName", "")),
-                    "role": "MSP",
-                },
-                date=item.get("ReportDate", item.get("Date", "")),
-                text=text,
-                title=item.get("AgendaItem", item.get("Subject", item.get("Title", ""))),
-                metadata={
-                    "contribution_id": str(item.get("ContributionID", item.get("Id", ""))),
-                    "report_id": str(item.get("OfficialReportID", "")),
-                    "agenda_item": item.get("AgendaItem", ""),
-                },
-                source_url=f"{_API}/OfficialReportContributions",
-            ))
+
+            links = [a["href"] for a in soup.select("a[href]")
+                     if a.get("href", "").startswith(("/", "http"))
+                     and re.search(r"\d{4}-\d{2}-\d{2}|/official-report/|/or-\d", a.get("href", ""), re.I)]
+
+            if not links:
+                body = soup.find("body")
+                snippet = body.get_text(separator=" ", strip=True)[:500] if body else ""
+                logger.warning(f"[Scottish Parliament] No Official Report links at {url} — snippet: {snippet}")
+                continue
+
+            logger.info(f"[Scottish Parliament] Found {len(links)} Official Report links")
+            for href in links[:50]:
+                full_url = href if href.startswith("http") else f"{_WEB}{href}"
+                detail = self._html_get(full_url)
+                if not detail:
+                    continue
+                date_el = detail.select_one("time[datetime], time, .date, h1")
+                date_str = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
+                if from_date and date_str and date_str[:10] < from_date:
+                    continue
+                for contrib in detail.select(".contribution, .speech, [class*='contribution'], tr"):
+                    speaker_el = contrib.select_one(".speaker, .msp-name, strong, b, td:first-child")
+                    text_el = contrib.select_one(".text, p, td:last-child")
+                    text = text_el.get_text(strip=True) if text_el else contrib.get_text(strip=True)
+                    if len(text) < 10:
+                        continue
+                    records.append(self._make_record(
+                        data_type="plenary_speech",
+                        member={
+                            "id": "", "name": speaker_el.get_text(strip=True) if speaker_el else "",
+                            "party": "", "constituency": "", "role": "MSP",
+                        },
+                        date=date_str,
+                        text=text,
+                        title="",
+                        source_url=full_url,
+                    ))
+            if records:
+                break
+
         logger.info(f"[Scottish Parliament] {len(records)} plenary records fetched")
         return records
 
@@ -220,30 +295,95 @@ class ScottishParliamentScraper(BaseScraper):
             "Votes", "VoteResults", "DivisionVotes", "MemberVotes",
             "Divisions", "VotedFor",
         ], filters=filters)
+
+        if rows:
+            # OData data found — use it
+            records = []
+            for vote in rows:
+                direction_map = {1: "aye", 2: "no", 3: "abstain"}
+                direction_raw = vote.get("VoteType", vote.get("Vote", 0))
+                direction = direction_map.get(direction_raw, str(direction_raw).lower())
+                div_title = vote.get("DivisionName", vote.get("MotionText", vote.get("Title", "")))
+                records.append(self._make_record(
+                    data_type="vote",
+                    member={
+                        "id": str(vote.get("PersonId", vote.get("MemberID", ""))),
+                        "name": vote.get("MemberName", vote.get("Name", "")),
+                        "party": vote.get("PartyName", vote.get("Party", "")),
+                        "constituency": vote.get("ConstituencyName", vote.get("RegionName", "")),
+                        "role": "MSP",
+                    },
+                    date=vote.get("DivisionDate", vote.get("Date", "")),
+                    text=f"Voted {direction} on: {div_title}",
+                    title=div_title,
+                    metadata={
+                        "division_id": str(vote.get("DivisionID", vote.get("VoteID", ""))),
+                        "vote_direction": direction,
+                        "division_result": vote.get("DivisionResult", vote.get("Result", "")),
+                    },
+                    source_url=f"{_API}/Votes",
+                ))
+            logger.info(f"[Scottish Parliament] {len(records)} vote records fetched")
+            return records
+
+        # Fallback: scrape votes/divisions from parliament.scot
         records = []
-        for vote in rows:
-            direction_map = {1: "aye", 2: "no", 3: "abstain"}
-            direction_raw = vote.get("VoteType", vote.get("Vote", 0))
-            direction = direction_map.get(direction_raw, str(direction_raw).lower())
-            div_title = vote.get("DivisionName", vote.get("MotionText", vote.get("Title", "")))
-            records.append(self._make_record(
-                data_type="vote",
-                member={
-                    "id": str(vote.get("PersonId", vote.get("MemberID", ""))),
-                    "name": vote.get("MemberName", vote.get("Name", "")),
-                    "party": vote.get("PartyName", vote.get("Party", "")),
-                    "constituency": vote.get("ConstituencyName", vote.get("RegionName", "")),
-                    "role": "MSP",
-                },
-                date=vote.get("DivisionDate", vote.get("Date", "")),
-                text=f"Voted {direction} on: {div_title}",
-                title=div_title,
-                metadata={
-                    "division_id": str(vote.get("DivisionID", vote.get("VoteID", ""))),
-                    "vote_direction": direction,
-                    "division_result": vote.get("DivisionResult", vote.get("Result", "")),
-                },
-                source_url=f"{_API}/Votes",
-            ))
+        for path in [
+            "/chamber-and-committees/votes-and-divisions/search",
+            "/chamber-and-committees/votes-and-divisions",
+        ]:
+            url = f"{_WEB}{path}"
+            soup = self._html_get(url)
+            if not soup:
+                continue
+
+            links = [a["href"] for a in soup.select("a[href]")
+                     if a.get("href", "").startswith(("/", "http"))
+                     and re.search(r"/division|/vote|\d{4}-\d{2}-\d{2}|/\d+", a.get("href", ""), re.I)]
+
+            if not links:
+                body = soup.find("body")
+                snippet = body.get_text(separator=" ", strip=True)[:500] if body else ""
+                logger.warning(f"[Scottish Parliament] No division links at {url} — snippet: {snippet}")
+                continue
+
+            logger.info(f"[Scottish Parliament] Found {len(links)} division links")
+            for href in links[:200]:
+                full_url = href if href.startswith("http") else f"{_WEB}{href}"
+                detail = self._html_get(full_url)
+                if not detail:
+                    continue
+                date_el = detail.select_one("time[datetime], time, .date, h1")
+                date_str = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
+                if from_date and date_str and date_str[:10] < from_date:
+                    continue
+                title_el = detail.select_one("h1, h2, .title, .motion")
+                div_title = title_el.get_text(strip=True) if title_el else ""
+                for direction, sel_list in [
+                    ("aye", [".ayes li", ".for li", "[class*='aye'] li", "[class*='for'] li"]),
+                    ("no", [".noes li", ".against li", "[class*='no'] li", "[class*='against'] li"]),
+                    ("abstain", [".abstentions li", ".abstain li", "[class*='abstain'] li"]),
+                ]:
+                    voters = []
+                    for sel in sel_list:
+                        voters = detail.select(sel)
+                        if voters:
+                            break
+                    for voter_el in voters:
+                        name = voter_el.get_text(strip=True)
+                        if not name:
+                            continue
+                        records.append(self._make_record(
+                            data_type="vote",
+                            member={"id": "", "name": name, "party": "", "constituency": "", "role": "MSP"},
+                            date=date_str,
+                            text=f"Voted {direction} on: {div_title}",
+                            title=div_title,
+                            metadata={"vote_direction": direction, "division_result": ""},
+                            source_url=full_url,
+                        ))
+            if records:
+                break
+
         logger.info(f"[Scottish Parliament] {len(records)} vote records fetched")
         return records

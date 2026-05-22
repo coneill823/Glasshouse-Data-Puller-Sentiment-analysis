@@ -176,10 +176,14 @@ class UKParliamentScraper(BaseScraper):
 
     def fetch_plenary_business(self, from_date: Optional[str] = None) -> List[Dict]:
         records = []
-        # Try written statements first, then debate contributions
+        # Hansard API — try all known URL variants (casing and house suffix differ by version)
         endpoints = [
+            (f"{_HANSARD}/writtenStatements/Commons", "plenary_speech"),
+            (f"{_HANSARD}/writtenStatements", "plenary_speech"),
+            (f"{_HANSARD}/writtenstatements/Commons", "plenary_speech"),
             (f"{_HANSARD}/writtenstatements", "plenary_speech"),
-            (f"{_HANSARD}/debates/debatecontributions", "plenary_speech"),
+            (f"{_HANSARD}/debates/Commons", "plenary_speech"),
+            (f"{_HANSARD}/debates", "plenary_speech"),
         ]
         for url, dtype in endpoints:
             params: Dict = {"take": 100, "skip": 0}
@@ -257,7 +261,8 @@ class UKParliamentScraper(BaseScraper):
 
         logger.info(f"[UK Parliament] Found {len(divisions)} divisions — fetching per-member votes...")
         # Step 2: fetch voter lists per division
-        # Correct endpoint: /data/divisions.json/{id}  (plural, with .json — matches search endpoint pattern)
+        # Correct endpoint: /data/division/{id}.json  (singular "division", .json suffix)
+        # Confirmed format from the UK Parliament R client library (clvotes)
         records = []
         for i, div in enumerate(divisions):
             if i % 50 == 0:
@@ -269,7 +274,7 @@ class UKParliamentScraper(BaseScraper):
             noes = div.get("NoeCount", div.get("noeCount", 0))
             result = "passed" if ayes > noes else "failed"
 
-            detail_url = f"{_VOTES}/divisions.json/{div_id}"
+            detail_url = f"{_VOTES}/division/{div_id}.json"
             detail_resp = self._get(detail_url)
             if not detail_resp:
                 continue

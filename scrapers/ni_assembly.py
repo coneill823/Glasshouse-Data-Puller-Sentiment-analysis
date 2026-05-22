@@ -523,9 +523,10 @@ class NIAssemblyScraper(BaseScraper):
                     filtered.append(r)
             reports = filtered
 
-        # Log first report's keys once so we can see the actual field names
+        # Log first report's keys so we can see the actual field names in the run log
         if reports:
-            logger.debug(f"[NI Assembly] Sample report fields: {list(reports[0].keys())}")
+            logger.info(f"[NI Assembly] Sample report fields: {list(reports[0].keys())}")
+            logger.info(f"[NI Assembly] Sample report data: {reports[0]}")
 
         logger.info(f"[NI Assembly] Plenary: fetching speeches for {len(reports)} reports — this may take several minutes...")
         records = []
@@ -551,8 +552,12 @@ class NIAssemblyScraper(BaseScraper):
             )
             comp_data = self._parse_asmx_response(comp_resp, comp_url) if comp_resp else None
             comp_items = _first_list(comp_data)
-            if i == 0 and comp_items:
-                logger.debug(f"[NI Assembly] Sample component fields: {list(comp_items[0].keys())}")
+            if i == 0:
+                if comp_items:
+                    logger.info(f"[NI Assembly] Sample component fields: {list(comp_items[0].keys())}")
+                    logger.info(f"[NI Assembly] Sample component data: {comp_items[0]}")
+                else:
+                    logger.info(f"[NI Assembly] Component fetch for first report_id={report_id!r} returned 0 items (comp_resp={bool(comp_resp)})")
             for item in comp_items:
                 text = item.get("ComponentText", item.get("Text", item.get("Speech", "")))
                 if not text or len(text.strip()) < 10:
