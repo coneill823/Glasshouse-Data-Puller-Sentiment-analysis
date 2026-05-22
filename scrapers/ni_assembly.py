@@ -173,9 +173,23 @@ class NIAssemblyScraper(BaseScraper):
         return None  # all namespaces tried — caller will try HTTP GET
 
     def _aims_html(self, path: str, params: Optional[Dict] = None) -> Optional[BeautifulSoup]:
-        """Fetch an AIMS portal HTML page."""
-        resp = self._get(f"{_AIMS}{path}", params=params,
-                         accept="text/html,application/xhtml+xml")
+        """Fetch an AIMS portal HTML page with browser-like headers to avoid 403."""
+        url = f"{_AIMS}{path}" if not path.startswith("http") else path
+        # Temporarily override User-Agent — AIMS blocks the default bot UA
+        saved = dict(self.session.headers)
+        self.session.headers.update({
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-GB,en;q=0.9",
+            "Referer": _AIMS,
+        })
+        resp = self._get(url, params=params)
+        self.session.headers.clear()
+        self.session.headers.update(saved)
         if not resp:
             return None
         return BeautifulSoup(resp.text, "lxml")
@@ -209,7 +223,12 @@ class NIAssemblyScraper(BaseScraper):
 
     def fetch_register_of_interests(self, members: List[Dict]) -> List[Dict]:
         rows = []
-        for method in ("GetAllRegisteredInterests_JSON", "GetAllRegisteredInterests"):
+        for method in (
+            "GetAllRegisteredInterests_JSON",
+            "GetCurrentMembersRegisteredInterests_JSON",
+            "GetAllMemberInterests_JSON",
+            "GetAllRegisteredInterests",
+        ):
             url = f"{_BASE}/register.asmx/{method}"
             resp = self._get(url)
             if not resp:
@@ -441,10 +460,16 @@ class NIAssemblyScraper(BaseScraper):
         return records
 
     def _fetch_plenary_asmx(self, from_date: Optional[str] = None) -> List[Dict]:
-        data = self._asmx("hansard", "GetAllHansardReports_JSON")
-        reports = _first_list(data)
+        reports = []
+        for method in ("GetAllHansardReports_JSON", "GetHansardReports_JSON",
+                       "GetAllPlenaryReports_JSON"):
+            data = self._asmx("hansard", method)
+            reports = _first_list(data)
+            if reports:
+                logger.debug(f"[NI Assembly] {method} returned {len(reports)} reports")
+                break
+            logger.debug(f"[NI Assembly] {method} returned no reports")
         if not reports:
-            logger.debug("[NI Assembly] GetAllHansardReports_JSON returned no reports")
             return []
 
         if from_date:
@@ -495,8 +520,11 @@ class NIAssemblyScraper(BaseScraper):
     def _fetch_plenary_aims(self, from_date: Optional[str] = None) -> List[Dict]:
         """Scrape Official Report index from AIMS portal."""
         records = []
-        # AIMS official report index lists reports by date
-        for path in ["/officialreport/report.aspx", "/officialreport/"]:
+        for path in [
+            "/officialreport/officialreports.aspx",
+            "/officialreport/report.aspx",
+            "/officialreport/",
+        ]:
             soup = self._aims_html(path)
             if not soup:
                 continue
