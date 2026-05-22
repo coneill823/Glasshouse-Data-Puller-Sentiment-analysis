@@ -176,12 +176,12 @@ class UKParliamentScraper(BaseScraper):
 
     def fetch_plenary_business(self, from_date: Optional[str] = None) -> List[Dict]:
         records = []
-        # Hansard API — try all known URL variants (casing and house suffix differ by version)
+        # Written statements live on the same API as questions, not hansard.parliament.uk
+        # hansard.parliament.uk/api/* all return 404; correct domain is questions-statements-api
         endpoints = [
+            (f"{_QUESTIONS}/writtenstatements/statements", "plenary_speech"),
             (f"{_HANSARD}/writtenStatements/Commons", "plenary_speech"),
             (f"{_HANSARD}/writtenStatements", "plenary_speech"),
-            (f"{_HANSARD}/writtenstatements/Commons", "plenary_speech"),
-            (f"{_HANSARD}/writtenstatements", "plenary_speech"),
             (f"{_HANSARD}/debates/Commons", "plenary_speech"),
             (f"{_HANSARD}/debates", "plenary_speech"),
         ]
@@ -199,29 +199,47 @@ class UKParliamentScraper(BaseScraper):
                 if not resp:
                     break
                 data = resp.json()
-                items = data.get("Results", data.get("results", data.get("items", data.get("contributions", []))))
+                # questions-statements-api wraps in {"results": [...]} or {"statements": [...]}
+                if isinstance(data, list):
+                    raw_items = data
+                else:
+                    raw_items = data.get("results", data.get("statements", data.get("items", data.get("contributions", []))))
+                # Each item may itself be wrapped in a "value" key
+                items = []
+                for entry in raw_items:
+                    items.append(entry.get("value", entry) if isinstance(entry, dict) else entry)
                 if not items:
+                    if skip == 0:
+                        keys = list(data.keys()) if isinstance(data, dict) else type(data).__name__
+                        logger.warning(f"[UK Parliament] Plenary endpoint {url} responded but returned no items (keys: {keys})")
                     break
                 batch_found = True
                 for item in items:
-                    text = item.get("Value", item.get("text", item.get("body", item.get("ContributionText", ""))))
+                    text = item.get("Value", item.get("text", item.get("body",
+                           item.get("ContributionText", item.get("StatementText", "")))))
                     if not text:
                         continue
+                    member_obj = item.get("member", item.get("Member", {})) if isinstance(item.get("member", item.get("Member")), dict) else {}
                     records.append(self._make_record(
                         data_type=dtype,
                         member={
-                            "id": str(item.get("MemberId", item.get("memberId", ""))),
-                            "name": item.get("AttributedTo", item.get("MemberName", item.get("memberName", ""))),
-                            "party": item.get("Party", ""),
-                            "constituency": item.get("MemberFrom", ""),
+                            "id": str(item.get("MemberId", item.get("memberId", member_obj.get("id", "")))),
+                            "name": item.get("AttributedTo", item.get("MemberName",
+                                   item.get("memberName", member_obj.get("name",
+                                   item.get("nameDisplayAs", ""))))),
+                            "party": item.get("Party", member_obj.get("party", "")),
+                            "constituency": item.get("MemberFrom", member_obj.get("memberFrom", "")),
                             "role": "MP",
                         },
-                        date=item.get("Date", item.get("date", item.get("SittingDate", ""))),
+                        date=item.get("Date", item.get("date", item.get("SittingDate",
+                             item.get("dateMade", "")))),
                         text=text,
-                        title=item.get("Title", item.get("title", item.get("DebateSection", ""))),
+                        title=item.get("Title", item.get("title", item.get("DebateSection",
+                              item.get("subject", "")))),
                         metadata={
-                            "statement_id": str(item.get("Id", item.get("id", item.get("ContributionId", "")))),
-                            "house": item.get("House", "Commons"),
+                            "statement_id": str(item.get("Id", item.get("id",
+                                              item.get("ContributionId", "")))),
+                            "house": item.get("House", item.get("house", "Commons")),
                         },
                         source_url=url,
                     ))
@@ -229,6 +247,7 @@ class UKParliamentScraper(BaseScraper):
                     break
                 skip += 100
             if batch_found:
+                logger.info(f"[UK Parliament] Plenary data from: {url}")
                 break  # got data from this endpoint — skip remaining
         logger.info(f"[UK Parliament] {len(records)} plenary records fetched")
         return records

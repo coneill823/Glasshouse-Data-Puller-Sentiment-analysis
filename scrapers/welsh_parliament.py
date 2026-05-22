@@ -45,6 +45,7 @@ _INTEREST_PATHS = [
 
 # record.senedd.wales paths (capitalisation varies by version)
 _PLENARY_PATHS = [
+    "/en/plenary/",
     "/en/plenary/plenary-sessions/",
     "/en/plenary/plenary-session/",
     "/en/plenary/sessions/",
@@ -52,7 +53,8 @@ _PLENARY_PATHS = [
     "/en/business/plenary/",
     "/en/Business/Plenary/",
     "/en/Business/Plenary",
-    "/en/plenary/",
+    "/en/business/",
+    "/en/Business/",
 ]
 _DIVISION_PATHS = [
     "/en/plenary/divisions/",
@@ -67,6 +69,17 @@ _QUESTION_PATHS = [
     "/en/business/oral-questions/",
     "/en/Business/OralQuestions",
     "/en/Business/WrittenQuestions",
+    "/en/business/oral-questions",
+    "/en/business/written-questions",
+]
+
+# senedd.wales main site question paths
+_SENEDD_QUESTION_PATHS = [
+    "/senedd-business/written-questions/",
+    "/senedd-business/oral-questions/",
+    "/en/senedd-business/written-questions/",
+    "/en/senedd-business/oral-questions/",
+    "/senedd-business/questions/",
 ]
 
 
@@ -267,8 +280,23 @@ class WelshParliamentScraper(BaseScraper):
     def fetch_questions(self, from_date: Optional[str] = None) -> List[Dict]:
         records = []
 
-        # Try record.senedd.wales paths first, then business.senedd.wales
-        for base, paths in [(_RECORD, _QUESTION_PATHS), (_BUSINESS, ["/en/written-questions/", "/en/oral-questions/"])]:
+        # Regex for links that are individual question items (not just category navigation).
+        # Requires a date component OR a numeric ID that looks like a specific item.
+        _ITEM_LINK_RE = re.compile(
+            r"/\d{4}-\d{2}-\d{2}|/\d{4}/\d{2}|/\d{5,}|"
+            r"question[s]?/\w|oral[s]?/\d|written[s]?/\d",
+            re.I,
+        )
+
+        search_targets = [
+            # (base, paths, question_type)
+            (_RECORD, _QUESTION_PATHS, None),
+            (_BASE, _SENEDD_QUESTION_PATHS, None),
+            (_BUSINESS, ["/en/written-questions/", "/en/oral-questions/",
+                         "/written-questions/", "/oral-questions/"], None),
+        ]
+
+        for base, paths, _ in search_targets:
             for path in paths:
                 url = f"{base}{path}"
                 soup = self._html_get(url)
@@ -278,19 +306,20 @@ class WelshParliamentScraper(BaseScraper):
                 links_found = []
                 for link in soup.select("a[href]"):
                     href = link.get("href", "")
-                    # Only follow real http/https or path-based links (filter out tel:, mailto:, javascript:, etc.)
                     if not href or not (href.startswith("/") or href.startswith("http")):
                         continue
-                    if re.search(r"/\d{4}-\d{2}-\d{2}|/\d+|question|oral|written", href, re.I):
+                    if _ITEM_LINK_RE.search(href):
                         links_found.append(href)
 
                 if not links_found:
                     body = soup.find("body")
                     snippet = body.get_text(separator=" ", strip=True)[:600] if body else ""
-                    logger.warning(f"[Welsh Parliament] Questions index loaded but no question links found: {url} — snippet: {snippet}")
+                    logger.warning(
+                        f"[Welsh Parliament] Questions: no item links found at {url} — snippet: {snippet}"
+                    )
                     continue
 
-                logger.info(f"[Welsh Parliament] Questions: found {len(links_found)} links at {url}")
+                logger.info(f"[Welsh Parliament] Questions: found {len(links_found)} item links at {url}")
                 for href in links_found[:100]:
                     full_url = href if href.startswith("http") else f"{base}{href}"
                     detail = self._html_get(full_url)
@@ -303,12 +332,17 @@ class WelshParliamentScraper(BaseScraper):
                     if from_date and date_str and date_str[:10] < from_date:
                         continue
 
-                    for contrib in detail.select(".question, .written-question, .contribution, .item"):
+                    item_count_before = len(records)
+                    for contrib in detail.select(
+                        ".question, .written-question, .contribution, .item, "
+                        ".q-item, .answer, [class*='question'], article, p"
+                    ):
                         speaker_el = contrib.select_one(".speaker, .member-name, strong, b")
                         text_el = contrib.select_one(".text, .body, p")
                         text = text_el.get_text(strip=True) if text_el else contrib.get_text(strip=True)
                         if len(text) < 10:
                             continue
+                        q_type = "oral" if "oral" in path.lower() else "written"
                         records.append(self._make_record(
                             data_type="question",
                             member={
@@ -321,9 +355,15 @@ class WelshParliamentScraper(BaseScraper):
                             date=date_str,
                             text=text,
                             title="",
-                            metadata={"question_type": "oral" if "oral" in path.lower() else "written"},
+                            metadata={"question_type": q_type},
                             source_url=full_url,
                         ))
+                    if len(records) == item_count_before:
+                        body = detail.find("body")
+                        snippet = body.get_text(separator=" ", strip=True)[:300] if body else ""
+                        logger.warning(
+                            f"[Welsh Parliament] 0 items from question page {full_url} — snippet: {snippet}"
+                        )
 
                 if records:
                     logger.info(f"[Welsh Parliament] {len(records)} question records fetched")
@@ -336,29 +376,43 @@ class WelshParliamentScraper(BaseScraper):
     # Plenary business — Record of Proceedings
     # ------------------------------------------------------------------
 
+    # Links that indicate an individual plenary session (date-based or ID-based)
+    _SESSION_LINK_RE = re.compile(
+        r"\d{4}-\d{2}-\d{2}|/\d{4}/\d{2}|/\d{5,}|"
+        r"[Pp]lenary/\d|[Ss]ession/\d|[Bb]usiness/\d",
+    )
+
     def fetch_plenary_business(self, from_date: Optional[str] = None) -> List[Dict]:
-        soup = self._try_paths(_RECORD, _PLENARY_PATHS)
-        if not soup:
-            logger.warning("[Welsh Parliament] Could not load plenary index from record.senedd.wales")
-            return []
-
+        # Try each path individually; stop at the first one that contains session links.
+        # _try_paths would stop at the first page with ANY content, which may be a nav page.
         session_links = []
-        for link in soup.select("a[href]"):
-            href = link.get("href", "")
-            if not href or not (href.startswith("/") or href.startswith("http")):
+        for path in _PLENARY_PATHS:
+            url = f"{_RECORD}{path}"
+            soup = self._html_get(url)
+            if not soup:
+                logger.warning(f"[Welsh Parliament] Plenary: could not load {url}")
                 continue
-            if re.search(r"[Pp]lenary[/.].*\d{4}|\d{4}-\d{2}-\d{2}|/\d{4}/\d{2}", href):
-                full_url = href if href.startswith("http") else f"{_RECORD}{href}"
-                session_links.append(full_url)
-        session_links = list(dict.fromkeys(session_links))
-
-        if not session_links:
+            found = []
+            for link in soup.select("a[href]"):
+                href = link.get("href", "")
+                if not href or not (href.startswith("/") or href.startswith("http")):
+                    continue
+                if self._SESSION_LINK_RE.search(href):
+                    full_url = href if href.startswith("http") else f"{_RECORD}{href}"
+                    found.append(full_url)
+            found = list(dict.fromkeys(found))
+            if found:
+                session_links = found
+                logger.info(f"[Welsh Parliament] Plenary: found {len(session_links)} session links at {url}")
+                break
             body = soup.find("body")
             snippet = body.get_text(separator=" ", strip=True)[:500] if body else ""
-            logger.warning(f"[Welsh Parliament] No plenary session links found — page snippet: {snippet}")
+            logger.warning(f"[Welsh Parliament] Plenary: no session links at {url} — snippet: {snippet}")
+
+        if not session_links:
+            logger.warning("[Welsh Parliament] No plenary session links found — all paths exhausted")
             return []
 
-        logger.info(f"[Welsh Parliament] Plenary: found {len(session_links)} session links")
         records = []
         for session_url in session_links[:50]:
             session_soup = self._html_get(session_url)

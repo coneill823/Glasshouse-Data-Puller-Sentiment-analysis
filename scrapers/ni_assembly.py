@@ -535,10 +535,11 @@ class NIAssemblyScraper(BaseScraper):
                 logger.info(f"[NI Assembly] Plenary: {i}/{len(reports)} reports processed ({len(records)} speeches so far)")
             # NI Assembly uses HansardReportId; fall back to generic names
             report_id = str(
+                report.get("ReportDocId",          # actual field name from API
                 report.get("HansardReportId",
                 report.get("ReportId",
                 report.get("reportId",
-                report.get("Id", report.get("id", "")))))
+                report.get("Id", report.get("id", ""))))))
             )
             report_date = report.get("PlenaryDate", report.get("Date", report.get("date", "")))
             if not report_id:
@@ -546,7 +547,8 @@ class NIAssemblyScraper(BaseScraper):
             comp_url = f"{_BASE}/hansard.asmx/GetHansardComponentsByReportId_JSON"
             # Param name varies — try HansardReportId first (matches field name), then reportId
             comp_resp = (
-                self._get(comp_url, params={"HansardReportId": report_id})
+                self._get(comp_url, params={"ReportDocId": report_id})
+                or self._get(comp_url, params={"HansardReportId": report_id})
                 or self._get(comp_url, params={"reportId": report_id})
                 or self._get(comp_url, params={"id": report_id})
             )

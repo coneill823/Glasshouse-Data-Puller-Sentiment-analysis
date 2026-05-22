@@ -128,11 +128,28 @@ class ScottishParliamentScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def fetch_register_of_interests(self, members: List[Dict]) -> List[Dict]:
-        url = f"{_WEB}/msps/members-interests/register-of-interests"
-        soup = self._html_get(url)
+        # URL structure changes between sessions; try several candidates
+        interest_candidates = [
+            f"{_WEB}/msps/members-interests/",
+            f"{_WEB}/msps/members-interests",
+            f"{_WEB}/msps/members-interests/register-of-interests",
+            f"{_WEB}/msps/members-interests/register-of-interests/",
+            f"{_WEB}/msps/register-of-interests",
+            f"{_WEB}/msps/",
+        ]
+        soup = None
+        url = ""
+        for candidate in interest_candidates:
+            resp_soup = self._html_get(candidate)
+            if resp_soup:
+                soup = resp_soup
+                url = candidate
+                logger.info(f"[Scottish Parliament] Loaded interests page: {candidate}")
+                break
+            logger.warning(f"[Scottish Parliament] Could not load interests page: {candidate}")
         records = []
         if not soup:
-            logger.warning(f"[Scottish Parliament] Could not load register of interests: {url}")
+            logger.warning("[Scottish Parliament] All interest page candidates failed")
             return records
 
         member_lookup = {m["name"].lower(): m for m in members}
@@ -162,8 +179,8 @@ class ScottishParliamentScraper(BaseScraper):
 
         if not records:
             body = soup.find("body")
-            snippet = body.get_text(separator=" ", strip=True)[:500] if body else ""
-            logger.warning(f"[Scottish Parliament] 0 interest records parsed — page snippet: {snippet}")
+            snippet = body.get_text(separator=" ", strip=True)[:600] if body else ""
+            logger.warning(f"[Scottish Parliament] 0 interest records parsed from {url} — snippet: {snippet}")
         logger.info(f"[Scottish Parliament] {len(records)} interest records fetched")
         return records
 
@@ -194,6 +211,7 @@ class ScottishParliamentScraper(BaseScraper):
                 continue
 
             logger.info(f"[Scottish Parliament] Found {len(links)} question links at {url}")
+            page_records_before = len(records)
             for href in links[:200]:
                 full_url = href if href.startswith("http") else f"{_WEB}{href}"
                 detail = self._html_get(full_url)
@@ -203,7 +221,8 @@ class ScottishParliamentScraper(BaseScraper):
                 date_str = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
                 if from_date and date_str and date_str[:10] < from_date:
                     continue
-                for contrib in detail.select(".question, .answer, .contribution, .item, article"):
+                item_count_before = len(records)
+                for contrib in detail.select(".question, .answer, .contribution, .item, article, .q-text, .a-text, p"):
                     text = contrib.get_text(strip=True)
                     if len(text) < 10:
                         continue
@@ -219,7 +238,11 @@ class ScottishParliamentScraper(BaseScraper):
                         title="",
                         source_url=full_url,
                     ))
-            if records:
+                if len(records) == item_count_before:
+                    body = detail.find("body")
+                    snippet = body.get_text(separator=" ", strip=True)[:300] if body else ""
+                    logger.warning(f"[Scottish Parliament] 0 items from question page {full_url} — snippet: {snippet}")
+            if len(records) > page_records_before:
                 break
 
         logger.info(f"[Scottish Parliament] {len(records)} question records fetched")
@@ -293,7 +316,8 @@ class ScottishParliamentScraper(BaseScraper):
             filters = f"DivisionDate ge datetime'{from_date}'"
         rows, _ = self._odata_try([
             "Votes", "VoteResults", "DivisionVotes", "MemberVotes",
-            "Divisions", "VotedFor",
+            "Divisions", "VotedFor", "VotingData", "VoteRecords",
+            "MSPVotes", "DivisionResults", "DivisionVote", "MemberVoting",
         ], filters=filters)
 
         if rows:
@@ -331,6 +355,10 @@ class ScottishParliamentScraper(BaseScraper):
         for path in [
             "/chamber-and-committees/votes-and-divisions/search",
             "/chamber-and-committees/votes-and-divisions",
+            "/chamber-and-committees/votes-and-divisions/",
+            "/the-work-of-the-parliament/votes-and-divisions",
+            "/parliamentarybusiness/voting/",
+            "/msps/voting-behaviour",
         ]:
             url = f"{_WEB}{path}"
             soup = self._html_get(url)
@@ -343,7 +371,7 @@ class ScottishParliamentScraper(BaseScraper):
 
             if not links:
                 body = soup.find("body")
-                snippet = body.get_text(separator=" ", strip=True)[:500] if body else ""
+                snippet = body.get_text(separator=" ", strip=True)[:600] if body else ""
                 logger.warning(f"[Scottish Parliament] No division links at {url} — snippet: {snippet}")
                 continue
 
