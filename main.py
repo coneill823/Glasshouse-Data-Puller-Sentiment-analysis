@@ -20,7 +20,7 @@ Usage
 import argparse
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone  # timezone required — do not remove
 from typing import Optional
 
 import schedule

@@ -515,10 +515,20 @@ class NIAssemblyScraper(BaseScraper):
                     filtered.append(r)
             reports = filtered
 
+        # Log first report's keys once so we can see the actual field names
+        if reports:
+            logger.debug(f"[NI Assembly] Sample report fields: {list(reports[0].keys())}")
+
         records = []
         for report in reports:
-            report_id = str(report.get("ReportId", report.get("Id", "")))
-            report_date = report.get("PlenaryDate", report.get("Date", ""))
+            # NI Assembly uses HansardReportId; fall back to generic names
+            report_id = str(
+                report.get("HansardReportId",
+                report.get("ReportId",
+                report.get("reportId",
+                report.get("Id", report.get("id", "")))))
+            )
+            report_date = report.get("PlenaryDate", report.get("Date", report.get("date", "")))
             if not report_id:
                 continue
             comp_url = f"{_BASE}/hansard.asmx/GetHansardComponentsByReportId_JSON"
