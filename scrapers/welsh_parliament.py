@@ -22,11 +22,15 @@ _RECORD = _CFG["record_base"]  # https://record.senedd.wales
 
 # Candidate paths tried in order for each resource type
 _MEMBER_PATHS = [
+    "/find-a-member-of-the-senedd/",
+    "/en/find-a-member-of-the-senedd/",
     "/en/senedd-members/current-senedd-members/",
     "/en/senedd-members/current-members/",
     "/en/ms-aMs/Pages/MSsbyRegion.aspx",
 ]
 _INTEREST_PATHS = [
+    "/senedd-business/register-of-members-interests/",
+    "/en/senedd-business/register-of-members-interests/",
     "/en/senedd-members/register-of-members-financial-interests/",
     "/en/bus-home/Pages/bus-register-of-members-interests.aspx",
 ]
@@ -155,7 +159,8 @@ class WelshParliamentScraper(BaseScraper):
     def fetch_questions(self, from_date: Optional[str] = None) -> List[Dict]:
         records = []
         for path in ["/en/Business/OralQuestions", "/en/Business/WrittenQuestions",
-                     "/en/Business/Questions"]:
+                     "/en/Business/Questions", "/en/business/oralquestions",
+                     "/en/business/writtenquestions"]:
             soup = self._html_get(f"{_RECORD}{path}")
             if not soup:
                 continue
@@ -205,15 +210,20 @@ class WelshParliamentScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def fetch_plenary_business(self, from_date: Optional[str] = None) -> List[Dict]:
-        soup = self._html_get(f"{_RECORD}/en/Business/Plenary")
-        if not soup:
+        plenary_url = None
+        for path in ["/en/Business/Plenary", "/en/business/plenary", "/en/Plenary"]:
+            soup = self._html_get(f"{_RECORD}{path}")
+            if soup and soup.find("body"):
+                plenary_url = f"{_RECORD}{path}"
+                break
+        if not plenary_url:
             logger.warning("[Welsh Parliament] Could not fetch plenary index")
             return []
 
         session_links = []
         for link in soup.select("a[href]"):
             href = link.get("href", "")
-            if re.search(r"/Plenary/.*(/\d{4}-\d{2}-\d{2}|/\d+)", href):
+            if re.search(r"[Pp]lenary/.*(/\d{4}-\d{2}-\d{2}|/\d+)", href):
                 full_url = href if href.startswith("http") else f"{_RECORD}{href}"
                 session_links.append(full_url)
         session_links = list(dict.fromkeys(session_links))  # deduplicate, preserve order
@@ -260,7 +270,12 @@ class WelshParliamentScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def fetch_votes_on_division(self, from_date: Optional[str] = None) -> List[Dict]:
-        soup = self._html_get(f"{_RECORD}/en/Business/Divisions")
+        divisions_soup = None
+        for path in ["/en/Business/Divisions", "/en/business/divisions", "/en/Divisions"]:
+            divisions_soup = self._html_get(f"{_RECORD}{path}")
+            if divisions_soup and divisions_soup.find("body"):
+                break
+        soup = divisions_soup
         if not soup:
             logger.warning("[Welsh Parliament] Could not fetch divisions index")
             return []

@@ -45,6 +45,15 @@ class ScottishParliamentScraper(BaseScraper):
             skip += top
         return all_results
 
+    def _odata_try(self, candidates: List[str], filters: Optional[str] = None) -> tuple:
+        """Try each candidate endpoint name until one returns data. Returns (data, endpoint_name)."""
+        for name in candidates:
+            rows = self._odata_get(name, filters=filters)
+            if rows:
+                logger.info(f"[Scottish Parliament] Using endpoint: {name}")
+                return rows, name
+        return [], candidates[0]
+
     # ------------------------------------------------------------------
     # Members (MSPs)
     # ------------------------------------------------------------------
@@ -72,7 +81,10 @@ class ScottishParliamentScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def fetch_register_of_interests(self, members: List[Dict]) -> List[Dict]:
-        rows = self._odata_get("MemberInterests")
+        rows, _ = self._odata_try([
+            "MemberInterests", "RegisteredInterests", "Interests",
+            "MemberRegisteredInterests", "RegisterOfInterests",
+        ])
         lookup = self._member_lookup(members)
         records = []
         for item in rows:
@@ -110,7 +122,10 @@ class ScottishParliamentScraper(BaseScraper):
         filters = None
         if from_date:
             filters = f"QuestionDate ge datetime'{from_date}'"
-        rows = self._odata_get("Questions", filters=filters)
+        rows, _ = self._odata_try([
+            "Questions", "WrittenQuestions", "OralQuestions",
+            "QuestionAndAnswers", "AssemblyQuestions",
+        ], filters=filters)
         records = []
         for q in rows:
             q_text = q.get("QuestionText", q.get("Text", ""))
@@ -147,7 +162,10 @@ class ScottishParliamentScraper(BaseScraper):
         filters = None
         if from_date:
             filters = f"ReportDate ge datetime'{from_date}'"
-        rows = self._odata_get("OfficialReportContributions", filters=filters)
+        rows, _ = self._odata_try([
+            "OfficialReportContributions", "Contributions", "MemberBusinessContributions",
+            "OfficialReport", "OralContributions", "PlenaryContributions",
+        ], filters=filters)
         records = []
         for item in rows:
             text = item.get("ContributionText", item.get("Text", item.get("Speech", "")))
@@ -183,7 +201,10 @@ class ScottishParliamentScraper(BaseScraper):
         filters = None
         if from_date:
             filters = f"DivisionDate ge datetime'{from_date}'"
-        rows = self._odata_get("Votes", filters=filters)
+        rows, _ = self._odata_try([
+            "Votes", "VoteResults", "DivisionVotes", "MemberVotes",
+            "Divisions", "VotedFor",
+        ], filters=filters)
         records = []
         for vote in rows:
             direction_map = {1: "aye", 2: "no", 3: "abstain"}

@@ -175,47 +175,57 @@ class UKParliamentScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def fetch_plenary_business(self, from_date: Optional[str] = None) -> List[Dict]:
-        url = f"{_HANSARD}/writtenstatements"
-        params: Dict = {"take": 100, "skip": 0}
-        if from_date:
-            params["startDate"] = from_date
-
         records = []
-        skip = 0
-        while True:
-            params["skip"] = skip
-            resp = self._get(url, params=params)
-            if not resp:
-                break
-            data = resp.json()
-            items = data.get("Results", data.get("results", data.get("items", [])))
-            if not items:
-                break
-            for item in items:
-                text = item.get("Value", item.get("text", item.get("body", "")))
-                if not text:
-                    continue
-                records.append(self._make_record(
-                    data_type="plenary_speech",
-                    member={
-                        "id": str(item.get("MemberId", item.get("memberId", ""))),
-                        "name": item.get("AttributedTo", item.get("memberName", "")),
-                        "party": "",
-                        "constituency": "",
-                        "role": "MP",
-                    },
-                    date=item.get("Date", item.get("date", "")),
-                    text=text,
-                    title=item.get("Title", item.get("title", "")),
-                    metadata={
-                        "statement_id": str(item.get("Id", item.get("id", ""))),
-                        "house": item.get("House", "Commons"),
-                    },
-                    source_url=url,
-                ))
-            if len(items) < 100:
-                break
-            skip += 100
+        # Try written statements first, then debate contributions
+        endpoints = [
+            (f"{_HANSARD}/writtenstatements", "plenary_speech"),
+            (f"{_HANSARD}/debates/debatecontributions", "plenary_speech"),
+        ]
+        for url, dtype in endpoints:
+            params: Dict = {"take": 100, "skip": 0}
+            if from_date:
+                params["startDate"] = from_date
+            skip = 0
+            batch_found = False
+            while True:
+                params["skip"] = skip
+                if skip % 1000 == 0 and skip > 0:
+                    logger.info(f"[UK Parliament] Plenary: fetched {len(records)} so far from {url}...")
+                resp = self._get(url, params=params)
+                if not resp:
+                    break
+                data = resp.json()
+                items = data.get("Results", data.get("results", data.get("items", data.get("contributions", []))))
+                if not items:
+                    break
+                batch_found = True
+                for item in items:
+                    text = item.get("Value", item.get("text", item.get("body", item.get("ContributionText", ""))))
+                    if not text:
+                        continue
+                    records.append(self._make_record(
+                        data_type=dtype,
+                        member={
+                            "id": str(item.get("MemberId", item.get("memberId", ""))),
+                            "name": item.get("AttributedTo", item.get("MemberName", item.get("memberName", ""))),
+                            "party": item.get("Party", ""),
+                            "constituency": item.get("MemberFrom", ""),
+                            "role": "MP",
+                        },
+                        date=item.get("Date", item.get("date", item.get("SittingDate", ""))),
+                        text=text,
+                        title=item.get("Title", item.get("title", item.get("DebateSection", ""))),
+                        metadata={
+                            "statement_id": str(item.get("Id", item.get("id", item.get("ContributionId", "")))),
+                            "house": item.get("House", "Commons"),
+                        },
+                        source_url=url,
+                    ))
+                if len(items) < 100:
+                    break
+                skip += 100
+            if batch_found:
+                break  # got data from this endpoint — skip remaining
         logger.info(f"[UK Parliament] {len(records)} plenary records fetched")
         return records
 
@@ -247,7 +257,7 @@ class UKParliamentScraper(BaseScraper):
 
         logger.info(f"[UK Parliament] Found {len(divisions)} divisions — fetching per-member votes...")
         # Step 2: fetch voter lists per division
-        # Correct endpoint: /data/division/{id}  (no .json, singular)
+        # Correct endpoint: /data/divisions.json/{id}  (plural, with .json — matches search endpoint pattern)
         records = []
         for i, div in enumerate(divisions):
             if i % 50 == 0:
@@ -259,7 +269,7 @@ class UKParliamentScraper(BaseScraper):
             noes = div.get("NoeCount", div.get("noeCount", 0))
             result = "passed" if ayes > noes else "failed"
 
-            detail_url = f"{_VOTES}/division/{div_id}"
+            detail_url = f"{_VOTES}/divisions.json/{div_id}"
             detail_resp = self._get(detail_url)
             if not detail_resp:
                 continue

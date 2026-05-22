@@ -243,7 +243,12 @@ class NIAssemblyScraper(BaseScraper):
             "GetAllRegisteredInterests_JSON",
             "GetCurrentMembersRegisteredInterests_JSON",
             "GetAllMemberInterests_JSON",
+            "GetAllCurrentMemberInterests_JSON",
+            "GetMemberInterests_JSON",
+            "GetRegisterOfInterests_JSON",
+            "GetAllInterests_JSON",
             "GetAllRegisteredInterests",
+            "GetCurrentMembersRegisteredInterests",
         ]
         discovered = self._discover_asmx_methods("register")
         interest_methods = list(dict.fromkeys(
@@ -538,9 +543,17 @@ class NIAssemblyScraper(BaseScraper):
             if not report_id:
                 continue
             comp_url = f"{_BASE}/hansard.asmx/GetHansardComponentsByReportId_JSON"
-            comp_resp = self._get(comp_url, params={"reportId": report_id})
+            # Param name varies — try HansardReportId first (matches field name), then reportId
+            comp_resp = (
+                self._get(comp_url, params={"HansardReportId": report_id})
+                or self._get(comp_url, params={"reportId": report_id})
+                or self._get(comp_url, params={"id": report_id})
+            )
             comp_data = self._parse_asmx_response(comp_resp, comp_url) if comp_resp else None
-            for item in _first_list(comp_data):
+            comp_items = _first_list(comp_data)
+            if i == 0 and comp_items:
+                logger.debug(f"[NI Assembly] Sample component fields: {list(comp_items[0].keys())}")
+            for item in comp_items:
                 text = item.get("ComponentText", item.get("Text", item.get("Speech", "")))
                 if not text or len(text.strip()) < 10:
                     continue
