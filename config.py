@@ -34,6 +34,7 @@ PARLIAMENTS = {
         "name": "Welsh Parliament (Senedd)",
         "enabled": True,
         "api_base": "https://senedd.wales",
-        "record_base": "https://record.assembly.wales",
+        # record.assembly.wales redirects here after the Assembly was renamed Senedd
+        "record_base": "https://record.senedd.wales",
     },
 }

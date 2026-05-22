@@ -54,8 +54,13 @@ class NIAssemblyScraper(BaseScraper):
     def __init__(self):
         super().__init__("NI Assembly")
 
-    # SOAP namespace used by all data.niassembly.gov.uk services
-    _NS = "http://niassembly.gov.uk/webservices"
+    # Try common ASP.NET ASMX namespaces in order — the AIMS services don't
+    # publish a WSDL we can query, so we probe until one succeeds.
+    _SOAP_NAMESPACES = [
+        "http://tempuri.org/",
+        "http://niassembly.gov.uk/webservices/",
+        "http://niassembly.gov.uk/",
+    ]
 
     def _asmx(self, service: str, method: str, params: Optional[Dict] = None):
         """Call an ASMX method.
@@ -96,41 +101,59 @@ class NIAssemblyScraper(BaseScraper):
             return None
 
     def _soap_post(self, url: str, method: str, params: Dict):
-        """Send a SOAP 1.1 POST request to an ASMX endpoint."""
-        params_xml = "\n      ".join(
-            f"<{k} xmlns=''>{v}</{k}>" for k, v in params.items()
-        )
-        envelope = (
-            '<?xml version="1.0" encoding="utf-8"?>'
-            '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" '
-            f'xmlns:tns="{self._NS}">'
-            "<soap:Body>"
-            f"<tns:{method}>"
-            f"{params_xml}"
-            f"</tns:{method}>"
-            "</soap:Body>"
-            "</soap:Envelope>"
-        )
-        self._rate_limit()
+        """Send a SOAP 1.1 POST request, probing common ASP.NET namespaces.
+
+        The correct namespace for data.niassembly.gov.uk is not published via
+        WSDL, so we try tempuri.org first (ASP.NET default) then NI-specific
+        variants.  A 500 response signals the wrong namespace; anything else
+        is treated as a definitive answer.
+        """
         import time as _time
-        for attempt in range(3):
-            try:
-                resp = self.session.post(
-                    url,
-                    data=envelope.encode("utf-8"),
-                    headers={
-                        "Content-Type": "text/xml; charset=utf-8",
-                        "SOAPAction": f'"{self._NS}/{method}"',
-                    },
-                    timeout=30,
-                )
-                resp.raise_for_status()
-                return resp
-            except Exception as e:
-                wait = 2 ** attempt
-                logger.warning(f"[NI Assembly] SOAP attempt {attempt+1}/3 failed: {e}. Retry in {wait}s")
-                _time.sleep(wait)
-        logger.error(f"[NI Assembly] SOAP call failed after 3 attempts: {url}/{method}")
+
+        def _envelope(ns: str) -> bytes:
+            params_xml = "".join(
+                f"<{k}>{v}T00:00:00</{k}>" if k.lower().endswith("date") else f"<{k}>{v}</{k}>"
+                for k, v in params.items()
+            )
+            return (
+                '<?xml version="1.0" encoding="utf-8"?>'
+                '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">'
+                "<soap:Body>"
+                f'<{method} xmlns="{ns}">'
+                f"{params_xml}"
+                f"</{method}>"
+                "</soap:Body>"
+                "</soap:Envelope>"
+            ).encode("utf-8")
+
+        self._rate_limit()
+        for ns in self._SOAP_NAMESPACES:
+            for attempt in range(2):
+                try:
+                    resp = self.session.post(
+                        url,
+                        data=_envelope(ns),
+                        headers={
+                            "Content-Type": "text/xml; charset=utf-8",
+                            "SOAPAction": f'"{ns}{method}"',
+                        },
+                        timeout=30,
+                    )
+                    if resp.status_code >= 500:
+                        logger.debug(f"[NI Assembly] HTTP {resp.status_code} with ns={ns!r}, trying next")
+                        break  # wrong namespace — try next
+                    if not resp.ok:
+                        logger.error(f"[NI Assembly] HTTP {resp.status_code} from {url}/{method}")
+                        return None
+                    return resp
+                except Exception as e:
+                    if attempt == 0:
+                        _time.sleep(2)
+                        continue
+                    logger.warning(f"[NI Assembly] SOAP request error: {e}")
+                    break
+
+        logger.error(f"[NI Assembly] All SOAP namespace attempts failed: {url}/{method}")
         return None
 
     # ------------------------------------------------------------------
