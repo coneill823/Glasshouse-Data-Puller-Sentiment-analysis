@@ -45,13 +45,28 @@ class ScottishParliamentScraper(BaseScraper):
             skip += top
         return all_results
 
+    def _odata_probe(self, endpoint: str) -> str:
+        """Return HTTP status code (as string) for a single probe request, for logging."""
+        import requests as _req
+        url = f"{_API}/{endpoint}"
+        self._rate_limit()
+        try:
+            r = self.session.get(url, params={"$format": "json", "$top": 1}, timeout=15)
+            return str(r.status_code)
+        except Exception as e:
+            return f"ERR({e})"
+
     def _odata_try(self, candidates: List[str], filters: Optional[str] = None) -> tuple:
-        """Try each candidate endpoint name until one returns data. Returns (data, endpoint_name)."""
+        """Try each candidate endpoint name until one returns data. Returns (data, endpoint_name).
+        Logs HTTP status for every candidate so failures appear in the run log."""
         for name in candidates:
             rows = self._odata_get(name, filters=filters)
             if rows:
-                logger.info(f"[Scottish Parliament] Using endpoint: {name}")
+                logger.info(f"[Scottish Parliament] Endpoint worked: {name} → {len(rows)} rows")
                 return rows, name
+            status = self._odata_probe(name)
+            logger.warning(f"[Scottish Parliament] Endpoint {name!r} → HTTP {status} / 0 rows")
+        logger.warning(f"[Scottish Parliament] All candidates exhausted: {candidates}")
         return [], candidates[0]
 
     # ------------------------------------------------------------------

@@ -19,8 +19,10 @@ Usage
 """
 import argparse
 import logging
+import os
 import sys
 from datetime import datetime, timezone  # timezone required — do not remove
+from pathlib import Path
 from typing import Optional
 
 import schedule
@@ -35,12 +37,33 @@ from scrapers import (
 )
 from utils.storage import save_results, load_manifest, write_manifest
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+_LOG_FORMAT = "%(asctime)s  %(levelname)-8s  %(name)s  %(message)s"
+_LOG_DATE = "%Y-%m-%d %H:%M:%S"
+
+def _setup_logging():
+    logs_dir = Path("logs")
+    logs_dir.mkdir(exist_ok=True)
+    run_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
+    log_path = logs_dir / f"run_{run_ts}.log"
+
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+
+    # Console handler
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt=_LOG_DATE))
+    root.addHandler(ch)
+
+    # File handler — captures everything the console shows
+    fh = logging.FileHandler(log_path, encoding="utf-8")
+    fh.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt=_LOG_DATE))
+    root.addHandler(fh)
+
+    return log_path
+
+_log_path = _setup_logging()
 logger = logging.getLogger("main")
+logger.info(f"Log file: {_log_path.resolve()}")
 
 SCRAPERS = {
     "ni": ("ni_assembly", NIAssemblyScraper),

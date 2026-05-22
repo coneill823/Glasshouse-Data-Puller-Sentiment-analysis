@@ -1,9 +1,12 @@
 """
 Welsh Parliament (Senedd) scraper.
 
-The Senedd does not expose a structured public REST API.  Data is scraped from:
+No structured public REST API exists.  Data is scraped from:
   - https://senedd.wales/          — member profiles, register of interests
   - https://record.senedd.wales/   — Record of Proceedings (plenary, votes)
+  - https://business.senedd.wales/ — questions tabled / answered
+
+All requests use a browser User-Agent; the Senedd CDN blocks generic bot UAs.
 """
 import logging
 import re
@@ -17,22 +20,50 @@ from config import PARLIAMENTS
 logger = logging.getLogger(__name__)
 
 _CFG = PARLIAMENTS["welsh_parliament"]
-_BASE = _CFG["api_base"]       # https://senedd.wales
-_RECORD = _CFG["record_base"]  # https://record.senedd.wales
+_BASE = _CFG["api_base"]        # https://senedd.wales
+_RECORD = _CFG["record_base"]   # https://record.senedd.wales
+_BUSINESS = "https://business.senedd.wales"
 
-# Candidate paths tried in order for each resource type
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+
+# Current (2024-2026) senedd.wales URL paths
 _MEMBER_PATHS = [
     "/find-a-member-of-the-senedd/",
     "/en/find-a-member-of-the-senedd/",
     "/en/senedd-members/current-senedd-members/",
     "/en/senedd-members/current-members/",
-    "/en/ms-aMs/Pages/MSsbyRegion.aspx",
 ]
 _INTEREST_PATHS = [
     "/senedd-business/register-of-members-interests/",
     "/en/senedd-business/register-of-members-interests/",
     "/en/senedd-members/register-of-members-financial-interests/",
-    "/en/bus-home/Pages/bus-register-of-members-interests.aspx",
+]
+
+# record.senedd.wales paths (capitalisation varies by version)
+_PLENARY_PATHS = [
+    "/en/plenary/",
+    "/en/Plenary/",
+    "/en/business/plenary/",
+    "/en/Business/Plenary/",
+    "/en/Business/Plenary",
+]
+_DIVISION_PATHS = [
+    "/en/plenary/divisions/",
+    "/en/business/divisions/",
+    "/en/Business/Divisions",
+    "/en/Plenary/Divisions",
+]
+_QUESTION_PATHS = [
+    "/en/written-questions/",
+    "/en/oral-questions/",
+    "/en/business/written-questions/",
+    "/en/business/oral-questions/",
+    "/en/Business/OralQuestions",
+    "/en/Business/WrittenQuestions",
 ]
 
 
@@ -40,18 +71,36 @@ class WelshParliamentScraper(BaseScraper):
     def __init__(self):
         super().__init__("Welsh Parliament (Senedd)")
 
+    # ------------------------------------------------------------------
+    # Transport — always use a browser UA to avoid CDN blocks
+    # ------------------------------------------------------------------
+
     def _html_get(self, url: str, params: Optional[Dict] = None) -> Optional[BeautifulSoup]:
-        resp = self._get(url, params=params, accept="text/html,application/xhtml+xml")
+        saved = dict(self.session.headers)
+        self.session.headers.update({
+            "User-Agent": _BROWSER_UA,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-GB,en;q=0.9",
+        })
+        resp = self._get(url, params=params)
+        self.session.headers.clear()
+        self.session.headers.update(saved)
         if not resp:
             return None
         return BeautifulSoup(resp.text, "lxml")
 
     def _try_paths(self, base: str, paths: List[str]) -> Optional[BeautifulSoup]:
-        """Try each path until one returns a non-empty page."""
+        """Try each path in order; return the first soup whose body has real content."""
         for path in paths:
-            soup = self._html_get(f"{base}{path}")
-            if soup and soup.find("body"):
+            url = f"{base}{path}"
+            soup = self._html_get(url)
+            if soup and soup.find("body") and len(soup.get_text(strip=True)) > 200:
+                logger.info(f"[Welsh Parliament] Loaded: {url}")
                 return soup
+            elif soup:
+                logger.warning(f"[Welsh Parliament] Page loaded but looks empty/error: {url}")
+            else:
+                logger.warning(f"[Welsh Parliament] Failed to load: {url}")
         return None
 
     # ------------------------------------------------------------------
@@ -66,43 +115,63 @@ class WelshParliamentScraper(BaseScraper):
     def _scrape_members(self) -> List[Dict]:
         soup = self._try_paths(_BASE, _MEMBER_PATHS)
         if not soup:
-            logger.warning("[Welsh Parliament] Could not fetch member listing page")
+            logger.warning("[Welsh Parliament] Could not load any member listing page — check log for failed URLs")
             return []
 
         members = []
-        # Modern Senedd website uses article/card elements
-        selectors = [
+
+        # senedd.wales uses WordPress with various card/block patterns.
+        # Try progressively broader selectors.
+        card_selectors = [
+            "article.member-card",
             "article.senedd-member",
-            ".ms-member-card",
             ".member-card",
-            "article.member",
-            ".senedd-member",
-            "li.member",
+            ".ms-card",
+            "[class*='member-card']",
+            "[class*='memberCard']",
+            "article.wp-block-post",
+            "li.wp-block-post",
+            "article",
         ]
         cards = []
-        for sel in selectors:
-            cards = soup.select(sel)
+        for sel in card_selectors:
+            cards = [c for c in soup.select(sel) if c.get_text(strip=True)]
             if cards:
+                logger.debug(f"[Welsh Parliament] Member cards found with selector: {sel!r} ({len(cards)} cards)")
                 break
 
         if not cards:
-            # Fallback: any <article> or <li> that contains a name-like heading
-            cards = [el for el in soup.select("article, li") if el.select_one("h2, h3")]
+            # Last resort: any element containing a name-like heading
+            cards = [el for el in soup.select("li, div") if el.select_one("h2, h3, h4")]
+            logger.debug(f"[Welsh Parliament] Fallback card extraction: {len(cards)} candidates")
 
         for card in cards:
-            name_el = card.select_one("h2, h3, h4, .member-name, .ms-name, [class*='name']")
-            party_el = card.select_one(".party, .ms-party, .member-party, [class*='party']")
-            const_el = card.select_one(".constituency, .region, [class*='constituency'], [class*='region']")
+            name_el = (
+                card.select_one("h2, h3, h4")
+                or card.select_one("[class*='name'], [class*='Name']")
+                or card.select_one("strong, b")
+            )
+            party_el = card.select_one("[class*='party'], [class*='Party']")
+            const_el = card.select_one(
+                "[class*='constituency'], [class*='region'], [class*='Constituency'], [class*='Region']"
+            )
             link_el = card.select_one("a[href]")
+
             member_id = ""
             if link_el:
                 href = link_el.get("href", "")
                 m = re.search(r"/(\d+)", href)
                 if m:
                     member_id = m.group(1)
+                else:
+                    slug = re.search(r"/([a-z0-9-]+)/?$", href, re.I)
+                    if slug:
+                        member_id = slug.group(1)
+
             name = name_el.get_text(strip=True) if name_el else ""
-            if not name:
+            if not name or len(name) < 3:
                 continue
+
             members.append({
                 "id": member_id,
                 "name": name,
@@ -111,6 +180,13 @@ class WelshParliamentScraper(BaseScraper):
                 "role": "MS",
                 "status": "current",
             })
+
+        if not members:
+            # Log a snippet of the page HTML to help diagnose the selector
+            body = soup.find("body")
+            snippet = body.get_text(separator=" ", strip=True)[:500] if body else ""
+            logger.warning(f"[Welsh Parliament] 0 members parsed — page snippet: {snippet}")
+
         return members
 
     def _member_lookup(self, members: List[Dict]) -> Dict[str, Dict]:
@@ -124,12 +200,35 @@ class WelshParliamentScraper(BaseScraper):
         soup = self._try_paths(_BASE, _INTEREST_PATHS)
         records = []
         if not soup:
-            logger.warning("[Welsh Parliament] Could not fetch register of interests page")
+            logger.warning("[Welsh Parliament] Could not load register of interests page")
             return records
 
-        # The interests page groups entries by member
-        for section in soup.select("section, .member-interests, .ms-interests, article"):
-            name_el = section.select_one("h2, h3, .member-name")
+        # The interests page may link to a PDF or list interests inline.
+        # Detect PDF link and warn; otherwise parse inline HTML.
+        pdf_links = soup.select("a[href$='.pdf'], a[href*='/media/']")
+        if pdf_links:
+            pdf_url = pdf_links[0].get("href", "")
+            logger.warning(
+                f"[Welsh Parliament] Register of interests appears to be a PDF — "
+                f"HTML parsing skipped. PDF: {pdf_url}"
+            )
+            return records
+
+        # Try to find per-member interest sections
+        section_selectors = [
+            "section.member-interests",
+            "[class*='member-interest']",
+            "article",
+            "section",
+        ]
+        sections = []
+        for sel in section_selectors:
+            sections = [s for s in soup.select(sel) if s.select_one("h2, h3, h4")]
+            if sections:
+                break
+
+        for section in sections:
+            name_el = section.select_one("h2, h3, h4")
             if not name_el:
                 continue
             member_name = name_el.get_text(strip=True)
@@ -137,7 +236,7 @@ class WelshParliamentScraper(BaseScraper):
                 (m for m in members if m["name"].lower() == member_name.lower()),
                 {"id": "", "name": member_name, "party": "", "constituency": "", "role": "MS"},
             )
-            for item in section.select("li, .interest-item, p.interest"):
+            for item in section.select("li, p"):
                 text = item.get_text(strip=True)
                 if len(text) < 5:
                     continue
@@ -149,58 +248,78 @@ class WelshParliamentScraper(BaseScraper):
                     title="",
                     source_url=f"{_BASE}{_INTEREST_PATHS[0]}",
                 ))
+
+        if not records:
+            body = soup.find("body")
+            snippet = body.get_text(separator=" ", strip=True)[:500] if body else ""
+            logger.warning(f"[Welsh Parliament] 0 interest records parsed — page snippet: {snippet}")
+
         logger.info(f"[Welsh Parliament] {len(records)} interest records fetched")
         return records
 
     # ------------------------------------------------------------------
-    # Questions — scraped from Record of Proceedings
+    # Questions
     # ------------------------------------------------------------------
 
     def fetch_questions(self, from_date: Optional[str] = None) -> List[Dict]:
         records = []
-        for path in ["/en/Business/OralQuestions", "/en/Business/WrittenQuestions",
-                     "/en/Business/Questions", "/en/business/oralquestions",
-                     "/en/business/writtenquestions"]:
-            soup = self._html_get(f"{_RECORD}{path}")
-            if not soup:
-                continue
-            for link in soup.select("a[href]")[:100]:
-                href = link.get("href", "")
-                if not re.search(r"/\d{4}-\d{2}-\d{2}|/\d+", href):
+
+        # Try record.senedd.wales paths first, then business.senedd.wales
+        for base, paths in [(_RECORD, _QUESTION_PATHS), (_BUSINESS, ["/en/written-questions/", "/en/oral-questions/"])]:
+            for path in paths:
+                url = f"{base}{path}"
+                soup = self._html_get(url)
+                if not soup:
                     continue
-                full_url = href if href.startswith("http") else f"{_RECORD}{href}"
-                detail = self._html_get(full_url)
-                if not detail:
+
+                links_found = []
+                for link in soup.select("a[href]"):
+                    href = link.get("href", "")
+                    if re.search(r"/\d{4}-\d{2}-\d{2}|/\d+", href):
+                        links_found.append(href)
+
+                if not links_found:
+                    logger.warning(f"[Welsh Parliament] Questions index loaded but no question links found: {url}")
                     continue
-                date_el = detail.select_one("time, .date, [datetime]")
-                date_str = ""
-                if date_el:
-                    date_str = date_el.get("datetime", date_el.get_text(strip=True))
-                if from_date and date_str and date_str[:10] < from_date:
-                    continue
-                for contrib in detail.select(".question, .written-question, .contribution"):
-                    speaker_el = contrib.select_one(".speaker, .member-name, strong")
-                    text_el = contrib.select_one(".text, p")
-                    text = text_el.get_text(strip=True) if text_el else contrib.get_text(strip=True)
-                    if len(text) < 10:
+
+                logger.info(f"[Welsh Parliament] Questions: found {len(links_found)} links at {url}")
+                for href in links_found[:100]:
+                    full_url = href if href.startswith("http") else f"{base}{href}"
+                    detail = self._html_get(full_url)
+                    if not detail:
                         continue
-                    records.append(self._make_record(
-                        data_type="question",
-                        member={
-                            "id": "",
-                            "name": speaker_el.get_text(strip=True) if speaker_el else "",
-                            "party": "",
-                            "constituency": "",
-                            "role": "MS",
-                        },
-                        date=date_str,
-                        text=text,
-                        title="",
-                        metadata={"question_type": "oral" if "Oral" in path else "written"},
-                        source_url=full_url,
-                    ))
-            if records:
-                break  # stop once we have data from one endpoint
+                    date_el = detail.select_one("time[datetime], time, .date, [class*='date']")
+                    date_str = ""
+                    if date_el:
+                        date_str = date_el.get("datetime", date_el.get_text(strip=True))
+                    if from_date and date_str and date_str[:10] < from_date:
+                        continue
+
+                    for contrib in detail.select(".question, .written-question, .contribution, .item"):
+                        speaker_el = contrib.select_one(".speaker, .member-name, strong, b")
+                        text_el = contrib.select_one(".text, .body, p")
+                        text = text_el.get_text(strip=True) if text_el else contrib.get_text(strip=True)
+                        if len(text) < 10:
+                            continue
+                        records.append(self._make_record(
+                            data_type="question",
+                            member={
+                                "id": "",
+                                "name": speaker_el.get_text(strip=True) if speaker_el else "",
+                                "party": "",
+                                "constituency": "",
+                                "role": "MS",
+                            },
+                            date=date_str,
+                            text=text,
+                            title="",
+                            metadata={"question_type": "oral" if "oral" in path.lower() else "written"},
+                            source_url=full_url,
+                        ))
+
+                if records:
+                    logger.info(f"[Welsh Parliament] {len(records)} question records fetched")
+                    return records
 
         logger.info(f"[Welsh Parliament] {len(records)} question records fetched")
         return records
@@ -210,39 +329,55 @@ class WelshParliamentScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def fetch_plenary_business(self, from_date: Optional[str] = None) -> List[Dict]:
-        plenary_url = None
-        for path in ["/en/Business/Plenary", "/en/business/plenary", "/en/Plenary"]:
-            soup = self._html_get(f"{_RECORD}{path}")
-            if soup and soup.find("body"):
-                plenary_url = f"{_RECORD}{path}"
-                break
-        if not plenary_url:
-            logger.warning("[Welsh Parliament] Could not fetch plenary index")
+        soup = self._try_paths(_RECORD, _PLENARY_PATHS)
+        if not soup:
+            logger.warning("[Welsh Parliament] Could not load plenary index from record.senedd.wales")
             return []
 
         session_links = []
         for link in soup.select("a[href]"):
             href = link.get("href", "")
-            if re.search(r"[Pp]lenary/.*(/\d{4}-\d{2}-\d{2}|/\d+)", href):
+            if re.search(r"[Pp]lenary[/.].*\d{4}|\d{4}-\d{2}-\d{2}", href):
                 full_url = href if href.startswith("http") else f"{_RECORD}{href}"
                 session_links.append(full_url)
-        session_links = list(dict.fromkeys(session_links))  # deduplicate, preserve order
+        session_links = list(dict.fromkeys(session_links))
 
+        if not session_links:
+            body = soup.find("body")
+            snippet = body.get_text(separator=" ", strip=True)[:500] if body else ""
+            logger.warning(f"[Welsh Parliament] No plenary session links found — page snippet: {snippet}")
+            return []
+
+        logger.info(f"[Welsh Parliament] Plenary: found {len(session_links)} session links")
         records = []
         for session_url in session_links[:50]:
             session_soup = self._html_get(session_url)
             if not session_soup:
                 continue
-            date_el = session_soup.select_one("time[datetime], .date, h1")
+
+            date_el = session_soup.select_one("time[datetime], time, .date, h1, [class*='date']")
             session_date = ""
             if date_el:
                 session_date = date_el.get("datetime", date_el.get_text(strip=True))
             if from_date and session_date and session_date[:10] < from_date:
                 continue
 
-            for contrib in session_soup.select(".contribution, .speech, [class*='contribution']"):
-                speaker_el = contrib.select_one(".speaker, .member-name, strong")
-                text_el = contrib.select_one(".text, p, .speech-text")
+            contrib_selectors = [
+                ".contribution", ".speech", "[class*='contribution']",
+                "[class*='speech']", ".item", "tr.speech",
+            ]
+            contribs = []
+            for sel in contrib_selectors:
+                contribs = session_soup.select(sel)
+                if contribs:
+                    break
+
+            for contrib in contribs:
+                speaker_el = (
+                    contrib.select_one(".speaker, .member-name, [class*='speaker'], [class*='member']")
+                    or contrib.select_one("strong, b")
+                )
+                text_el = contrib.select_one(".text, p, .speech-text, [class*='text']")
                 text = text_el.get_text(strip=True) if text_el else contrib.get_text(strip=True)
                 if len(text) < 10:
                     continue
@@ -270,39 +405,56 @@ class WelshParliamentScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def fetch_votes_on_division(self, from_date: Optional[str] = None) -> List[Dict]:
-        divisions_soup = None
-        for path in ["/en/Business/Divisions", "/en/business/divisions", "/en/Divisions"]:
-            divisions_soup = self._html_get(f"{_RECORD}{path}")
-            if divisions_soup and divisions_soup.find("body"):
-                break
-        soup = divisions_soup
+        soup = self._try_paths(_RECORD, _DIVISION_PATHS)
         if not soup:
-            logger.warning("[Welsh Parliament] Could not fetch divisions index")
+            logger.warning("[Welsh Parliament] Could not load divisions index from record.senedd.wales")
             return []
 
         records = []
-        for row in soup.select("table tr, .division-row, li.division"):
-            cols = row.select("td, .col")
-            title_el = row.select_one("td:first-child, .division-title, a")
-            date_el = row.select_one("td:nth-child(2), time, .date")
+        row_selectors = ["table tr", ".division-row", "li.division", "article.division", "li"]
+        rows = []
+        for sel in row_selectors:
+            rows = soup.select(sel)
+            if rows:
+                break
+
+        if not rows:
+            body = soup.find("body")
+            snippet = body.get_text(separator=" ", strip=True)[:500] if body else ""
+            logger.warning(f"[Welsh Parliament] No division rows found — page snippet: {snippet}")
+            return []
+
+        logger.info(f"[Welsh Parliament] Divisions: found {len(rows)} rows to check")
+        for row in rows:
             link_el = row.select_one("a[href]")
             if not link_el:
                 continue
-            title = title_el.get_text(strip=True) if title_el else link_el.get_text(strip=True)
+            title_el = row.select_one("td:first-child, .title, h2, h3") or link_el
+            date_el = row.select_one("td:nth-child(2), time, .date, [class*='date']")
+            title = title_el.get_text(strip=True)
             div_date = date_el.get_text(strip=True) if date_el else ""
             if from_date and div_date and div_date[:10] < from_date:
                 continue
+
             detail_href = link_el["href"]
             detail_url = detail_href if detail_href.startswith("http") else f"{_RECORD}{detail_href}"
             detail_soup = self._html_get(detail_url)
             if not detail_soup:
                 continue
 
-            # Parse voter lists — try multiple CSS selector patterns
             vote_sections = {
-                "aye": [".ayes li", ".for li", "[class*='aye'] li", "[class*='for'] li"],
-                "no": [".noes li", ".against li", "[class*='no'] li", "[class*='against'] li"],
-                "abstain": [".abstentions li", ".abstain li", "[class*='abstain'] li"],
+                "aye": [
+                    ".ayes li", ".for li", "[class*='aye'] li", "[class*='for'] li",
+                    "[class*='Aye'] li", "[class*='For'] li",
+                ],
+                "no": [
+                    ".noes li", ".against li", "[class*='no'] li", "[class*='against'] li",
+                    "[class*='No'] li", "[class*='Against'] li",
+                ],
+                "abstain": [
+                    ".abstentions li", ".abstain li", "[class*='abstain'] li",
+                    "[class*='Abstain'] li",
+                ],
             }
             for direction, selectors in vote_sections.items():
                 voters = []
@@ -326,11 +478,7 @@ class WelshParliamentScraper(BaseScraper):
                         date=div_date,
                         text=f"Voted {direction} on: {title}",
                         title=title,
-                        metadata={
-                            "vote_direction": direction,
-                            "division_result": "",
-                            "source_url": detail_url,
-                        },
+                        metadata={"vote_direction": direction, "division_result": ""},
                         source_url=detail_url,
                     ))
 
