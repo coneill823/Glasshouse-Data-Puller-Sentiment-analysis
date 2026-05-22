@@ -3,7 +3,7 @@ UK Parliament scraper.
 
 APIs used:
   Members:          https://members-api.parliament.uk/api
-  Written Questions: https://writtenquestions-api.parliament.uk/api
+  Written Questions: https://questions-statements-api.parliament.uk/api  (old writtenquestions-api domain retired)
   Commons Votes:    https://commonsvotes-api.parliament.uk/data
   Hansard (debates): https://hansard.parliament.uk/api
 """
@@ -17,9 +17,12 @@ logger = logging.getLogger(__name__)
 
 _CFG = PARLIAMENTS["uk_parliament"]
 _MEMBERS = _CFG["members_api"]
-_QUESTIONS = _CFG["questions_api"]
+_QUESTIONS = _CFG["questions_api"]   # https://questions-statements-api.parliament.uk/api
 _VOTES = _CFG["commons_votes_api"]
 _HANSARD = _CFG["hansard_api"]
+
+# Members API caps take at 20
+_MEMBERS_PAGE = 20
 
 
 class UKParliamentScraper(BaseScraper):
@@ -27,66 +30,44 @@ class UKParliamentScraper(BaseScraper):
         super().__init__("UK Parliament")
 
     # ------------------------------------------------------------------
-    # Members (Commons only — MPs)
+    # Members (Commons — MPs)
     # ------------------------------------------------------------------
+
+    def _fetch_member_page(self, url: str, is_current: bool, skip: int) -> List[Dict]:
+        resp = self._get(url, params={
+            "House": "Commons",
+            "IsCurrentMember": "true" if is_current else "false",
+            "skip": skip,
+            "take": _MEMBERS_PAGE,
+        })
+        if not resp:
+            return []
+        data = resp.json()
+        items = data.get("items", [])
+        members = []
+        for item in items:
+            v = item.get("value", item)
+            members.append({
+                "id": str(v.get("id", "")),
+                "name": v.get("nameDisplayAs", v.get("nameFullTitle", "")),
+                "party": v.get("latestParty", {}).get("name", "") if isinstance(v.get("latestParty"), dict) else "",
+                "constituency": v.get("latestHouseMembership", {}).get("membershipFrom", "") if isinstance(v.get("latestHouseMembership"), dict) else "",
+                "role": "MP",
+                "status": "current" if is_current else "historical",
+            })
+        return members
 
     def fetch_members(self) -> List[Dict]:
         url = f"{_MEMBERS}/Members/Search"
         all_members = []
-        skip = 0
-        page_size = 100
-        while True:
-            resp = self._get(url, params={
-                "House": "Commons",
-                "IsCurrentMember": "true",
-                "skip": skip,
-                "take": page_size,
-            })
-            if not resp:
-                break
-            data = resp.json()
-            items = data.get("items", [])
-            for item in items:
-                v = item.get("value", item)
-                all_members.append({
-                    "id": str(v.get("id", "")),
-                    "name": v.get("nameDisplayAs", v.get("nameFullTitle", "")),
-                    "party": v.get("latestParty", {}).get("name", "") if isinstance(v.get("latestParty"), dict) else "",
-                    "constituency": v.get("latestHouseMembership", {}).get("membershipFrom", ""),
-                    "role": "MP",
-                    "status": "current",
-                })
-            if len(items) < page_size:
-                break
-            skip += page_size
-
-        # Also pull historical members for full history
-        skip = 0
-        while True:
-            resp = self._get(url, params={
-                "House": "Commons",
-                "IsCurrentMember": "false",
-                "skip": skip,
-                "take": page_size,
-            })
-            if not resp:
-                break
-            data = resp.json()
-            items = data.get("items", [])
-            for item in items:
-                v = item.get("value", item)
-                all_members.append({
-                    "id": str(v.get("id", "")),
-                    "name": v.get("nameDisplayAs", v.get("nameFullTitle", "")),
-                    "party": v.get("latestParty", {}).get("name", "") if isinstance(v.get("latestParty"), dict) else "",
-                    "constituency": v.get("latestHouseMembership", {}).get("membershipFrom", ""),
-                    "role": "MP",
-                    "status": "historical",
-                })
-            if len(items) < page_size:
-                break
-            skip += page_size
-
+        for is_current in (True, False):
+            skip = 0
+            while True:
+                batch = self._fetch_member_page(url, is_current, skip)
+                all_members.extend(batch)
+                if len(batch) < _MEMBERS_PAGE:
+                    break
+                skip += _MEMBERS_PAGE
         logger.info(f"[UK Parliament] {len(all_members)} MPs fetched")
         return all_members
 
@@ -128,20 +109,17 @@ class UKParliamentScraper(BaseScraper):
         return records
 
     # ------------------------------------------------------------------
-    # Questions (written)
+    # Questions (written) — new API domain
     # ------------------------------------------------------------------
 
     def fetch_questions(self, from_date: Optional[str] = None) -> List[Dict]:
-        url = f"{_QUESTIONS}/writtenquestions/search"
-        params = {
-            "house": "Commons",
-            "take": 100,
-            "skip": 0,
-        }
+        # New endpoint: questions-statements-api.parliament.uk
+        url = f"{_QUESTIONS}/writtenquestions/questions"
+        params: Dict = {"house": "Commons", "take": 100, "skip": 0}
         if from_date:
             params["tabledWhenFrom"] = from_date
 
-        all_questions = []
+        records = []
         skip = 0
         while True:
             params["skip"] = skip
@@ -149,53 +127,51 @@ class UKParliamentScraper(BaseScraper):
             if not resp:
                 break
             data = resp.json()
-            results = data.get("results", [])
-            if not results:
+            # Response shape: {"results": [...]} or {"questions": [...]}
+            items = data.get("results", data.get("questions", []))
+            if not items:
                 break
-            all_questions.extend(results)
-            if len(results) < 100:
+            for item in items:
+                v = item.get("value", item)
+                q_text = v.get("questionText", v.get("text", ""))
+                answer = v.get("answerText", v.get("answer", ""))
+                combined = f"Question: {q_text}\n\nAnswer: {answer}" if answer else q_text
+                records.append(self._make_record(
+                    data_type="question",
+                    member={
+                        "id": str(v.get("askingMemberId", v.get("memberId", ""))),
+                        "name": v.get("askingMember", {}).get("name", "") if isinstance(v.get("askingMember"), dict) else v.get("memberName", ""),
+                        "party": v.get("askingMember", {}).get("party", "") if isinstance(v.get("askingMember"), dict) else "",
+                        "constituency": v.get("askingMember", {}).get("memberFrom", "") if isinstance(v.get("askingMember"), dict) else "",
+                        "role": "MP",
+                    },
+                    date=v.get("tabledWhen", v.get("dateTabled", "")),
+                    text=combined,
+                    title=v.get("heading", v.get("subject", "")),
+                    metadata={
+                        "question_id": str(v.get("id", "")),
+                        "question_type": "written",
+                        "answering_body": v.get("answeringBodyName", ""),
+                        "answering_member": v.get("answeringMember", {}).get("name", "") if isinstance(v.get("answeringMember"), dict) else "",
+                        "answer_date": v.get("dateAnswered", ""),
+                        "is_withdrawn": v.get("isWithdrawn", False),
+                        "answer_text": answer,
+                    },
+                    source_url=url,
+                ))
+            if len(items) < 100:
                 break
             skip += 100
-
-        records = []
-        for item in all_questions:
-            v = item.get("value", item)
-            q_text = v.get("questionText", "")
-            answer = v.get("answerText", "")
-            combined = f"Question: {q_text}\n\nAnswer: {answer}" if answer else q_text
-            records.append(self._make_record(
-                data_type="question",
-                member={
-                    "id": str(v.get("askingMemberId", "")),
-                    "name": v.get("askingMember", {}).get("name", "") if isinstance(v.get("askingMember"), dict) else "",
-                    "party": v.get("askingMember", {}).get("party", "") if isinstance(v.get("askingMember"), dict) else "",
-                    "constituency": v.get("askingMember", {}).get("memberFrom", "") if isinstance(v.get("askingMember"), dict) else "",
-                    "role": "MP",
-                },
-                date=v.get("tabledWhen", v.get("dateTabled", "")),
-                text=combined,
-                title=v.get("heading", ""),
-                metadata={
-                    "question_id": str(v.get("id", "")),
-                    "question_type": "written",
-                    "answering_body": v.get("answeringBodyName", ""),
-                    "answering_member": v.get("answeringMember", {}).get("name", "") if isinstance(v.get("answeringMember"), dict) else "",
-                    "answer_date": v.get("dateAnswered", ""),
-                    "is_withdrawn": v.get("isWithdrawn", False),
-                    "answer_text": answer,
-                },
-                source_url=f"{_QUESTIONS}/writtenquestions/search",
-            ))
         logger.info(f"[UK Parliament] {len(records)} question records fetched")
         return records
 
     # ------------------------------------------------------------------
-    # Plenary business (Hansard debates)
+    # Plenary business (Written Statements via Hansard API)
     # ------------------------------------------------------------------
 
     def fetch_plenary_business(self, from_date: Optional[str] = None) -> List[Dict]:
         url = f"{_HANSARD}/writtenstatements"
-        params = {"take": 100, "skip": 0}
+        params: Dict = {"take": 100, "skip": 0}
         if from_date:
             params["startDate"] = from_date
 
@@ -207,7 +183,7 @@ class UKParliamentScraper(BaseScraper):
             if not resp:
                 break
             data = resp.json()
-            items = data.get("Results", data.get("results", []))
+            items = data.get("Results", data.get("results", data.get("items", [])))
             if not items:
                 break
             for item in items:
@@ -235,7 +211,6 @@ class UKParliamentScraper(BaseScraper):
             if len(items) < 100:
                 break
             skip += 100
-
         logger.info(f"[UK Parliament] {len(records)} plenary records fetched")
         return records
 
@@ -244,9 +219,9 @@ class UKParliamentScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def fetch_votes_on_division(self, from_date: Optional[str] = None) -> List[Dict]:
-        # Step 1: fetch all divisions
+        # Step 1: get the list of divisions
         div_url = f"{_VOTES}/divisions.json/search"
-        params = {"take": 25, "skip": 0}
+        params: Dict = {"take": 25, "skip": 0}
         if from_date:
             params["startDate"] = from_date
 
@@ -265,7 +240,8 @@ class UKParliamentScraper(BaseScraper):
                 break
             skip += 25
 
-        # Step 2: fetch per-division voting records
+        # Step 2: fetch voter lists per division
+        # Correct endpoint: /data/division/{id}  (no .json, singular)
         records = []
         for div in divisions:
             div_id = div.get("DivisionId", div.get("divisionId", ""))
@@ -275,7 +251,7 @@ class UKParliamentScraper(BaseScraper):
             noes = div.get("NoeCount", div.get("noeCount", 0))
             result = "passed" if ayes > noes else "failed"
 
-            detail_url = f"{_VOTES}/divisions.json/{div_id}"
+            detail_url = f"{_VOTES}/division/{div_id}"
             detail_resp = self._get(detail_url)
             if not detail_resp:
                 continue
@@ -289,7 +265,7 @@ class UKParliamentScraper(BaseScraper):
                             "id": str(voter.get("MemberId", voter.get("memberId", ""))),
                             "name": voter.get("Name", voter.get("name", voter.get("displayAs", ""))),
                             "party": voter.get("Party", voter.get("party", "")),
-                            "constituency": voter.get("SubParty", ""),
+                            "constituency": voter.get("SubParty", voter.get("constituency", "")),
                             "role": "MP",
                         },
                         date=div_date,

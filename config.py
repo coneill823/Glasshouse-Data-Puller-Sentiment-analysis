@@ -12,13 +12,15 @@ PARLIAMENTS = {
     "ni_assembly": {
         "name": "NI Assembly",
         "enabled": True,
-        "api_base": "https://aims.niassembly.gov.uk",
+        # Open Data web services — data starts from ~2007
+        "api_base": "http://data.niassembly.gov.uk",
     },
     "uk_parliament": {
         "name": "UK Parliament",
         "enabled": True,
         "members_api": "https://members-api.parliament.uk/api",
-        "questions_api": "https://writtenquestions-api.parliament.uk/api",
+        # writtenquestions-api.parliament.uk was retired; new domain:
+        "questions_api": "https://questions-statements-api.parliament.uk/api",
         "commons_votes_api": "https://commonsvotes-api.parliament.uk/data",
         "lords_votes_api": "https://lordsvotes-api.parliament.uk/data",
         "hansard_api": "https://hansard.parliament.uk/api",

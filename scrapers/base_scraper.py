@@ -97,7 +97,7 @@ class BaseScraper(ABC):
             "text": text.strip() if text else "",
             "title": title.strip() if title else "",
             "metadata": metadata or {},
-            "pulled_at": datetime.utcnow().isoformat() + "Z",
+            "pulled_at": datetime.now(datetime.UTC).isoformat(),
             "source_url": source_url,
         }
 

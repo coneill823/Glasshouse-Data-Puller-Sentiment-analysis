@@ -82,13 +82,13 @@ def run_parliament(parliament_key: str, scraper_class, from_date: Optional[str] 
             logger.info(f"  [DRY RUN] {dtype}: {len(records)} records (not saved)")
         return
 
-    run_date = datetime.utcnow().strftime("%Y-%m-%d")
+    run_date = datetime.now(datetime.UTC).strftime("%Y-%m-%d")
     saved_paths = {}
     for dtype, records in results.items():
         paths = save_results(cfg["name"], dtype, records, run_date=run_date)
         saved_paths[dtype] = paths
 
-    manifest["last_pulled_at"] = datetime.utcnow().isoformat() + "Z"
+    manifest["last_pulled_at"] = datetime.now(datetime.UTC).isoformat()
     manifest["last_pulled_from"] = effective_from
     manifest["runs"] = manifest.get("runs", []) + [{
         "date": run_date,
