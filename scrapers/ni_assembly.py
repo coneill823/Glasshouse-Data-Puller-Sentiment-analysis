@@ -8,12 +8,21 @@ Available services:
   questions.asmx — Oral & Written Questions
   hansard.asmx   — Official Report (plenary speeches)
   plenary.asmx   — Divisions / Votes
+
+For methods with date-range parameters the SOAP binding consistently returns
+HTTP 500 (the service likely has it disabled).  The fallback chain is:
+  1. SOAP POST (tried with common ASP.NET namespaces)
+  2. HTTP GET with query-string params (ASMX HTTP-GET binding)
+  3. AIMS public portal HTML scraping at https://aims.niassembly.gov.uk/
 """
 import json
 import logging
+import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, date
 from typing import Dict, Generator, List, Optional, Tuple
+
+from bs4 import BeautifulSoup
 
 from .base_scraper import BaseScraper
 from config import PARLIAMENTS
@@ -21,8 +30,9 @@ from config import PARLIAMENTS
 logger = logging.getLogger(__name__)
 
 _CFG = PARLIAMENTS["ni_assembly"]
-_BASE = _CFG["api_base"]   # http://data.niassembly.gov.uk
-_HISTORY_START = date(2007, 1, 1)   # AIMS data begins ~2007
+_BASE = _CFG["api_base"]          # http://data.niassembly.gov.uk
+_AIMS = "https://aims.niassembly.gov.uk"
+_HISTORY_START = date(2007, 1, 1)  # AIMS data begins ~2007
 
 
 def _date_chunks(from_date: Optional[str] = None,
@@ -54,35 +64,25 @@ class NIAssemblyScraper(BaseScraper):
     def __init__(self):
         super().__init__("NI Assembly")
 
-    # Try common ASP.NET ASMX namespaces in order — the AIMS services don't
-    # publish a WSDL we can query, so we probe until one succeeds.
+    # Try common ASP.NET ASMX namespaces in order.
     _SOAP_NAMESPACES = [
         "http://tempuri.org/",
         "http://niassembly.gov.uk/webservices/",
         "http://niassembly.gov.uk/",
     ]
 
-    def _asmx(self, service: str, method: str, params: Optional[Dict] = None):
-        """Call an ASMX method.
+    # ------------------------------------------------------------------
+    # Transport helpers
+    # ------------------------------------------------------------------
 
-        For parameter-free methods, uses a simple GET.
-        For methods with parameters (especially DateTime), uses SOAP POST
-        because ASP.NET ASMX services reject DateTime values passed via HTTP GET.
-        """
-        url = f"{_BASE}/{service}.asmx"
-        if not params:
-            resp = self._get(f"{url}/{method}")
-        else:
-            resp = self._soap_post(url, method, params)
-        if not resp:
-            return None
+    def _parse_asmx_response(self, resp, url_hint: str):
+        """Parse a raw ASMX response (JSON or SOAP XML) into a Python object."""
         ct = resp.headers.get("Content-Type", "")
         if "json" in ct:
             try:
                 return resp.json()
             except Exception:
                 pass
-        # SOAP response — extract the inner result (may be a JSON string)
         try:
             root = ET.fromstring(resp.content)
             for elem in root.iter():
@@ -97,17 +97,34 @@ class NIAssemblyScraper(BaseScraper):
         try:
             return json.loads(resp.text)
         except Exception:
-            logger.warning(f"[NI Assembly] Could not parse response from {url}/{method}")
+            logger.warning(f"[NI Assembly] Could not parse response from {url_hint}")
             return None
 
-    def _soap_post(self, url: str, method: str, params: Dict):
-        """Send a SOAP 1.1 POST request, probing common ASP.NET namespaces.
+    def _asmx(self, service: str, method: str, params: Optional[Dict] = None):
+        """Call an ASMX method with automatic fallback from SOAP to HTTP GET."""
+        url = f"{_BASE}/{service}.asmx"
 
-        The correct namespace for data.niassembly.gov.uk is not published via
-        WSDL, so we try tempuri.org first (ASP.NET default) then NI-specific
-        variants.  A 500 response signals the wrong namespace; anything else
-        is treated as a definitive answer.
-        """
+        if not params:
+            resp = self._get(f"{url}/{method}")
+        else:
+            # 1. Try SOAP POST
+            resp = self._soap_post(url, method, params)
+            if resp is None:
+                # 2. Fall back to HTTP GET with query-string params
+                get_params = {
+                    k: (f"{v}T00:00:00" if k.lower().endswith("date") and "T" not in str(v) else v)
+                    for k, v in params.items()
+                }
+                resp = self._get(f"{url}/{method}", params=get_params)
+                if resp:
+                    logger.debug(f"[NI Assembly] HTTP GET succeeded for {service}/{method}")
+
+        if not resp:
+            return None
+        return self._parse_asmx_response(resp, f"{url}/{method}")
+
+    def _soap_post(self, url: str, method: str, params: Dict):
+        """Send a SOAP 1.1 POST request, probing common ASP.NET namespaces."""
         import time as _time
 
         def _envelope(ns: str) -> bytes:
@@ -140,8 +157,8 @@ class NIAssemblyScraper(BaseScraper):
                         timeout=30,
                     )
                     if resp.status_code >= 500:
-                        logger.debug(f"[NI Assembly] HTTP {resp.status_code} with ns={ns!r}, trying next")
-                        break  # wrong namespace — try next
+                        logger.debug(f"[NI Assembly] HTTP {resp.status_code} ns={ns!r}, trying next")
+                        break
                     if not resp.ok:
                         logger.error(f"[NI Assembly] HTTP {resp.status_code} from {url}/{method}")
                         return None
@@ -150,11 +167,18 @@ class NIAssemblyScraper(BaseScraper):
                     if attempt == 0:
                         _time.sleep(2)
                         continue
-                    logger.warning(f"[NI Assembly] SOAP request error: {e}")
+                    logger.warning(f"[NI Assembly] SOAP error: {e}")
                     break
 
-        logger.error(f"[NI Assembly] All SOAP namespace attempts failed: {url}/{method}")
-        return None
+        return None  # all namespaces tried — caller will try HTTP GET
+
+    def _aims_html(self, path: str, params: Optional[Dict] = None) -> Optional[BeautifulSoup]:
+        """Fetch an AIMS portal HTML page."""
+        resp = self._get(f"{_AIMS}{path}", params=params,
+                         accept="text/html,application/xhtml+xml")
+        if not resp:
+            return None
+        return BeautifulSoup(resp.text, "lxml")
 
     # ------------------------------------------------------------------
     # Members
@@ -184,7 +208,6 @@ class NIAssemblyScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def fetch_register_of_interests(self, members: List[Dict]) -> List[Dict]:
-        # Try JSON variant first, fall back to XML
         rows = []
         for method in ("GetAllRegisteredInterests_JSON", "GetAllRegisteredInterests"):
             url = f"{_BASE}/register.asmx/{method}"
@@ -199,10 +222,8 @@ class NIAssemblyScraper(BaseScraper):
                         break
                 except Exception:
                     pass
-            # Parse as XML
             try:
                 root = ET.fromstring(resp.text)
-                # Strip namespace for easier searching
                 for elem in root.iter():
                     if "}" in elem.tag:
                         elem.tag = elem.tag.split("}", 1)[1]
@@ -244,10 +265,18 @@ class NIAssemblyScraper(BaseScraper):
         return records
 
     # ------------------------------------------------------------------
-    # Questions (oral + written, fetched in date chunks)
+    # Questions (oral + written)
     # ------------------------------------------------------------------
 
     def fetch_questions(self, from_date: Optional[str] = None) -> List[Dict]:
+        records = self._fetch_questions_asmx(from_date)
+        if not records:
+            logger.info("[NI Assembly] ASMX questions returned 0 — trying AIMS portal")
+            records = self._fetch_questions_aims(from_date)
+        logger.info(f"[NI Assembly] {len(records)} question records fetched")
+        return records
+
+    def _fetch_questions_asmx(self, from_date: Optional[str] = None) -> List[Dict]:
         records = []
         endpoints = {
             "oral": "GetQuestionsForOralAnswer_TabledInRange_JSON",
@@ -257,8 +286,7 @@ class NIAssemblyScraper(BaseScraper):
             for start, end in _date_chunks(from_date):
                 data = self._asmx("questions", method,
                                   params={"startDate": start, "endDate": end})
-                rows = _first_list(data)
-                for q in rows:
+                for q in _first_list(data):
                     q_text = q.get("QuestionText", q.get("Text", ""))
                     answer = q.get("AnswerText", q.get("Answer", ""))
                     combined = f"Question: {q_text}\n\nAnswer: {answer}" if answer else q_text
@@ -284,7 +312,113 @@ class NIAssemblyScraper(BaseScraper):
                         },
                         source_url=f"{_BASE}/questions.asmx/{method}",
                     ))
-        logger.info(f"[NI Assembly] {len(records)} question records fetched")
+        return records
+
+    def _fetch_questions_aims(self, from_date: Optional[str] = None) -> List[Dict]:
+        """Scrape questions from the AIMS public portal."""
+        records = []
+        for q_type, path in [
+            ("written", "/questions/writtenresults.aspx"),
+            ("oral", "/questions/oralresults.aspx"),
+        ]:
+            page = 1
+            while page <= 50:  # cap pages per type
+                soup = self._aims_html(path, params={"pg": page})
+                if not soup:
+                    break
+
+                # AIMS uses ASP.NET GridView — look for any data table
+                table = (
+                    soup.find("table", id=re.compile(r"Grid|grid|results|Results"))
+                    or soup.find("table", class_=re.compile(r"grid|table|results", re.I))
+                    or soup.find("table", attrs={"cellpadding": True})
+                )
+                if not table:
+                    break
+
+                rows = table.find_all("tr")[1:]  # skip header
+                if not rows:
+                    break
+
+                for row in rows:
+                    cols = [td.get_text(strip=True) for td in row.find_all("td")]
+                    if len(cols) < 2:
+                        continue
+                    # Common column orders: Date | Member | Subject | [Dept]
+                    # or: QuestionNo | Member | Date | Subject
+                    date_str = ""
+                    member_name = ""
+                    subject = ""
+                    text = ""
+                    for i, col in enumerate(cols):
+                        if re.match(r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}", col) or re.match(r"\d{4}-\d{2}-\d{2}", col):
+                            date_str = col
+                        elif i == len(cols) - 1:
+                            text = col
+                        elif not member_name and re.search(r"[A-Z][a-z]+ [A-Z]", col):
+                            member_name = col
+                        elif not subject and len(col) > 10:
+                            subject = col
+
+                    # Try to get full question text from detail link
+                    detail_link = row.find("a", href=True)
+                    if detail_link:
+                        detail_href = detail_link["href"]
+                        detail_url = (detail_href if detail_href.startswith("http")
+                                      else f"{_AIMS}{detail_href}")
+                        detail_soup = self._aims_html(
+                            detail_href if not detail_href.startswith("http") else detail_href.replace(_AIMS, "")
+                        )
+                        if detail_soup:
+                            # Full question text is usually in a div/span with the question
+                            for sel in ["#lblQuestionText", ".question-text", "div.question", "td.question"]:
+                                el = detail_soup.select_one(sel)
+                                if el:
+                                    text = el.get_text(strip=True)
+                                    break
+                            if not date_str:
+                                for sel in ["#lblTabledDate", ".tabled-date", "span.date"]:
+                                    el = detail_soup.select_one(sel)
+                                    if el:
+                                        date_str = el.get_text(strip=True)
+                                        break
+                            if not member_name:
+                                for sel in ["#lblMemberName", ".member-name", "span.member"]:
+                                    el = detail_soup.select_one(sel)
+                                    if el:
+                                        member_name = el.get_text(strip=True)
+                                        break
+
+                    if not text and subject:
+                        text = subject
+                    if not text:
+                        continue
+
+                    if from_date and date_str and len(date_str) >= 10:
+                        try:
+                            q_date = datetime.strptime(date_str[:10], "%Y-%m-%d").date()
+                            if q_date < datetime.strptime(from_date, "%Y-%m-%d").date():
+                                continue
+                        except ValueError:
+                            pass
+
+                    records.append(self._make_record(
+                        data_type="question",
+                        member={"id": "", "name": member_name, "party": "",
+                                "constituency": "", "role": "MLA"},
+                        date=date_str,
+                        text=text,
+                        title=subject,
+                        metadata={"question_type": q_type},
+                        source_url=f"{_AIMS}{path}",
+                    ))
+
+                # Check for next page
+                next_link = soup.find("a", string=re.compile(r"Next|next|›|»"))
+                if not next_link:
+                    break
+                page += 1
+
         return records
 
     # ------------------------------------------------------------------
@@ -292,36 +426,41 @@ class NIAssemblyScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def fetch_plenary_business(self, from_date: Optional[str] = None) -> List[Dict]:
-        # Step 1: get list of all Hansard report IDs
+        records = self._fetch_plenary_asmx(from_date)
+        if not records:
+            logger.info("[NI Assembly] ASMX plenary returned 0 — trying AIMS portal")
+            records = self._fetch_plenary_aims(from_date)
+        logger.info(f"[NI Assembly] {len(records)} plenary records fetched")
+        return records
+
+    def _fetch_plenary_asmx(self, from_date: Optional[str] = None) -> List[Dict]:
         data = self._asmx("hansard", "GetAllHansardReports_JSON")
         reports = _first_list(data)
+        if not reports:
+            logger.debug("[NI Assembly] GetAllHansardReports_JSON returned no reports")
+            return []
 
-        # Filter by date if requested
         if from_date:
             cutoff = datetime.strptime(from_date, "%Y-%m-%d").date()
             filtered = []
             for r in reports:
                 r_date_str = r.get("PlenaryDate", r.get("Date", ""))
                 try:
-                    r_date = datetime.strptime(r_date_str[:10], "%Y-%m-%d").date()
-                    if r_date >= cutoff:
+                    if datetime.strptime(r_date_str[:10], "%Y-%m-%d").date() >= cutoff:
                         filtered.append(r)
                 except ValueError:
                     filtered.append(r)
             reports = filtered
 
-        # Step 2: fetch contributions for each report
         records = []
         for report in reports:
             report_id = str(report.get("ReportId", report.get("Id", "")))
             report_date = report.get("PlenaryDate", report.get("Date", ""))
             if not report_id:
                 continue
-
             comp_data = self._asmx("hansard", "GetHansardComponentsByReportId_JSON",
                                    params={"reportId": report_id})
-            components = _first_list(comp_data)
-            for item in components:
+            for item in _first_list(comp_data):
                 text = item.get("ComponentText", item.get("Text", item.get("Speech", "")))
                 if not text or len(text.strip()) < 10:
                     continue
@@ -343,7 +482,67 @@ class NIAssemblyScraper(BaseScraper):
                     },
                     source_url=f"{_BASE}/hansard.asmx",
                 ))
-        logger.info(f"[NI Assembly] {len(records)} plenary records fetched")
+        return records
+
+    def _fetch_plenary_aims(self, from_date: Optional[str] = None) -> List[Dict]:
+        """Scrape Official Report index from AIMS portal."""
+        records = []
+        # AIMS official report index lists reports by date
+        for path in ["/officialreport/report.aspx", "/officialreport/"]:
+            soup = self._aims_html(path)
+            if not soup:
+                continue
+
+            # Find links to individual report pages
+            report_links = []
+            for link in soup.find_all("a", href=re.compile(r"report.*id=|reportId=|\d{4}-\d{2}-\d{2}", re.I)):
+                href = link.get("href", "")
+                report_links.append(href if href.startswith("http") else f"{_AIMS}{href}")
+
+            if not report_links:
+                continue
+
+            for report_url in report_links[:100]:  # cap per run
+                report_soup = self._aims_html(
+                    report_url.replace(_AIMS, "") if report_url.startswith(_AIMS) else report_url
+                )
+                if not report_soup:
+                    continue
+
+                date_el = report_soup.find(id=re.compile(r"date|Date")) or report_soup.find("h1")
+                report_date = date_el.get_text(strip=True) if date_el else ""
+
+                if from_date and report_date:
+                    try:
+                        parsed = datetime.strptime(report_date[:10], "%Y-%m-%d").date()
+                        if parsed < datetime.strptime(from_date, "%Y-%m-%d").date():
+                            continue
+                    except ValueError:
+                        pass
+
+                for contrib in report_soup.select(".contribution, .speech, tr.contribution"):
+                    speaker_el = contrib.select_one(".speaker, .member, strong, b")
+                    text_el = contrib.select_one(".text, .speech-text, p, td.speech")
+                    text = text_el.get_text(strip=True) if text_el else contrib.get_text(strip=True)
+                    if len(text) < 10:
+                        continue
+                    records.append(self._make_record(
+                        data_type="plenary_speech",
+                        member={
+                            "id": "",
+                            "name": speaker_el.get_text(strip=True) if speaker_el else "",
+                            "party": "",
+                            "constituency": "",
+                            "role": "MLA",
+                        },
+                        date=report_date,
+                        text=text,
+                        title="",
+                        metadata={"source": "aims_portal"},
+                        source_url=report_url,
+                    ))
+            break  # used the first path that worked
+
         return records
 
     # ------------------------------------------------------------------
@@ -351,21 +550,26 @@ class NIAssemblyScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def fetch_votes_on_division(self, from_date: Optional[str] = None) -> List[Dict]:
+        records = self._fetch_votes_asmx(from_date)
+        if not records:
+            logger.info("[NI Assembly] ASMX votes returned 0 — trying AIMS portal")
+            records = self._fetch_votes_aims(from_date)
+        logger.info(f"[NI Assembly] {len(records)} vote records fetched")
+        return records
+
+    def _fetch_votes_asmx(self, from_date: Optional[str] = None) -> List[Dict]:
         records = []
         for start, end in _date_chunks(from_date):
             data = self._asmx("plenary", "GetVotesOnDivision_JSON",
                               params={"startDate": start, "endDate": end})
-            rows = _first_list(data)
-            for vote in rows:
-                direction_raw = vote.get("VoteType", vote.get("Vote", vote.get("Type", ""))).lower()
-                # Normalise to aye/no/abstain
+            for vote in _first_list(data):
+                direction_raw = str(vote.get("VoteType", vote.get("Vote", vote.get("Type", "")))).lower()
                 if direction_raw in ("aye", "yes", "for", "1"):
                     direction = "aye"
                 elif direction_raw in ("no", "noe", "against", "2"):
                     direction = "no"
                 else:
                     direction = direction_raw or "abstain"
-
                 div_title = vote.get("MotionText", vote.get("DivisionTitle", vote.get("Title", "")))
                 records.append(self._make_record(
                     data_type="vote",
@@ -388,5 +592,97 @@ class NIAssemblyScraper(BaseScraper):
                     },
                     source_url=f"{_BASE}/plenary.asmx",
                 ))
-        logger.info(f"[NI Assembly] {len(records)} vote records fetched")
+        return records
+
+    def _fetch_votes_aims(self, from_date: Optional[str] = None) -> List[Dict]:
+        """Scrape division results from the AIMS public portal."""
+        records = []
+        soup = self._aims_html("/plenary/divisions.aspx")
+        if not soup:
+            return records
+
+        # Find links to individual division pages
+        for link in soup.find_all("a", href=re.compile(r"division|Division", re.I)):
+            href = link.get("href", "")
+            detail_url = href if href.startswith("http") else f"{_AIMS}{href}"
+            detail_path = href if not href.startswith("http") else href.replace(_AIMS, "")
+
+            # Get division date and title from the list row
+            row = link.find_parent("tr") or link.find_parent("li")
+            div_title = link.get_text(strip=True)
+            div_date = ""
+            if row:
+                cols = row.find_all("td")
+                for col in cols:
+                    text = col.get_text(strip=True)
+                    if re.match(r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}", text) or re.match(r"\d{4}-\d{2}-\d{2}", text):
+                        div_date = text
+                        break
+
+            if from_date and div_date:
+                try:
+                    parsed = datetime.strptime(div_date[:10], "%Y-%m-%d").date()
+                    if parsed < datetime.strptime(from_date, "%Y-%m-%d").date():
+                        continue
+                except ValueError:
+                    pass
+
+            detail_soup = self._aims_html(detail_path)
+            if not detail_soup:
+                continue
+
+            # Extract title and date from detail page if not found on listing
+            if not div_title or not div_date:
+                h1 = detail_soup.find("h1") or detail_soup.find("h2")
+                if h1 and not div_title:
+                    div_title = h1.get_text(strip=True)
+                for id_pat in ["lblDate", "divDate", "date"]:
+                    el = detail_soup.find(id=re.compile(id_pat, re.I))
+                    if el and not div_date:
+                        div_date = el.get_text(strip=True)
+                        break
+
+            # Common AIMS division detail patterns for voter lists
+            for direction, patterns in [
+                ("aye", [r"aye|for|in favour", r"Aye|For"]),
+                ("no", [r"no|against|noe", r"No|Against"]),
+                ("abstain", [r"abstain", r"Abstain"]),
+            ]:
+                # Try heading-based approach: find heading then siblings
+                heading_found = None
+                for tag in detail_soup.find_all(["h2", "h3", "h4", "strong", "th"]):
+                    tag_text = tag.get_text(strip=True).lower()
+                    if any(re.search(p, tag_text) for p in patterns):
+                        heading_found = tag
+                        break
+
+                voter_names = []
+                if heading_found:
+                    # Collect names from following sibling list items or table cells
+                    for sibling in heading_found.find_next_siblings():
+                        if sibling.name in ("h2", "h3", "h4", "strong") and sibling != heading_found:
+                            break  # next section
+                        for name_el in sibling.find_all(["li", "td", "span", "a"]):
+                            name = name_el.get_text(strip=True)
+                            if name and len(name) > 3 and re.search(r"[A-Z][a-z]", name):
+                                voter_names.append(name)
+                        if sibling.name == "li":
+                            voter_names.append(sibling.get_text(strip=True))
+
+                for name in voter_names:
+                    records.append(self._make_record(
+                        data_type="vote",
+                        member={"id": "", "name": name, "party": "",
+                                "constituency": "", "role": "MLA"},
+                        date=div_date,
+                        text=f"Voted {direction} on: {div_title}",
+                        title=div_title,
+                        metadata={
+                            "vote_direction": direction,
+                            "division_result": "",
+                            "source": "aims_portal",
+                        },
+                        source_url=detail_url,
+                    ))
+
         return records
