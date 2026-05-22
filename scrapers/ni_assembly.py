@@ -194,9 +194,26 @@ class NIAssemblyScraper(BaseScraper):
             return None
         return BeautifulSoup(resp.text, "lxml")
 
-    # ------------------------------------------------------------------
-    # Members
-    # ------------------------------------------------------------------
+    def _discover_asmx_methods(self, service: str) -> List[str]:
+        """Fetch the ASMX service listing page and extract available method names.
+
+        ASMX services return an HTML page at their root URL that lists every
+        web method as a link like <a href="hansard.asmx?op=MethodName">.
+        """
+        resp = self._get(f"{_BASE}/{service}.asmx")
+        if not resp:
+            return []
+        soup = BeautifulSoup(resp.text, "lxml")
+        methods = []
+        for link in soup.find_all("a", href=re.compile(r"\?op=")):
+            m = re.search(r"\?op=(.+)", link.get("href", ""))
+            if m:
+                methods.append(m.group(1))
+        if methods:
+            logger.debug(f"[NI Assembly] {service}.asmx methods: {methods}")
+        return methods
+
+
 
     def fetch_members(self) -> List[Dict]:
         data = self._asmx("members", "GetAllCurrentMembers_JSON")
@@ -222,13 +239,19 @@ class NIAssemblyScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def fetch_register_of_interests(self, members: List[Dict]) -> List[Dict]:
-        rows = []
-        for method in (
+        known_interest_methods = [
             "GetAllRegisteredInterests_JSON",
             "GetCurrentMembersRegisteredInterests_JSON",
             "GetAllMemberInterests_JSON",
             "GetAllRegisteredInterests",
-        ):
+        ]
+        discovered = self._discover_asmx_methods("register")
+        interest_methods = list(dict.fromkeys(
+            known_interest_methods + [m for m in discovered if "interest" in m.lower()]
+        ))
+
+        rows = []
+        for method in interest_methods:
             url = f"{_BASE}/register.asmx/{method}"
             resp = self._get(url)
             if not resp:
@@ -460,13 +483,21 @@ class NIAssemblyScraper(BaseScraper):
         return records
 
     def _fetch_plenary_asmx(self, from_date: Optional[str] = None) -> List[Dict]:
+        # Discover actual method names from the ASMX service listing page,
+        # then try known candidates and any "report" methods we find.
+        known = ["GetAllHansardReports_JSON", "GetHansardReports_JSON",
+                 "GetAllPlenaryReports_JSON"]
+        discovered = self._discover_asmx_methods("hansard")
+        candidates = list(dict.fromkeys(
+            known + [m for m in discovered if "report" in m.lower() and m.endswith("_JSON")]
+        ))
+
         reports = []
-        for method in ("GetAllHansardReports_JSON", "GetHansardReports_JSON",
-                       "GetAllPlenaryReports_JSON"):
+        for method in candidates:
             data = self._asmx("hansard", method)
             reports = _first_list(data)
             if reports:
-                logger.debug(f"[NI Assembly] {method} returned {len(reports)} reports")
+                logger.info(f"[NI Assembly] {method} returned {len(reports)} reports")
                 break
             logger.debug(f"[NI Assembly] {method} returned no reports")
         if not reports:
