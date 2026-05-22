@@ -277,6 +277,7 @@ class NIAssemblyScraper(BaseScraper):
         return records
 
     def _fetch_questions_asmx(self, from_date: Optional[str] = None) -> List[Dict]:
+        # Skip SOAP (consistently 500 for date params) — use HTTP GET directly.
         records = []
         endpoints = {
             "oral": "GetQuestionsForOralAnswer_TabledInRange_JSON",
@@ -284,8 +285,14 @@ class NIAssemblyScraper(BaseScraper):
         }
         for q_type, method in endpoints.items():
             for start, end in _date_chunks(from_date):
-                data = self._asmx("questions", method,
-                                  params={"startDate": start, "endDate": end})
+                url = f"{_BASE}/questions.asmx/{method}"
+                resp = self._get(url, params={
+                    "startDate": f"{start}T00:00:00",
+                    "endDate": f"{end}T00:00:00",
+                })
+                if not resp:
+                    continue
+                data = self._parse_asmx_response(resp, url)
                 for q in _first_list(data):
                     q_text = q.get("QuestionText", q.get("Text", ""))
                     answer = q.get("AnswerText", q.get("Answer", ""))
@@ -458,8 +465,9 @@ class NIAssemblyScraper(BaseScraper):
             report_date = report.get("PlenaryDate", report.get("Date", ""))
             if not report_id:
                 continue
-            comp_data = self._asmx("hansard", "GetHansardComponentsByReportId_JSON",
-                                   params={"reportId": report_id})
+            comp_url = f"{_BASE}/hansard.asmx/GetHansardComponentsByReportId_JSON"
+            comp_resp = self._get(comp_url, params={"reportId": report_id})
+            comp_data = self._parse_asmx_response(comp_resp, comp_url) if comp_resp else None
             for item in _first_list(comp_data):
                 text = item.get("ComponentText", item.get("Text", item.get("Speech", "")))
                 if not text or len(text.strip()) < 10:
@@ -558,10 +566,17 @@ class NIAssemblyScraper(BaseScraper):
         return records
 
     def _fetch_votes_asmx(self, from_date: Optional[str] = None) -> List[Dict]:
+        # Skip SOAP (consistently 500 for date params) — use HTTP GET directly.
         records = []
         for start, end in _date_chunks(from_date):
-            data = self._asmx("plenary", "GetVotesOnDivision_JSON",
-                              params={"startDate": start, "endDate": end})
+            url = f"{_BASE}/plenary.asmx/GetVotesOnDivision_JSON"
+            resp = self._get(url, params={
+                "startDate": f"{start}T00:00:00",
+                "endDate": f"{end}T00:00:00",
+            })
+            if not resp:
+                continue
+            data = self._parse_asmx_response(resp, url)
             for vote in _first_list(data):
                 direction_raw = str(vote.get("VoteType", vote.get("Vote", vote.get("Type", "")))).lower()
                 if direction_raw in ("aye", "yes", "for", "1"):
