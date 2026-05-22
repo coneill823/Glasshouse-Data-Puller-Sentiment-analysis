@@ -326,7 +326,10 @@ class NIAssemblyScraper(BaseScraper):
             "written": "GetQuestionsForWrittenAnswer_TabledInRange_JSON",
         }
         for q_type, method in endpoints.items():
-            for start, end in _date_chunks(from_date):
+            chunks = list(_date_chunks(from_date))
+            for chunk_idx, (start, end) in enumerate(chunks):
+                if chunk_idx % 5 == 0:
+                    logger.info(f"[NI Assembly] Questions ({q_type}): chunk {chunk_idx + 1}/{len(chunks)} ({start} → {end}), {len(records)} records so far")
                 url = f"{_BASE}/questions.asmx/{method}"
                 resp = self._get(url, params={
                     "startDate": f"{start}T00:00:00",
@@ -519,8 +522,11 @@ class NIAssemblyScraper(BaseScraper):
         if reports:
             logger.debug(f"[NI Assembly] Sample report fields: {list(reports[0].keys())}")
 
+        logger.info(f"[NI Assembly] Plenary: fetching speeches for {len(reports)} reports — this may take several minutes...")
         records = []
-        for report in reports:
+        for i, report in enumerate(reports):
+            if i % 50 == 0:
+                logger.info(f"[NI Assembly] Plenary: {i}/{len(reports)} reports processed ({len(records)} speeches so far)")
             # NI Assembly uses HansardReportId; fall back to generic names
             report_id = str(
                 report.get("HansardReportId",

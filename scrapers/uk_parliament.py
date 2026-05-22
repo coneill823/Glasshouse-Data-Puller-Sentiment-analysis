@@ -77,7 +77,10 @@ class UKParliamentScraper(BaseScraper):
 
     def fetch_register_of_interests(self, members: List[Dict]) -> List[Dict]:
         records = []
-        for member in members:
+        total = len(members)
+        for i, member in enumerate(members):
+            if i % 100 == 0:
+                logger.info(f"[UK Parliament] Interests: {i}/{total} members processed ({len(records)} records so far)")
             url = f"{_MEMBERS}/Members/{member['id']}/RegisteredInterests"
             resp = self._get(url)
             if not resp:
@@ -123,6 +126,8 @@ class UKParliamentScraper(BaseScraper):
         skip = 0
         while True:
             params["skip"] = skip
+            if skip % 1000 == 0 and skip > 0:
+                logger.info(f"[UK Parliament] Questions: fetched {len(records)} so far (page {skip // 100})...")
             resp = self._get(url, params=params)
             if not resp:
                 break
@@ -240,10 +245,13 @@ class UKParliamentScraper(BaseScraper):
                 break
             skip += 25
 
+        logger.info(f"[UK Parliament] Found {len(divisions)} divisions — fetching per-member votes...")
         # Step 2: fetch voter lists per division
         # Correct endpoint: /data/division/{id}  (no .json, singular)
         records = []
-        for div in divisions:
+        for i, div in enumerate(divisions):
+            if i % 50 == 0:
+                logger.info(f"[UK Parliament] Votes: {i}/{len(divisions)} divisions processed ({len(records)} records so far)")
             div_id = div.get("DivisionId", div.get("divisionId", ""))
             div_title = div.get("Title", div.get("title", ""))
             div_date = div.get("Date", div.get("date", ""))
