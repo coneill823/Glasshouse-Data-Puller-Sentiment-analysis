@@ -54,21 +54,84 @@ class NIAssemblyScraper(BaseScraper):
     def __init__(self):
         super().__init__("NI Assembly")
 
+    # SOAP namespace used by all data.niassembly.gov.uk services
+    _NS = "http://niassembly.gov.uk/webservices"
+
     def _asmx(self, service: str, method: str, params: Optional[Dict] = None):
-        """Call an ASMX JSON method and return parsed data."""
-        url = f"{_BASE}/{service}.asmx/{method}"
-        resp = self._get(url, params=params)
+        """Call an ASMX method.
+
+        For parameter-free methods, uses a simple GET.
+        For methods with parameters (especially DateTime), uses SOAP POST
+        because ASP.NET ASMX services reject DateTime values passed via HTTP GET.
+        """
+        url = f"{_BASE}/{service}.asmx"
+        if not params:
+            resp = self._get(f"{url}/{method}")
+        else:
+            resp = self._soap_post(url, method, params)
         if not resp:
             return None
-        try:
-            return resp.json()
-        except Exception:
-            # Some ASMX endpoints return a JSON string wrapped in XML or double-encoded
+        ct = resp.headers.get("Content-Type", "")
+        if "json" in ct:
             try:
-                return json.loads(resp.text)
+                return resp.json()
             except Exception:
-                logger.warning(f"[NI Assembly] Could not parse response from {url}")
-                return None
+                pass
+        # SOAP response — extract the inner result (may be a JSON string)
+        try:
+            root = ET.fromstring(resp.content)
+            for elem in root.iter():
+                tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+                if tag.endswith("Result") and elem.text:
+                    try:
+                        return json.loads(elem.text)
+                    except Exception:
+                        return elem.text
+        except ET.ParseError:
+            pass
+        try:
+            return json.loads(resp.text)
+        except Exception:
+            logger.warning(f"[NI Assembly] Could not parse response from {url}/{method}")
+            return None
+
+    def _soap_post(self, url: str, method: str, params: Dict):
+        """Send a SOAP 1.1 POST request to an ASMX endpoint."""
+        params_xml = "\n      ".join(
+            f"<{k} xmlns=''>{v}</{k}>" for k, v in params.items()
+        )
+        envelope = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" '
+            f'xmlns:tns="{self._NS}">'
+            "<soap:Body>"
+            f"<tns:{method}>"
+            f"{params_xml}"
+            f"</tns:{method}>"
+            "</soap:Body>"
+            "</soap:Envelope>"
+        )
+        self._rate_limit()
+        import time as _time
+        for attempt in range(3):
+            try:
+                resp = self.session.post(
+                    url,
+                    data=envelope.encode("utf-8"),
+                    headers={
+                        "Content-Type": "text/xml; charset=utf-8",
+                        "SOAPAction": f'"{self._NS}/{method}"',
+                    },
+                    timeout=30,
+                )
+                resp.raise_for_status()
+                return resp
+            except Exception as e:
+                wait = 2 ** attempt
+                logger.warning(f"[NI Assembly] SOAP attempt {attempt+1}/3 failed: {e}. Retry in {wait}s")
+                _time.sleep(wait)
+        logger.error(f"[NI Assembly] SOAP call failed after 3 attempts: {url}/{method}")
+        return None
 
     # ------------------------------------------------------------------
     # Members

@@ -9,7 +9,7 @@ Directory layout:
 import json
 import logging
 import re
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -52,7 +52,7 @@ def save_results(parliament_name: str, data_type: str, records: List[Dict],
         logger.info(f"No records to save for {parliament_name}/{data_type}")
         return {}
 
-    run_date = run_date or datetime.now(datetime.UTC).strftime("%Y-%m-%d")
+    run_date = run_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     parliament_slug = _slug(parliament_name)
     data_type_slug = _slug(data_type)
 

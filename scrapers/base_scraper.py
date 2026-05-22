@@ -1,7 +1,7 @@
 import time
 import logging
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Optional
 
 import requests
@@ -97,7 +97,7 @@ class BaseScraper(ABC):
             "text": text.strip() if text else "",
             "title": title.strip() if title else "",
             "metadata": metadata or {},
-            "pulled_at": datetime.now(datetime.UTC).isoformat(),
+            "pulled_at": datetime.now(timezone.utc).isoformat(),
             "source_url": source_url,
         }
 

@@ -33,7 +33,10 @@ class ScottishParliamentScraper(BaseScraper):
             if not resp:
                 break
             data = resp.json()
-            items = data.get("value", data if isinstance(data, list) else [])
+            if isinstance(data, list):
+                items = data
+            else:
+                items = data.get("value", [])
             if not items:
                 break
             all_results.extend(items)
