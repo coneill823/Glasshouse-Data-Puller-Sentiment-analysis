@@ -89,6 +89,14 @@ _SENEDD_QUESTION_PATHS = [
     "/senedd-business/questions/",
 ]
 
+# senedd.wales main site plenary paths (WordPress, SSR — distinct from record.senedd.wales SPA)
+_SENEDD_PLENARY_PATHS = [
+    "/senedd-business/plenary/",
+    "/en/senedd-business/plenary/",
+    "/senedd-business/chamber/",
+    "/en/senedd-business/chamber/",
+]
+
 
 class WelshParliamentScraper(BaseScraper):
     def __init__(self):
@@ -113,6 +121,8 @@ class WelshParliamentScraper(BaseScraper):
             return None
         ct = resp.headers.get("Content-Type", "")
         if "json" not in ct and not resp.text.strip().startswith(("[", "{")):
+            snippet = resp.text.strip()[:150]
+            logger.warning(f"[Welsh Parliament] API {url} returned HTML/non-JSON (200+shell) — snippet: {snippet!r}")
             return None
         try:
             return resp.json()
@@ -547,6 +557,40 @@ class WelshParliamentScraper(BaseScraper):
             sample_hrefs = all_hrefs[:10]
             logger.warning(f"[Welsh Parliament] Plenary: no session links at {url} — sample hrefs: {sample_hrefs} — snippet: {snippet}")
 
+        # 2b. If record.senedd.wales paths all 404'd, try the main senedd.wales site.
+        # https://senedd.wales/senedd-business/plenary/ is a WordPress SSR page that
+        # lists plenary sessions and may link to record.senedd.wales SSR session pages.
+        if not session_links:
+            for path in _SENEDD_PLENARY_PATHS:
+                url = f"{_BASE}{path}"
+                soup = self._html_get(url)
+                if not soup:
+                    logger.warning(f"[Welsh Parliament] Plenary: could not load {url}")
+                    continue
+                found = []
+                all_hrefs = []
+                for link in soup.select("a[href]"):
+                    href = link.get("href", "")
+                    if not href or not (href.startswith("/") or href.startswith("http")):
+                        continue
+                    all_hrefs.append(href)
+                    if self._SESSION_LINK_RE.search(href):
+                        if href.startswith("http"):
+                            full_link = href
+                        else:
+                            # relative links on senedd.wales resolve against _BASE
+                            full_link = f"{_BASE}{href}"
+                        found.append(full_link)
+                found = list(dict.fromkeys(found))
+                if found:
+                    session_links = found
+                    logger.info(f"[Welsh Parliament] Plenary: found {len(session_links)} session links at {url}")
+                    break
+                body = soup.find("body")
+                snippet = body.get_text(separator=" ", strip=True)[:400] if body else ""
+                sample_hrefs = all_hrefs[:10]
+                logger.warning(f"[Welsh Parliament] Plenary: no session links at {url} — sample hrefs: {sample_hrefs} — snippet: {snippet}")
+
         if not session_links:
             logger.warning("[Welsh Parliament] No plenary session links found — all paths exhausted")
             return []
@@ -567,12 +611,20 @@ class WelshParliamentScraper(BaseScraper):
             contrib_selectors = [
                 ".contribution", ".speech", "[class*='contribution']",
                 "[class*='speech']", ".item", "tr.speech",
+                # WordPress content selectors (senedd.wales main site)
+                ".wp-block-post-content p", ".entry-content p", "article p",
             ]
             contribs = []
             for sel in contrib_selectors:
                 contribs = session_soup.select(sel)
                 if contribs:
                     break
+
+            if not contribs:
+                body = session_soup.find("body")
+                snippet = body.get_text(separator=" ", strip=True)[:300] if body else ""
+                logger.warning(f"[Welsh Parliament] Plenary: 0 contribs at {session_url} — snippet: {snippet}")
+                continue
 
             for contrib in contribs:
                 speaker_el = (

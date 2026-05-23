@@ -128,9 +128,46 @@ class ScottishParliamentScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def fetch_register_of_interests(self, members: List[Dict]) -> List[Dict]:
-        # URL structure changes between sessions; try several candidates.
-        # "members-interests-and-lobbying" is the current (2021+) parliament.scot path.
+        records = []
+
+        # 1. Try OData API first — endpoints that might expose interests data
+        odata_interest_candidates = [
+            "RegisteredInterests", "MemberInterests", "Interests",
+            "MSPInterests", "RegisterOfInterests", "MemberRegisteredInterests",
+        ]
+        rows, endpoint = self._odata_try(odata_interest_candidates)
+        if rows:
+            member_lookup_id = {m["id"]: m for m in members}
+            member_lookup_name = {m["name"].lower(): m for m in members}
+            for row in rows:
+                member_id = str(row.get("PersonId", row.get("MemberID", row.get("MemberId", ""))))
+                member_name = row.get("MemberName", row.get("Name", ""))
+                member = (member_lookup_id.get(member_id)
+                          or member_lookup_name.get(member_name.lower(), {
+                              "id": member_id, "name": member_name,
+                              "party": "", "constituency": "", "role": "MSP",
+                          }))
+                text = row.get("Interest", row.get("Description", row.get("Text", "")))
+                if not text:
+                    continue
+                records.append(self._make_record(
+                    data_type="register_of_interests",
+                    member=member,
+                    date=row.get("DateRegistered", row.get("Date", "")),
+                    text=text,
+                    title=row.get("Category", row.get("CategoryName", "")),
+                    source_url=f"{_API}/{endpoint}",
+                ))
+            logger.info(f"[Scottish Parliament] {len(records)} interest records fetched via OData")
+            return records
+
+        # 2. Scrape from parliament.scot.  URL structure has changed across sessions;
+        #    try all known patterns, loading each and checking for actual interest content.
         interest_candidates = [
+            f"{_WEB}/msps/register-of-members-interests/",
+            f"{_WEB}/msps/register-of-members-interests",
+            f"{_WEB}/msps/interests/",
+            f"{_WEB}/msps/interests",
             f"{_WEB}/msps/members-interests-and-lobbying/register-of-interests",
             f"{_WEB}/msps/members-interests-and-lobbying/",
             f"{_WEB}/msps/members-interests-and-lobbying",
@@ -145,15 +182,44 @@ class ScottishParliamentScraper(BaseScraper):
         url = ""
         for candidate in interest_candidates:
             resp_soup = self._html_get(candidate)
-            if resp_soup:
+            if not resp_soup:
+                logger.warning(f"[Scottish Parliament] Could not load interests page: {candidate}")
+                continue
+            # Check that this page actually has interest-related content, not a generic MSP page
+            text_lower = resp_soup.get_text(separator=" ", strip=True).lower()
+            if any(kw in text_lower for kw in ("register of interests", "registered interest", "financial interest", "category")):
                 soup = resp_soup
                 url = candidate
-                logger.info(f"[Scottish Parliament] Loaded interests page: {candidate}")
+                logger.info(f"[Scottish Parliament] Loaded interests page with content: {candidate}")
                 break
-            logger.warning(f"[Scottish Parliament] Could not load interests page: {candidate}")
-        records = []
+            body = resp_soup.find("body")
+            snippet = body.get_text(separator=" ", strip=True)[:300] if body else ""
+            logger.warning(f"[Scottish Parliament] Loaded {candidate} but no interest keywords — snippet: {snippet}")
+            # Even if it's a general page, follow any links that look like per-MSP interest pages
+            sub_links = [
+                a["href"] for a in resp_soup.select("a[href]")
+                if re.search(r"interest|register", a.get("href", ""), re.I)
+                and a.get("href", "").startswith(("/", "http"))
+            ]
+            if sub_links:
+                logger.info(f"[Scottish Parliament] Following interest sub-links from {candidate}: {sub_links[:5]}")
+                for sub_href in sub_links[:3]:
+                    sub_url = sub_href if sub_href.startswith("http") else f"{_WEB}{sub_href}"
+                    sub_soup = self._html_get(sub_url)
+                    if not sub_soup:
+                        continue
+                    sub_text = sub_soup.get_text(separator=" ", strip=True).lower()
+                    if any(kw in sub_text for kw in ("register of interests", "registered interest", "financial interest")):
+                        soup = sub_soup
+                        url = sub_url
+                        logger.info(f"[Scottish Parliament] Found interests content at sub-link: {sub_url}")
+                        break
+                if soup:
+                    break
+
         if not soup:
             logger.warning("[Scottish Parliament] All interest page candidates failed")
+            logger.info(f"[Scottish Parliament] {len(records)} interest records fetched")
             return records
 
         member_lookup = {m["name"].lower(): m for m in members}
