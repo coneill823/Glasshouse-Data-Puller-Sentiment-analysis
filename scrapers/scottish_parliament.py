@@ -128,8 +128,12 @@ class ScottishParliamentScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def fetch_register_of_interests(self, members: List[Dict]) -> List[Dict]:
-        # URL structure changes between sessions; try several candidates
+        # URL structure changes between sessions; try several candidates.
+        # "members-interests-and-lobbying" is the current (2021+) parliament.scot path.
         interest_candidates = [
+            f"{_WEB}/msps/members-interests-and-lobbying/register-of-interests",
+            f"{_WEB}/msps/members-interests-and-lobbying/",
+            f"{_WEB}/msps/members-interests-and-lobbying",
             f"{_WEB}/msps/members-interests/",
             f"{_WEB}/msps/members-interests",
             f"{_WEB}/msps/members-interests/register-of-interests",

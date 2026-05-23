@@ -545,11 +545,12 @@ class NIAssemblyScraper(BaseScraper):
             if not report_id:
                 continue
             comp_url = f"{_BASE}/hansard.asmx/GetHansardComponentsByReportId_JSON"
-            # Param name varies — try HansardReportId first (matches field name), then reportId
+            # "reportId" is confirmed as the correct parameter name; try it first.
+            # Other names are fallbacks in case the service changes.
             comp_resp = (
-                self._get(comp_url, params={"ReportDocId": report_id})
+                self._get(comp_url, params={"reportId": report_id})
+                or self._get(comp_url, params={"ReportDocId": report_id})
                 or self._get(comp_url, params={"HansardReportId": report_id})
-                or self._get(comp_url, params={"reportId": report_id})
                 or self._get(comp_url, params={"id": report_id})
             )
             comp_data = self._parse_asmx_response(comp_resp, comp_url) if comp_resp else None

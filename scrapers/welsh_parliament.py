@@ -1,15 +1,22 @@
 """
 Welsh Parliament (Senedd) scraper.
 
-No structured public REST API exists.  Data is scraped from:
-  - https://senedd.wales/          — member profiles, register of interests
-  - https://record.senedd.wales/   — Record of Proceedings (plenary, votes)
-  - https://business.senedd.wales/ — questions tabled / answered
+Data sources:
+  - https://senedd.wales/                    — member profiles, register of interests
+  - https://record.senedd.wales/             — Record of Proceedings SPA (plenary, votes)
+  - https://record.senedd.wales/api/         — Record of Proceedings REST API
+  - https://business.senedd.wales/           — Senedd Business SPA (questions)
+  - https://business.senedd.wales/api/       — Senedd Business REST API
+  - https://senedd.wales/api/                — Senedd public REST API
 
+record.senedd.wales and business.senedd.wales are both JavaScript SPAs; the
+server-side rendered HTML is just a navigation shell.  Actual data is fetched
+via their REST APIs, which we probe at /api/ with common path patterns.
 All requests use a browser User-Agent; the Senedd CDN blocks generic bot UAs.
 """
 import logging
 import re
+from datetime import date, timedelta
 from typing import Dict, List, Optional
 
 from bs4 import BeautifulSoup
@@ -88,8 +95,29 @@ class WelshParliamentScraper(BaseScraper):
         super().__init__("Welsh Parliament (Senedd)")
 
     # ------------------------------------------------------------------
-    # Transport — always use a browser UA to avoid CDN blocks
+    # Transport helpers
     # ------------------------------------------------------------------
+
+    def _api_get(self, url: str, params: Optional[Dict] = None):
+        """Fetch a JSON API endpoint with browser UA.  Returns the parsed JSON or None."""
+        saved = dict(self.session.headers)
+        self.session.headers.update({
+            "User-Agent": _BROWSER_UA,
+            "Accept": "application/json, */*;q=0.8",
+            "Accept-Language": "en-GB,en;q=0.9",
+        })
+        resp = self._get(url, params=params)
+        self.session.headers.clear()
+        self.session.headers.update(saved)
+        if not resp:
+            return None
+        ct = resp.headers.get("Content-Type", "")
+        if "json" not in ct and not resp.text.strip().startswith(("[", "{")):
+            return None
+        try:
+            return resp.json()
+        except Exception:
+            return None
 
     def _html_get(self, url: str, params: Optional[Dict] = None) -> Optional[BeautifulSoup]:
         saved = dict(self.session.headers)
@@ -277,9 +305,63 @@ class WelshParliamentScraper(BaseScraper):
     # Questions
     # ------------------------------------------------------------------
 
+    # Known REST API endpoint patterns for Senedd questions.
+    # Both sites are React SPAs; the underlying APIs serve the actual data.
+    _QUESTION_API_CANDIDATES = [
+        f"{_RECORD}/api/questions",
+        f"{_RECORD}/api/written-questions",
+        f"{_RECORD}/api/oral-questions",
+        f"{_BUSINESS}/api/questions",
+        f"{_BUSINESS}/api/written-questions",
+        f"{_BUSINESS}/api/oral-questions",
+        f"{_BUSINESS}/api/businessquestions",
+        "https://senedd.wales/api/questions",
+        "https://senedd.wales/api/written-questions",
+        "https://senedd.wales/api/oral-questions",
+    ]
+
     def fetch_questions(self, from_date: Optional[str] = None) -> List[Dict]:
         records = []
 
+        # 1. Try REST API endpoints first (SPAs load data from APIs, not HTML)
+        for api_url in self._QUESTION_API_CANDIDATES:
+            params = {}
+            if from_date:
+                params["startDate"] = from_date
+            data = self._api_get(api_url, params=params if params else None)
+            if not data:
+                continue
+            items = data if isinstance(data, list) else data.get("items", data.get("results", data.get("questions", [])))
+            if not items:
+                logger.warning(f"[Welsh Parliament] Questions API {api_url} responded but returned no items (keys: {list(data.keys()) if isinstance(data, dict) else type(data).__name__})")
+                continue
+            logger.info(f"[Welsh Parliament] Questions API: {len(items)} items from {api_url}")
+            for item in items:
+                q_text = item.get("questionText", item.get("text", item.get("body", "")))
+                answer = item.get("answerText", item.get("answer", ""))
+                combined = f"Question: {q_text}\n\nAnswer: {answer}" if answer else q_text
+                if not combined:
+                    continue
+                records.append(self._make_record(
+                    data_type="question",
+                    member={
+                        "id": str(item.get("memberId", item.get("askingMemberId", ""))),
+                        "name": item.get("memberName", item.get("askingMember", {}).get("name", "") if isinstance(item.get("askingMember"), dict) else ""),
+                        "party": item.get("party", ""),
+                        "constituency": item.get("constituency", item.get("memberFrom", "")),
+                        "role": "MS",
+                    },
+                    date=item.get("dateTabled", item.get("date", "")),
+                    text=combined,
+                    title=item.get("subject", item.get("title", "")),
+                    metadata={"question_type": item.get("questionType", "written")},
+                    source_url=api_url,
+                ))
+            if records:
+                logger.info(f"[Welsh Parliament] {len(records)} question records fetched via API")
+                return records
+
+        # 2. Fall back to HTML scraping
         # Regex for links that are individual question items (not just category navigation).
         # Requires a date component OR a numeric ID that looks like a specific item.
         _ITEM_LINK_RE = re.compile(
@@ -376,15 +458,68 @@ class WelshParliamentScraper(BaseScraper):
     # Plenary business — Record of Proceedings
     # ------------------------------------------------------------------
 
-    # Links that indicate an individual plenary session (date-based or ID-based)
+    # Known REST API endpoint patterns for plenary proceedings
+    _PLENARY_API_CANDIDATES = [
+        f"{_RECORD}/api/plenary/sessions",
+        f"{_RECORD}/api/plenary",
+        f"{_RECORD}/api/proceedings",
+        f"{_RECORD}/api/agenda",
+        f"{_RECORD}/api/contributions",
+        f"{_RECORD}/api/meetings",
+        "https://senedd.wales/api/plenary",
+        "https://senedd.wales/api/proceedings",
+    ]
+
+    # Links that indicate an individual plenary session (date-based or ID-based).
+    # Matches 4+ digit IDs, date-based paths, or standard plenary URL patterns.
     _SESSION_LINK_RE = re.compile(
-        r"\d{4}-\d{2}-\d{2}|/\d{4}/\d{2}|/\d{5,}|"
-        r"[Pp]lenary/\d|[Ss]ession/\d|[Bb]usiness/\d",
+        r"\d{4}-\d{2}-\d{2}|/\d{4}/\d{2}|/\d{4,}|"
+        r"[Pp]lenary/\d|[Ss]ession/\d|[Ss]itting/\d|[Mm]eeting/\d",
     )
 
     def fetch_plenary_business(self, from_date: Optional[str] = None) -> List[Dict]:
-        # Try each path individually; stop at the first one that contains session links.
-        # _try_paths would stop at the first page with ANY content, which may be a nav page.
+        # 1. Try REST API endpoints (SPAs load data from APIs, not HTML)
+        for api_url in self._PLENARY_API_CANDIDATES:
+            params = {}
+            if from_date:
+                params["startDate"] = from_date
+            data = self._api_get(api_url, params=params if params else None)
+            if not data:
+                continue
+            sessions = data if isinstance(data, list) else data.get("sessions", data.get("items", data.get("results", [])))
+            if not sessions:
+                logger.warning(f"[Welsh Parliament] Plenary API {api_url} responded but no sessions (keys: {list(data.keys()) if isinstance(data, dict) else type(data).__name__})")
+                continue
+            logger.info(f"[Welsh Parliament] Plenary API: {len(sessions)} sessions from {api_url}")
+            records = []
+            for session in sessions:
+                session_date = session.get("date", session.get("sittingDate", ""))
+                contributions = session.get("contributions", session.get("speeches", session.get("items", [])))
+                for contrib in contributions:
+                    text = contrib.get("text", contrib.get("body", contrib.get("speech", "")))
+                    if not text or len(text) < 10:
+                        continue
+                    records.append(self._make_record(
+                        data_type="plenary_speech",
+                        member={
+                            "id": str(contrib.get("memberId", "")),
+                            "name": contrib.get("memberName", contrib.get("speaker", "")),
+                            "party": contrib.get("party", ""),
+                            "constituency": contrib.get("constituency", ""),
+                            "role": "MS",
+                        },
+                        date=session_date,
+                        text=text,
+                        title=contrib.get("subject", contrib.get("title", "")),
+                        source_url=api_url,
+                    ))
+            if records:
+                logger.info(f"[Welsh Parliament] {len(records)} plenary records fetched via API")
+                return records
+
+        # 2. Try each HTML path individually; stop at the first one that contains session links.
+        # record.senedd.wales is a SPA — most path variants return a nav-only shell with no
+        # content links. Only paths that are server-side rendered include session-link rows.
         session_links = []
         for path in _PLENARY_PATHS:
             url = f"{_RECORD}{path}"
@@ -393,10 +528,12 @@ class WelshParliamentScraper(BaseScraper):
                 logger.warning(f"[Welsh Parliament] Plenary: could not load {url}")
                 continue
             found = []
+            all_hrefs = []
             for link in soup.select("a[href]"):
                 href = link.get("href", "")
                 if not href or not (href.startswith("/") or href.startswith("http")):
                     continue
+                all_hrefs.append(href)
                 if self._SESSION_LINK_RE.search(href):
                     full_url = href if href.startswith("http") else f"{_RECORD}{href}"
                     found.append(full_url)
@@ -406,8 +543,9 @@ class WelshParliamentScraper(BaseScraper):
                 logger.info(f"[Welsh Parliament] Plenary: found {len(session_links)} session links at {url}")
                 break
             body = soup.find("body")
-            snippet = body.get_text(separator=" ", strip=True)[:500] if body else ""
-            logger.warning(f"[Welsh Parliament] Plenary: no session links at {url} — snippet: {snippet}")
+            snippet = body.get_text(separator=" ", strip=True)[:400] if body else ""
+            sample_hrefs = all_hrefs[:10]
+            logger.warning(f"[Welsh Parliament] Plenary: no session links at {url} — sample hrefs: {sample_hrefs} — snippet: {snippet}")
 
         if not session_links:
             logger.warning("[Welsh Parliament] No plenary session links found — all paths exhausted")
@@ -489,6 +627,9 @@ class WelshParliamentScraper(BaseScraper):
             return []
 
         logger.info(f"[Welsh Parliament] Divisions: found {len(rows)} rows to check")
+        # Log first few division hrefs so we can see the URL pattern
+        sample_div_hrefs = [r.select_one("a[href]")["href"] for r in rows[:5] if r.select_one("a[href]")]
+        logger.info(f"[Welsh Parliament] Sample division hrefs: {sample_div_hrefs}")
         for row in rows:
             link_el = row.select_one("a[href]")
             if not link_el:
