@@ -50,8 +50,14 @@ _INTEREST_PATHS = [
     "/en/senedd-members/register-of-members-financial-interests/",
 ]
 
-# record.senedd.wales paths (capitalisation varies by version)
+# record.senedd.wales paths (capitalisation varies by version).
+# /en/plenary/divisions/ is confirmed SSR; try analogous sub-paths first.
 _PLENARY_PATHS = [
+    "/en/plenary/oral-questions/",
+    "/en/plenary/written-questions/",
+    "/en/plenary/statements/",
+    "/en/plenary/debates/",
+    "/en/plenary/contributions/",
     "/en/plenary/",
     "/en/plenary/plenary-sessions/",
     "/en/plenary/plenary-session/",
@@ -70,6 +76,11 @@ _DIVISION_PATHS = [
     "/en/Plenary/Divisions",
 ]
 _QUESTION_PATHS = [
+    # SSR analogues of the working /en/plenary/divisions/ path
+    "/en/plenary/oral-questions/",
+    "/en/plenary/written-questions/",
+    "/en/OralQuestions/",
+    "/en/WrittenQuestions/",
     "/en/written-questions/",
     "/en/oral-questions/",
     "/en/business/written-questions/",
@@ -590,6 +601,34 @@ class WelshParliamentScraper(BaseScraper):
                 snippet = body.get_text(separator=" ", strip=True)[:400] if body else ""
                 sample_hrefs = all_hrefs[:10]
                 logger.warning(f"[Welsh Parliament] Plenary: no session links at {url} — sample hrefs: {sample_hrefs} — snippet: {snippet}")
+                # When landing on the senedd.wales plenary overview, follow sub-pages
+                # (e.g. /senedd-business/plenary/past-plenary-sessions/) to find listings.
+                if "senedd-business/plenary" in path:
+                    sub_paths = [
+                        h for h in all_hrefs
+                        if ("senedd-business/plenary/" in h)
+                        and h not in ("/senedd-business/plenary/", path, url)
+                        and not h.endswith("/what-is-plenary/")
+                    ]
+                    for sub_href in sub_paths[:8]:
+                        sub_url = sub_href if sub_href.startswith("http") else f"{_BASE}{sub_href}"
+                        sub_soup = self._html_get(sub_url)
+                        if not sub_soup:
+                            continue
+                        sub_hrefs = []
+                        for link in sub_soup.select("a[href]"):
+                            h2 = link.get("href", "")
+                            if not h2 or not (h2.startswith("/") or h2.startswith("http")):
+                                continue
+                            sub_hrefs.append(h2)
+                            if self._SESSION_LINK_RE.search(h2):
+                                fl = h2 if h2.startswith("http") else f"{_BASE}{h2}"
+                                found.append(fl)
+                        logger.info(f"[Welsh Parliament] Plenary sub-page {sub_url}: {len(found)} session links — sample hrefs: {sub_hrefs[:8]}")
+                    if found:
+                        session_links = list(dict.fromkeys(found))
+                        logger.info(f"[Welsh Parliament] Plenary: {len(session_links)} session links from sub-pages of {url}")
+                        break
 
         if not session_links:
             logger.warning("[Welsh Parliament] No plenary session links found — all paths exhausted")

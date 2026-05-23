@@ -195,21 +195,27 @@ class ScottishParliamentScraper(BaseScraper):
             body = resp_soup.find("body")
             snippet = body.get_text(separator=" ", strip=True)[:300] if body else ""
             logger.warning(f"[Scottish Parliament] Loaded {candidate} but no interest keywords — snippet: {snippet}")
-            # Even if it's a general page, follow any links that look like per-MSP interest pages
-            sub_links = [
-                a["href"] for a in resp_soup.select("a[href]")
-                if re.search(r"interest|register", a.get("href", ""), re.I)
-                and a.get("href", "").startswith(("/", "http"))
-            ]
+            # Even if it's a general page, follow links whose href OR visible text
+            # mentions interests/register so we reach the actual register page.
+            sub_links = []
+            for a in resp_soup.select("a[href]"):
+                href = a.get("href", "")
+                if not href or not (href.startswith("/") or href.startswith("http")):
+                    continue
+                link_text = a.get_text(strip=True).lower()
+                if re.search(r"interest|register", href, re.I) or re.search(r"interest|register", link_text):
+                    sub_links.append(href)
             if sub_links:
                 logger.info(f"[Scottish Parliament] Following interest sub-links from {candidate}: {sub_links[:5]}")
-                for sub_href in sub_links[:3]:
+                for sub_href in sub_links[:5]:
                     sub_url = sub_href if sub_href.startswith("http") else f"{_WEB}{sub_href}"
+                    if sub_url in interest_candidates:
+                        continue  # already tried
                     sub_soup = self._html_get(sub_url)
                     if not sub_soup:
                         continue
                     sub_text = sub_soup.get_text(separator=" ", strip=True).lower()
-                    if any(kw in sub_text for kw in ("register of interests", "registered interest", "financial interest")):
+                    if any(kw in sub_text for kw in ("register of interests", "registered interest", "financial interest", "category")):
                         soup = sub_soup
                         url = sub_url
                         logger.info(f"[Scottish Parliament] Found interests content at sub-link: {sub_url}")
@@ -353,9 +359,21 @@ class ScottishParliamentScraper(BaseScraper):
                 date_str = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
                 if from_date and date_str and date_str[:10] < from_date:
                     continue
-                for contrib in detail.select(".contribution, .speech, [class*='contribution'], tr"):
-                    speaker_el = contrib.select_one(".speaker, .msp-name, strong, b, td:first-child")
-                    text_el = contrib.select_one(".text, p, td:last-child")
+                # Log CSS classes on first page so we can tune selectors from the run log
+                if not records:
+                    all_cls = sorted({c for el in detail.select("[class]") for c in el.get("class", [])})
+                    logger.info(f"[Scottish Parliament] Official Report page CSS classes: {all_cls[:40]}")
+                item_count_before = len(records)
+                for contrib in detail.select(
+                    ".contribution, .speech, [class*='contribution'], [class*='speech'], "
+                    ".or-row, .or-report-row, .member-speech, .chamber-row, "
+                    ".qna-item, .member-contribution, tr, article, .content-row"
+                ):
+                    speaker_el = contrib.select_one(
+                        ".speaker, .msp-name, strong, b, td:first-child, "
+                        "[class*='speaker'], [class*='member-name'], .or-member"
+                    )
+                    text_el = contrib.select_one(".text, p, td:last-child, [class*='text'], [class*='body']")
                     text = text_el.get_text(strip=True) if text_el else contrib.get_text(strip=True)
                     if len(text) < 10:
                         continue
@@ -370,6 +388,10 @@ class ScottishParliamentScraper(BaseScraper):
                         title="",
                         source_url=full_url,
                     ))
+                if len(records) == item_count_before:
+                    body = detail.find("body")
+                    snippet = body.get_text(separator=" ", strip=True)[:400] if body else ""
+                    logger.warning(f"[Scottish Parliament] 0 contribs at {full_url} — snippet: {snippet}")
             if records:
                 break
 
@@ -426,9 +448,14 @@ class ScottishParliamentScraper(BaseScraper):
             "/chamber-and-committees/votes-and-divisions/search",
             "/chamber-and-committees/votes-and-divisions",
             "/chamber-and-committees/votes-and-divisions/",
+            "/chamber-and-committees/votes/",
+            "/chamber-and-committees/divisions/",
+            "/chamber-and-committees/how-parliament-works/votes-and-divisions",
+            "/chamber-and-committees/how-parliament-works/votes-and-divisions/",
             "/the-work-of-the-parliament/votes-and-divisions",
             "/parliamentarybusiness/voting/",
             "/msps/voting-behaviour",
+            "/msps/votes/",
         ]:
             url = f"{_WEB}{path}"
             soup = self._html_get(url)
