@@ -2,13 +2,18 @@ import time
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
+from urllib.parse import urlparse
 
 import requests
 
 from config import REQUEST_TIMEOUT, MAX_RETRIES, RETRY_BACKOFF_BASE, RATE_LIMIT_DELAY
 
 logger = logging.getLogger(__name__)
+
+# After this many consecutive failures from the same host, sleep before retrying
+_CONSECUTIVE_FAIL_THRESHOLD = 5
+_CONSECUTIVE_FAIL_SLEEP = 30  # seconds
 
 
 class BaseScraper(ABC):
@@ -20,6 +25,8 @@ class BaseScraper(ABC):
             "User-Agent": "GlasshouseDataPuller/1.0 (Parliamentary Sentiment Analysis Research)",
         })
         self._last_request_time = 0.0
+        # Track consecutive failures per hostname to avoid hammering rate-limited servers
+        self._consecutive_host_failures: Dict[str, int] = {}
 
     def _rate_limit(self):
         elapsed = time.time() - self._last_request_time
@@ -27,15 +34,29 @@ class BaseScraper(ABC):
             time.sleep(RATE_LIMIT_DELAY - elapsed)
         self._last_request_time = time.time()
 
-    def _get(self, url: str, params: Optional[Dict] = None, accept: Optional[str] = None) -> Optional[requests.Response]:
+    def _get(self, url: str, params: Optional[Dict] = None, accept: Optional[str] = None,
+             timeout: Optional[int] = None) -> Optional[requests.Response]:
         self._rate_limit()
         headers = {}
         if accept:
             headers["Accept"] = accept
+        effective_timeout = timeout if timeout is not None else REQUEST_TIMEOUT
+
+        host = urlparse(url).netloc or url
+        consec = self._consecutive_host_failures.get(host, 0)
+        if consec >= _CONSECUTIVE_FAIL_THRESHOLD:
+            logger.warning(
+                f"[{self.parliament_name}] {host} has failed {consec}× consecutively — "
+                f"sleeping {_CONSECUTIVE_FAIL_SLEEP}s before retrying"
+            )
+            time.sleep(_CONSECUTIVE_FAIL_SLEEP)
+            self._consecutive_host_failures[host] = 0
+
         for attempt in range(MAX_RETRIES):
             try:
-                resp = self.session.get(url, params=params, timeout=REQUEST_TIMEOUT, headers=headers)
+                resp = self.session.get(url, params=params, timeout=effective_timeout, headers=headers)
                 resp.raise_for_status()
+                self._consecutive_host_failures[host] = 0
                 return resp
             except requests.exceptions.HTTPError:
                 code = resp.status_code
@@ -51,6 +72,7 @@ class BaseScraper(ABC):
                 logger.warning(f"Request error (attempt {attempt + 1}/{MAX_RETRIES}): {e}. Retry in {wait}s.")
                 time.sleep(wait)
         logger.error(f"All {MAX_RETRIES} attempts failed for {url}")
+        self._consecutive_host_failures[host] = consec + 1
         return None
 
     def _paginate(self, url: str, params: Dict, page_size: int = 100,

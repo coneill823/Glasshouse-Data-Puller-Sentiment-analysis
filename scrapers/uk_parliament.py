@@ -128,7 +128,7 @@ class UKParliamentScraper(BaseScraper):
             params["skip"] = skip
             if skip % 1000 == 0 and skip > 0:
                 logger.info(f"[UK Parliament] Questions: fetched {len(records)} so far (page {skip // 100})...")
-            resp = self._get(url, params=params)
+            resp = self._get(url, params=params, timeout=90)
             if not resp:
                 break
             data = resp.json()
@@ -195,7 +195,7 @@ class UKParliamentScraper(BaseScraper):
                 params["skip"] = skip
                 if skip % 1000 == 0 and skip > 0:
                     logger.info(f"[UK Parliament] Plenary: fetched {len(records)} so far from {url}...")
-                resp = self._get(url, params=params)
+                resp = self._get(url, params=params, timeout=90)
                 if not resp:
                     break
                 data = resp.json()
@@ -294,7 +294,7 @@ class UKParliamentScraper(BaseScraper):
             result = "passed" if ayes > noes else "failed"
 
             detail_url = f"{_VOTES}/division/{div_id}.json"
-            detail_resp = self._get(detail_url)
+            detail_resp = self._get(detail_url, timeout=60)
             if not detail_resp:
                 continue
             detail = detail_resp.json()

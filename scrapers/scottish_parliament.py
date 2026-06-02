@@ -7,6 +7,7 @@ and votes are scraped from https://www.parliament.scot with a browser User-Agent
 """
 import logging
 import re
+from datetime import date, timedelta
 from typing import Dict, List, Optional
 
 from bs4 import BeautifulSoup
@@ -185,9 +186,10 @@ class ScottishParliamentScraper(BaseScraper):
             if not resp_soup:
                 logger.warning(f"[Scottish Parliament] Could not load interests page: {candidate}")
                 continue
-            # Check that this page actually has interest-related content, not a generic MSP page
+            # Check that this page actually has interest-related content, not a generic MSP page.
+            # "category" is intentionally excluded — it appears in generic nav menus.
             text_lower = resp_soup.get_text(separator=" ", strip=True).lower()
-            if any(kw in text_lower for kw in ("register of interests", "registered interest", "financial interest", "category")):
+            if any(kw in text_lower for kw in ("register of interests", "registered interest", "financial interest", "shareholding", "heritable property", "nature of interest")):
                 soup = resp_soup
                 url = candidate
                 logger.info(f"[Scottish Parliament] Loaded interests page with content: {candidate}")
@@ -328,10 +330,109 @@ class ScottishParliamentScraper(BaseScraper):
     # Plenary business — Official Report from parliament.scot
     # ------------------------------------------------------------------
 
+    def _recent_sitting_dates(self, n: int = 60) -> List[str]:
+        """Return the last n weekdays as YYYY-MM-DD strings (parliament doesn't sit weekends)."""
+        today = date.today()
+        days = []
+        d = today
+        while len(days) < n:
+            if d.weekday() < 5:  # Mon–Fri
+                days.append(d.strftime("%Y-%m-%d"))
+            d -= timedelta(days=1)
+        return days
+
+    def _scrape_or_detail(self, full_url: str, date_str: str,
+                          records: List[Dict], from_date: Optional[str]) -> int:
+        """Scrape a single Official Report page and append any speeches to records.
+        Returns the number of records added."""
+        if from_date and date_str and date_str[:10] < from_date:
+            return 0
+        detail = self._html_get(full_url)
+        if not detail:
+            return 0
+        if not date_str:
+            date_el = detail.select_one("time[datetime], time, .date, h1")
+            date_str = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
+        if not records:
+            all_cls = sorted({c for el in detail.select("[class]") for c in el.get("class", [])})
+            logger.info(f"[Scottish Parliament] OR page CSS classes: {all_cls[:40]}")
+        before = len(records)
+        for contrib in detail.select(
+            ".contribution, .speech, [class*='contribution'], [class*='speech'], "
+            ".or-row, .or-report-row, .member-speech, .chamber-row, "
+            ".qna-item, .member-contribution, tr, article, .content-row"
+        ):
+            speaker_el = contrib.select_one(
+                ".speaker, .msp-name, strong, b, td:first-child, "
+                "[class*='speaker'], [class*='member-name'], .or-member"
+            )
+            text_el = contrib.select_one(".text, p, td:last-child, [class*='text'], [class*='body']")
+            text = text_el.get_text(strip=True) if text_el else contrib.get_text(strip=True)
+            if len(text) < 10:
+                continue
+            records.append(self._make_record(
+                data_type="plenary_speech",
+                member={
+                    "id": "", "name": speaker_el.get_text(strip=True) if speaker_el else "",
+                    "party": "", "constituency": "", "role": "MSP",
+                },
+                date=date_str,
+                text=text,
+                title="",
+                source_url=full_url,
+            ))
+        added = len(records) - before
+        if added == 0:
+            body = detail.find("body")
+            snippet = body.get_text(separator=" ", strip=True)[:300] if body else ""
+            logger.warning(f"[Scottish Parliament] 0 contribs at {full_url} — snippet: {snippet[:200]}")
+        return added
+
     def fetch_plenary_business(self, from_date: Optional[str] = None) -> List[Dict]:
-        records = []
-        # Known sub-nav pages under /official-report/ — following these yields 0 speeches.
-        # The link regex previously matched /official-report/ broadly and caught these.
+        records: List[Dict] = []
+
+        # ----------------------------------------------------------------
+        # 1. Try RSS feed — the Scottish Parliament exposes one for the OR.
+        #    Each <item> has a <link> pointing to a session transcript.
+        # ----------------------------------------------------------------
+        rss_candidates = [
+            f"{_WEB}/rss/official-report",
+            f"{_WEB}/rss/official-report/chamber",
+            f"{_WEB}/feed/official-report",
+            f"{_WEB}/rss",
+        ]
+        rss_links: List[str] = []
+        for rss_url in rss_candidates:
+            rss_resp = self._html_get(rss_url)
+            if not rss_resp:
+                continue
+            items = rss_resp.find_all("item")
+            if not items:
+                logger.warning(f"[Scottish Parliament] RSS {rss_url}: 0 <item> elements")
+                continue
+            for item in items:
+                link_el = item.find("link")
+                href = link_el.get_text(strip=True) if link_el else ""
+                if href and "official-report" in href:
+                    rss_links.append(href)
+            if rss_links:
+                logger.info(f"[Scottish Parliament] RSS {rss_url}: {len(rss_links)} OR links")
+                break
+
+        for href in rss_links[:30]:
+            # Extract date hint from URL if present
+            m = re.search(r"(\d{4}-\d{2}-\d{2})", href)
+            date_hint = m.group(1) if m else ""
+            self._scrape_or_detail(href, date_hint, records, from_date)
+        if records:
+            logger.info(f"[Scottish Parliament] {len(records)} plenary records fetched (via RSS)")
+            return records
+
+        # ----------------------------------------------------------------
+        # 2. Try the generic OR index pages and follow any date/session links.
+        #    parliament.scot redesign renders most of these pages as SPAs, so
+        #    this usually yields nothing — but try anyway in case they flip SSR.
+        # ----------------------------------------------------------------
         _SKIP_SUBNAV = {
             "search-what-was-said-in-parliament",
             "about-the-official-report",
@@ -341,74 +442,63 @@ class ScottishParliamentScraper(BaseScraper):
         for path in [
             "/chamber-and-committees/official-report/what-was-said-in-parliament",
             "/chamber-and-committees/official-report",
-            "/chamber-and-committees/official-report/alphabetical-list-of-debates",
-            "/chamber-and-committees/official-report/search-what-was-said-in-parliament",
+            "/chamber-and-committees/chamber-debates",
+            "/chamber-and-committees/plenary",
         ]:
             url = f"{_WEB}{path}"
             soup = self._html_get(url)
             if not soup:
                 continue
-
-            # Only follow links that look like actual session transcript pages:
-            # date-based paths (YYYY-MM-DD) or /or-NNN short-report IDs.
-            # Exclude the known sub-nav pages that return nav-only HTML.
             all_hrefs = [a["href"] for a in soup.select("a[href]")
                          if a.get("href", "").startswith(("/", "http"))]
             links = [h for h in all_hrefs
                      if re.search(r"\d{4}-\d{2}-\d{2}|/or-\d", h, re.I)
                      and not any(s in h for s in _SKIP_SUBNAV)]
-
             if not links:
-                body = soup.find("body")
-                snippet = body.get_text(separator=" ", strip=True)[:500] if body else ""
-                logger.warning(f"[Scottish Parliament] No Official Report links at {url} — sample hrefs: {all_hrefs[:10]} — snippet: {snippet}")
+                logger.warning(
+                    f"[Scottish Parliament] No OR links at {url} — "
+                    f"sample hrefs: {all_hrefs[:10]}"
+                )
                 continue
-
-            logger.info(f"[Scottish Parliament] Found {len(links)} Official Report links")
+            logger.info(f"[Scottish Parliament] Found {len(links)} OR links at {url}")
             for href in links[:50]:
                 full_url = href if href.startswith("http") else f"{_WEB}{href}"
-                detail = self._html_get(full_url)
-                if not detail:
-                    continue
-                date_el = detail.select_one("time[datetime], time, .date, h1")
-                date_str = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
-                if from_date and date_str and date_str[:10] < from_date:
-                    continue
-                # Log CSS classes on first page so we can tune selectors from the run log
-                if not records:
-                    all_cls = sorted({c for el in detail.select("[class]") for c in el.get("class", [])})
-                    logger.info(f"[Scottish Parliament] Official Report page CSS classes: {all_cls[:40]}")
-                item_count_before = len(records)
-                for contrib in detail.select(
-                    ".contribution, .speech, [class*='contribution'], [class*='speech'], "
-                    ".or-row, .or-report-row, .member-speech, .chamber-row, "
-                    ".qna-item, .member-contribution, tr, article, .content-row"
-                ):
-                    speaker_el = contrib.select_one(
-                        ".speaker, .msp-name, strong, b, td:first-child, "
-                        "[class*='speaker'], [class*='member-name'], .or-member"
-                    )
-                    text_el = contrib.select_one(".text, p, td:last-child, [class*='text'], [class*='body']")
-                    text = text_el.get_text(strip=True) if text_el else contrib.get_text(strip=True)
-                    if len(text) < 10:
-                        continue
-                    records.append(self._make_record(
-                        data_type="plenary_speech",
-                        member={
-                            "id": "", "name": speaker_el.get_text(strip=True) if speaker_el else "",
-                            "party": "", "constituency": "", "role": "MSP",
-                        },
-                        date=date_str,
-                        text=text,
-                        title="",
-                        source_url=full_url,
-                    ))
-                if len(records) == item_count_before:
-                    body = detail.find("body")
-                    snippet = body.get_text(separator=" ", strip=True)[:400] if body else ""
-                    logger.warning(f"[Scottish Parliament] 0 contribs at {full_url} — snippet: {snippet}")
+                m = re.search(r"(\d{4}-\d{2}-\d{2})", href)
+                date_hint = m.group(1) if m else ""
+                self._scrape_or_detail(full_url, date_hint, records, from_date)
             if records:
                 break
+
+        if records:
+            logger.info(f"[Scottish Parliament] {len(records)} plenary records fetched (via index pages)")
+            return records
+
+        # ----------------------------------------------------------------
+        # 3. Direct date-based URL construction for recent sitting days.
+        #    The Official Report URL pattern is:
+        #      /chamber-and-committees/official-report/what-was-said-in-parliament/
+        #      official-report-{day}-{month-name}-{year}
+        #    e.g. official-report-4-june-2026
+        #    Try the last ~60 weekdays (parliament sits most Tue–Thu in term).
+        # ----------------------------------------------------------------
+        month_names = ["january", "february", "march", "april", "may", "june",
+                       "july", "august", "september", "october", "november", "december"]
+        tried = 0
+        hit = 0
+        for iso_date in self._recent_sitting_dates(60):
+            y, mo, d = iso_date.split("-")
+            slug = f"official-report-{int(d)}-{month_names[int(mo) - 1]}-{y}"
+            url = (f"{_WEB}/chamber-and-committees/official-report/"
+                   f"what-was-said-in-parliament/{slug}")
+            added = self._scrape_or_detail(url, iso_date, records, from_date)
+            tried += 1
+            if added > 0:
+                hit += 1
+        if tried:
+            logger.info(
+                f"[Scottish Parliament] Date-URL probe: {tried} dates tried, "
+                f"{hit} had content, {len(records)} total records"
+            )
 
         logger.info(f"[Scottish Parliament] {len(records)} plenary records fetched")
         return records
