@@ -330,23 +330,38 @@ class ScottishParliamentScraper(BaseScraper):
 
     def fetch_plenary_business(self, from_date: Optional[str] = None) -> List[Dict]:
         records = []
+        # Known sub-nav pages under /official-report/ — following these yields 0 speeches.
+        # The link regex previously matched /official-report/ broadly and caught these.
+        _SKIP_SUBNAV = {
+            "search-what-was-said-in-parliament",
+            "about-the-official-report",
+            "alphabetical-list-of-debates",
+            "corrections-and-changes-to-the-official-report",
+        }
         for path in [
             "/chamber-and-committees/official-report/what-was-said-in-parliament",
             "/chamber-and-committees/official-report",
+            "/chamber-and-committees/official-report/alphabetical-list-of-debates",
+            "/chamber-and-committees/official-report/search-what-was-said-in-parliament",
         ]:
             url = f"{_WEB}{path}"
             soup = self._html_get(url)
             if not soup:
                 continue
 
-            links = [a["href"] for a in soup.select("a[href]")
-                     if a.get("href", "").startswith(("/", "http"))
-                     and re.search(r"\d{4}-\d{2}-\d{2}|/official-report/|/or-\d", a.get("href", ""), re.I)]
+            # Only follow links that look like actual session transcript pages:
+            # date-based paths (YYYY-MM-DD) or /or-NNN short-report IDs.
+            # Exclude the known sub-nav pages that return nav-only HTML.
+            all_hrefs = [a["href"] for a in soup.select("a[href]")
+                         if a.get("href", "").startswith(("/", "http"))]
+            links = [h for h in all_hrefs
+                     if re.search(r"\d{4}-\d{2}-\d{2}|/or-\d", h, re.I)
+                     and not any(s in h for s in _SKIP_SUBNAV)]
 
             if not links:
                 body = soup.find("body")
                 snippet = body.get_text(separator=" ", strip=True)[:500] if body else ""
-                logger.warning(f"[Scottish Parliament] No Official Report links at {url} — snippet: {snippet}")
+                logger.warning(f"[Scottish Parliament] No Official Report links at {url} — sample hrefs: {all_hrefs[:10]} — snippet: {snippet}")
                 continue
 
             logger.info(f"[Scottish Parliament] Found {len(links)} Official Report links")

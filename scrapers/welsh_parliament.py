@@ -628,7 +628,8 @@ class WelshParliamentScraper(BaseScraper):
                     if found:
                         session_links = list(dict.fromkeys(found))
                         logger.info(f"[Welsh Parliament] Plenary: {len(session_links)} session links from sub-pages of {url}")
-                        break
+                        # Do NOT break here — keep checking remaining _SENEDD_PLENARY_PATHS
+                        # in case other sub-pages add more session links.
 
         if not session_links:
             logger.warning("[Welsh Parliament] No plenary session links found — all paths exhausted")
