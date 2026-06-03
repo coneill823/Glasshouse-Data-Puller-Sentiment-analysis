@@ -186,10 +186,17 @@ class ScottishParliamentScraper(BaseScraper):
             if not resp_soup:
                 logger.warning(f"[Scottish Parliament] Could not load interests page: {candidate}")
                 continue
-            # Check that this page actually has interest-related content, not a generic MSP page.
-            # "category" is intentionally excluded — it appears in generic nav menus.
-            text_lower = resp_soup.get_text(separator=" ", strip=True).lower()
-            if any(kw in text_lower for kw in ("register of interests", "registered interest", "financial interest", "shareholding", "heritable property", "nature of interest")):
+            # Check the MAIN CONTENT area only — the site nav always contains
+            # "About the Register of Interests" which would cause a false-positive match.
+            main_el = (resp_soup.find("main")
+                       or resp_soup.find("div", class_=re.compile(r"\bmain\b|\bcontent\b", re.I))
+                       or resp_soup.find("body"))
+            text_lower = main_el.get_text(separator=" ", strip=True).lower() if main_el else ""
+            # Strip the nav — parliament.scot puts <nav> inside <main>
+            for nav in (main_el.find_all("nav") if main_el else []):
+                nav_text = nav.get_text(separator=" ", strip=True).lower()
+                text_lower = text_lower.replace(nav_text, "")
+            if any(kw in text_lower for kw in ("registered interest", "financial interest", "shareholding", "heritable property", "nature of interest", "category of interest")):
                 soup = resp_soup
                 url = candidate
                 logger.info(f"[Scottish Parliament] Loaded interests page with content: {candidate}")
@@ -353,9 +360,11 @@ class ScottishParliamentScraper(BaseScraper):
         if not date_str:
             date_el = detail.select_one("time[datetime], time, .date, h1")
             date_str = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
-        if not records:
+        # Log CSS classes only once (first page) to diagnose selector gaps without flooding the log
+        if not hasattr(self, "_or_css_logged"):
             all_cls = sorted({c for el in detail.select("[class]") for c in el.get("class", [])})
-            logger.info(f"[Scottish Parliament] OR page CSS classes: {all_cls[:40]}")
+            logger.info(f"[Scottish Parliament] OR page CSS classes (first hit): {all_cls[:40]}")
+            self._or_css_logged = True
         before = len(records)
         for contrib in detail.select(
             ".contribution, .speech, [class*='contribution'], [class*='speech'], "

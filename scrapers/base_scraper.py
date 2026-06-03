@@ -11,8 +11,10 @@ from config import REQUEST_TIMEOUT, MAX_RETRIES, RETRY_BACKOFF_BASE, RATE_LIMIT_
 
 logger = logging.getLogger(__name__)
 
-# After this many consecutive failures from the same host, sleep before retrying
-_CONSECUTIVE_FAIL_THRESHOLD = 5
+# After this many consecutive failures from the same host, sleep before retrying.
+# Set high enough that it only fires for genuinely persistent outages (not transient blips
+# or expected rate-limiting runs like NI Assembly ~report 450).
+_CONSECUTIVE_FAIL_THRESHOLD = 20
 _CONSECUTIVE_FAIL_SLEEP = 30  # seconds
 
 
@@ -72,7 +74,8 @@ class BaseScraper(ABC):
                 logger.warning(f"Request error (attempt {attempt + 1}/{MAX_RETRIES}): {e}. Retry in {wait}s.")
                 time.sleep(wait)
         logger.error(f"All {MAX_RETRIES} attempts failed for {url}")
-        self._consecutive_host_failures[host] = consec + 1
+        # Use current dict value, not stale `consec` — the sleep above may have reset it to 0
+        self._consecutive_host_failures[host] = self._consecutive_host_failures.get(host, 0) + 1
         return None
 
     def _paginate(self, url: str, params: Dict, page_size: int = 100,
