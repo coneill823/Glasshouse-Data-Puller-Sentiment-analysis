@@ -8,6 +8,7 @@ APIs used:
   Hansard (debates): https://hansard.parliament.uk/api
 """
 import logging
+from datetime import date as _date
 from typing import Dict, List, Optional
 
 from .base_scraper import BaseScraper
@@ -116,58 +117,88 @@ class UKParliamentScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def fetch_questions(self, from_date: Optional[str] = None) -> List[Dict]:
-        # New endpoint: questions-statements-api.parliament.uk
+        # questions-statements-api hard-caps at page 200 (offset 20,000) with HTTP 500.
+        # Chunk by year so each chunk's offset pagination stays well below that limit.
         url = f"{_QUESTIONS}/writtenquestions/questions"
-        params: Dict = {"house": "Commons", "take": 100, "skip": 0}
+        today = _date.today().isoformat()
+
         if from_date:
-            params["tabledWhenFrom"] = from_date
+            # Incremental pull — single range, unlikely to exceed the per-chunk cap
+            chunks = [(from_date, today)]
+        else:
+            # Full pull — year-by-year from 2015 to present
+            start_year = 2015
+            current_year = _date.today().year
+            chunks = []
+            for year in range(start_year, current_year + 1):
+                year_start = f"{year}-01-01"
+                year_end = f"{year}-12-31" if year < current_year else today
+                chunks.append((year_start, year_end))
 
         records = []
-        skip = 0
-        while True:
-            params["skip"] = skip
-            if skip % 1000 == 0 and skip > 0:
-                logger.info(f"[UK Parliament] Questions: fetched {len(records)} so far (page {skip // 100})...")
-            resp = self._get(url, params=params, timeout=90)
-            if not resp:
-                break
-            data = resp.json()
-            # Response shape: {"results": [...]} or {"questions": [...]}
-            items = data.get("results", data.get("questions", []))
-            if not items:
-                break
-            for item in items:
-                v = item.get("value", item)
-                q_text = v.get("questionText", v.get("text", ""))
-                answer = v.get("answerText", v.get("answer", ""))
-                combined = f"Question: {q_text}\n\nAnswer: {answer}" if answer else q_text
-                records.append(self._make_record(
-                    data_type="question",
-                    member={
-                        "id": str(v.get("askingMemberId", v.get("memberId", ""))),
-                        "name": v.get("askingMember", {}).get("name", "") if isinstance(v.get("askingMember"), dict) else v.get("memberName", ""),
-                        "party": v.get("askingMember", {}).get("party", "") if isinstance(v.get("askingMember"), dict) else "",
-                        "constituency": v.get("askingMember", {}).get("memberFrom", "") if isinstance(v.get("askingMember"), dict) else "",
-                        "role": "MP",
-                    },
-                    date=v.get("tabledWhen", v.get("dateTabled", "")),
-                    text=combined,
-                    title=v.get("heading", v.get("subject", "")),
-                    metadata={
-                        "question_id": str(v.get("id", "")),
-                        "question_type": "written",
-                        "answering_body": v.get("answeringBodyName", ""),
-                        "answering_member": v.get("answeringMember", {}).get("name", "") if isinstance(v.get("answeringMember"), dict) else "",
-                        "answer_date": v.get("dateAnswered", ""),
-                        "is_withdrawn": v.get("isWithdrawn", False),
-                        "answer_text": answer,
-                    },
-                    source_url=url,
-                ))
-            if len(items) < 100:
-                break
-            skip += 100
-        logger.info(f"[UK Parliament] {len(records)} question records fetched")
+        seen_ids: set = set()
+        for chunk_start, chunk_end in chunks:
+            logger.info(f"[UK Parliament] Questions: fetching {chunk_start} → {chunk_end}")
+            params: Dict = {
+                "house": "Commons",
+                "take": 100,
+                "skip": 0,
+                "tabledWhenFrom": chunk_start,
+                "tabledWhenTo": chunk_end,
+            }
+            chunk_count = 0
+            skip = 0
+            while True:
+                params["skip"] = skip
+                if skip % 1000 == 0 and skip > 0:
+                    logger.info(f"[UK Parliament] Questions {chunk_start}: {chunk_count} so far (skip {skip})...")
+                resp = self._get(url, params=params, timeout=90)
+                if not resp:
+                    break
+                data = resp.json()
+                # Response shape: {"results": [...]} or {"questions": [...]}
+                items = data.get("results", data.get("questions", []))
+                if not items:
+                    break
+                for item in items:
+                    v = item.get("value", item)
+                    q_id = str(v.get("id", ""))
+                    if q_id and q_id in seen_ids:
+                        continue
+                    if q_id:
+                        seen_ids.add(q_id)
+                    q_text = v.get("questionText", v.get("text", ""))
+                    answer = v.get("answerText", v.get("answer", ""))
+                    combined = f"Question: {q_text}\n\nAnswer: {answer}" if answer else q_text
+                    records.append(self._make_record(
+                        data_type="question",
+                        member={
+                            "id": str(v.get("askingMemberId", v.get("memberId", ""))),
+                            "name": v.get("askingMember", {}).get("name", "") if isinstance(v.get("askingMember"), dict) else v.get("memberName", ""),
+                            "party": v.get("askingMember", {}).get("party", "") if isinstance(v.get("askingMember"), dict) else "",
+                            "constituency": v.get("askingMember", {}).get("memberFrom", "") if isinstance(v.get("askingMember"), dict) else "",
+                            "role": "MP",
+                        },
+                        date=v.get("tabledWhen", v.get("dateTabled", "")),
+                        text=combined,
+                        title=v.get("heading", v.get("subject", "")),
+                        metadata={
+                            "question_id": q_id,
+                            "question_type": "written",
+                            "answering_body": v.get("answeringBodyName", ""),
+                            "answering_member": v.get("answeringMember", {}).get("name", "") if isinstance(v.get("answeringMember"), dict) else "",
+                            "answer_date": v.get("dateAnswered", ""),
+                            "is_withdrawn": v.get("isWithdrawn", False),
+                            "answer_text": answer,
+                        },
+                        source_url=url,
+                    ))
+                    chunk_count += 1
+                if len(items) < 100:
+                    break
+                skip += 100
+            logger.info(f"[UK Parliament] Questions {chunk_start}–{chunk_end}: {chunk_count} records")
+        logger.info(f"[UK Parliament] {len(records)} question records fetched total")
         return records
 
     # ------------------------------------------------------------------
