@@ -506,8 +506,12 @@ def _wales_votes_sample(s: WelshParliamentScraper) -> Tuple[List[Dict], str]:
         if not link_el:
             continue
         title  = (row.select_one("td:first-child, .title, h2, h3") or link_el).get_text(strip=True)
-        date_el = row.select_one("td:nth-child(2), time, .date, [class*='date']")
+        date_el = row.select_one("td:nth-child(2), time, .date, [class*='date'], li:nth-child(2), span[class*='date']")
         div_date = date_el.get_text(strip=True) if date_el else ""
+        if not div_date:
+            row_text = row.get_text(separator=" ", strip=True)
+            dm = re.search(r"\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{1,2}\s+\w+\s+\d{4}", row_text)
+            div_date = dm.group(0) if dm else ""
         href = link_el["href"]
         if not href or not (href.startswith("/") or href.startswith("http")):
             continue

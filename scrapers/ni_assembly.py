@@ -381,23 +381,21 @@ class NIAssemblyScraper(BaseScraper):
                     records.append(self._make_record(
                         data_type="question",
                         member={
-                            "id": str(q.get("PersonId", q.get("MemberId", ""))),
-                            "name": (q.get("MemberName") or q.get("Member")
-                                     or q.get("AskingMemberName") or q.get("TabledByMember")
-                                     or q.get("MemberDisplayName") or ""),
-                            "party": q.get("PartyName", q.get("Party", "")),
-                            "constituency": q.get("ConstituencyName", q.get("Constituency", "")),
+                            "id": str(q.get("TablerPersonId") or q.get("PersonId") or q.get("MemberId") or ""),
+                            "name": (q.get("TablerName") or q.get("MemberName") or q.get("Member") or ""),
+                            "party": q.get("PartyName") or q.get("Party") or "",
+                            "constituency": q.get("ConstituencyName") or q.get("Constituency") or "",
                             "role": "MLA",
                         },
-                        date=q.get("TabledDate", q.get("RaisedDate", q.get("Date", ""))),
+                        date=q.get("TabledDate") or q.get("RaisedDate") or q.get("Date") or "",
                         text=combined,
-                        title=q.get("SubjectTitle", q.get("Subject", q.get("Title", ""))),
+                        title=q.get("Reference") or q.get("SubjectTitle") or q.get("Subject") or q.get("Title") or "",
                         metadata={
-                            "question_id": str(q.get("QuestionId", q.get("Id", ""))),
+                            "question_id": str(q.get("DocumentId") or q.get("QuestionId") or q.get("Id") or ""),
                             "question_type": q_type,
-                            "minister": q.get("MinisterName", q.get("AnsweredBy", "")),
-                            "department": q.get("DepartmentName", q.get("Department", "")),
-                            "status": q.get("Status", ""),
+                            "minister": q.get("MinisterTitle") or q.get("MinisterName") or q.get("AnsweredBy") or "",
+                            "department": q.get("Department") or q.get("DepartmentName") or "",
+                            "status": q.get("Status") or "",
                             "answer_text": answer,
                         },
                         source_url=f"{_BASE}/questions.asmx/{method}",
@@ -716,37 +714,66 @@ class NIAssemblyScraper(BaseScraper):
             vote_items = _first_list(data)
             if vote_items and not records:
                 logger.warning(f"[NI Assembly] Vote sample fields: {list(vote_items[0].keys())} | sample={dict(list(vote_items[0].items())[:6])!r:.300}")
-            for vote in vote_items:
-                direction_raw = str(vote.get("VoteType", vote.get("Vote", vote.get("Type", "")))).lower()
-                if direction_raw in ("aye", "yes", "for", "1"):
-                    direction = "aye"
-                elif direction_raw in ("no", "noe", "against", "2"):
-                    direction = "no"
+            for division in vote_items:
+                div_id = str(division.get("EventID") or division.get("DocumentID") or division.get("DivisionId") or "")
+                div_title = division.get("DivisionSubject") or division.get("MotionText") or division.get("DivisionTitle") or ""
+                div_date = division.get("DivisionDate") or division.get("Date") or ""
+                div_result = division.get("DivisionResult") or division.get("Result") or ""
+                div_type = division.get("DivisonType") or division.get("DivisionType") or ""
+
+                member_votes = division.get("MemberVoting") or []
+                if isinstance(member_votes, dict):
+                    # Unwrap single-item dict (e.g. {"MemberVote": [...]})
+                    member_votes = next(iter(member_votes.values()), []) if member_votes else []
+                if not isinstance(member_votes, list):
+                    member_votes = []
+
+                if member_votes and not hasattr(self, "_vote_member_fields_logged"):
+                    self._vote_member_fields_logged = True
+                    sample_mv = member_votes[0] if member_votes else {}
+                    logger.warning(f"[NI Assembly] MemberVoting[0]: type={type(sample_mv).__name__} | {sample_mv!r:.300}")
+
+                if not member_votes:
+                    records.append(self._make_record(
+                        data_type="vote",
+                        member={"id": "", "name": "", "party": "", "constituency": "", "role": "MLA"},
+                        date=div_date,
+                        text=f"Division: {div_title}",
+                        title=div_title,
+                        metadata={"division_id": div_id, "division_result": div_result, "division_type": div_type},
+                        source_url=f"{_BASE}/plenary.asmx",
+                    ))
                 else:
-                    direction = direction_raw or "abstain"
-                div_title = vote.get("MotionText", vote.get("DivisionTitle", vote.get("Title", "")))
-                records.append(self._make_record(
-                    data_type="vote",
-                    member={
-                        "id": str(vote.get("PersonId", vote.get("MemberId", ""))),
-                        "name": (vote.get("MemberName") or vote.get("Name")
-                                 or vote.get("VoterName") or vote.get("MemberDisplayName") or ""),
-                        "party": vote.get("PartyName", vote.get("Party", "")),
-                        "constituency": vote.get("ConstituencyName", vote.get("Constituency", "")),
-                        "role": "MLA",
-                    },
-                    date=vote.get("DivisionDate", vote.get("Date", "")),
-                    text=f"Voted {direction} on: {div_title}",
-                    title=div_title,
-                    metadata={
-                        "division_id": str(vote.get("DivisionId", vote.get("Id", ""))),
-                        "vote_direction": direction,
-                        "division_result": vote.get("Result", ""),
-                        "ayes": vote.get("AyeCount", vote.get("Ayes", "")),
-                        "noes": vote.get("NoeCount", vote.get("Noes", "")),
-                    },
-                    source_url=f"{_BASE}/plenary.asmx",
-                ))
+                    for mv in member_votes:
+                        if not isinstance(mv, dict):
+                            continue
+                        mv_dir = str(mv.get("VoteType") or mv.get("Vote") or mv.get("Decision") or mv.get("VotedFor") or "").lower()
+                        if mv_dir in ("aye", "yes", "for", "1", "true"):
+                            direction = "aye"
+                        elif mv_dir in ("no", "noe", "noes", "against", "2", "false"):
+                            direction = "no"
+                        else:
+                            direction = mv_dir or "unknown"
+                        records.append(self._make_record(
+                            data_type="vote",
+                            member={
+                                "id": str(mv.get("PersonId") or mv.get("MemberId") or mv.get("MemberID") or ""),
+                                "name": mv.get("MemberName") or mv.get("Name") or mv.get("DisplayName") or "",
+                                "party": mv.get("PartyName") or mv.get("Party") or "",
+                                "constituency": mv.get("ConstituencyName") or mv.get("Constituency") or "",
+                                "role": "MLA",
+                            },
+                            date=div_date,
+                            text=f"Voted {direction} on: {div_title}",
+                            title=div_title,
+                            metadata={
+                                "division_id": div_id,
+                                "vote_direction": direction,
+                                "division_result": div_result,
+                                "division_type": div_type,
+                            },
+                            source_url=f"{_BASE}/plenary.asmx",
+                        ))
         return records
 
     def _fetch_votes_aims(self, from_date: Optional[str] = None) -> List[Dict]:

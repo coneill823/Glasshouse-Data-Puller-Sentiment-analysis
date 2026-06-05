@@ -185,37 +185,77 @@ class WelshParliamentScraper(BaseScraper):
 
         members = []
 
-        # senedd.wales uses WordPress with various card/block patterns.
-        # Try progressively broader selectors.
+        # Primary approach: find member profile links and scrape each profile.
+        # senedd.wales profile URLs match /find-a-member-of-the-senedd/{slug}/
+        profile_links = list(dict.fromkeys(
+            (a["href"] if a["href"].startswith("http") else f"{_BASE}{a['href']}")
+            for a in soup.select("a[href]")
+            if re.search(r"/find-a-member-of-the-senedd/[a-z][a-z0-9-]+/?$",
+                         a.get("href", ""), re.I)
+        ))
+        logger.warning(f"[Welsh Parliament] Member profile links found: {len(profile_links)} — e.g. {profile_links[:3]}")
+
+        if profile_links:
+            for profile_url in profile_links[:80]:
+                profile_soup = self._html_get(profile_url)
+                if not profile_soup:
+                    continue
+                name_el = profile_soup.select_one("h1, .page-title, [class*='member-name']")
+                name = name_el.get_text(strip=True) if name_el else ""
+                if not name or len(name) < 3:
+                    # Fallback: use slug as display name
+                    slug_m = re.search(r"/find-a-member-of-the-senedd/([a-z0-9-]+)/?$", profile_url, re.I)
+                    name = slug_m.group(1).replace("-", " ").title() if slug_m else ""
+                party_el = (
+                    profile_soup.select_one("[class*='party'], [class*='Party']")
+                    or profile_soup.select_one("[class*='group'], [class*='Group']")
+                    or profile_soup.select_one(".tag, .badge, [class*='tag'], [class*='badge']")
+                    or profile_soup.select_one("span.wp-block-post-terms, .wp-block-post-terms")
+                )
+                party = party_el.get_text(strip=True) if party_el else ""
+                const_el = profile_soup.select_one(
+                    "[class*='constituency'], [class*='region'], [class*='Constituency'], [class*='Region']"
+                )
+                constituency = const_el.get_text(strip=True) if const_el else ""
+                slug = re.search(r"/find-a-member-of-the-senedd/([a-z0-9-]+)/?$", profile_url, re.I)
+                member_id = slug.group(1) if slug else ""
+                if not hasattr(self, "_ms_profile_logged"):
+                    self._ms_profile_logged = True
+                    logger.warning(
+                        f"[Welsh Parliament] First MS profile: name={name!r} party={party!r} "
+                        f"const={constituency!r} id={member_id!r}"
+                    )
+                members.append({
+                    "id": member_id,
+                    "name": name,
+                    "party": party,
+                    "constituency": constituency,
+                    "role": "MS",
+                    "status": "current",
+                })
+            if members:
+                logger.info(f"[Welsh Parliament] {len(members)} MSs scraped via profile pages")
+                return members
+
+        # Fallback: card-based extraction from the listing page
         card_selectors = [
-            "article.member-card",
-            "article.senedd-member",
-            ".member-card",
-            ".ms-card",
-            "[class*='member-card']",
-            "[class*='memberCard']",
-            "article.wp-block-post",
-            "li.wp-block-post",
-            "article",
+            "article.member-card", "article.senedd-member", ".member-card", ".ms-card",
+            "[class*='member-card']", "[class*='memberCard']",
+            "article.wp-block-post", "li.wp-block-post", "article",
         ]
         cards = []
         for sel in card_selectors:
             cards = [c for c in soup.select(sel) if c.get_text(strip=True)]
             if cards:
-                logger.debug(f"[Welsh Parliament] Member cards found with selector: {sel!r} ({len(cards)} cards)")
                 break
-
         if not cards:
-            # Last resort: any element containing a name-like heading
             cards = [el for el in soup.select("li, div") if el.select_one("h2, h3, h4")]
-            logger.debug(f"[Welsh Parliament] Fallback card extraction: {len(cards)} candidates")
 
-        # Log card structure at WARNING so it appears even when test silences INFO
         if cards:
             sample_cls = sorted({c for el in cards[0].select("[class]") for c in el.get("class", [])})
             logger.warning(
-                f"[Welsh Parliament] First member card CSS classes: {sample_cls[:30]}\n"
-                f"  Card HTML snippet: {str(cards[0])[:600]}"
+                f"[Welsh Parliament] Fallback card selectors — first card CSS classes: {sample_cls[:20]}\n"
+                f"  Snippet: {str(cards[0])[:400]}"
             )
 
         for card in cards:
@@ -227,9 +267,8 @@ class WelshParliamentScraper(BaseScraper):
             party_el = (
                 card.select_one("[class*='party'], [class*='Party']")
                 or card.select_one("[class*='group'], [class*='Group']")
-                or card.select_one(".tag, .badge, .label, [class*='tag'], [class*='badge']")
+                or card.select_one(".tag, .badge, [class*='tag'], [class*='badge']")
                 or card.select_one("span.wp-block-post-terms, .wp-block-post-terms")
-                or card.select_one("p:has(span), .entry-content p:last-of-type")
             )
             const_el = card.select_one(
                 "[class*='constituency'], [class*='region'], [class*='Constituency'], [class*='Region']"
@@ -741,9 +780,14 @@ class WelshParliamentScraper(BaseScraper):
             if not link_el:
                 continue
             title_el = row.select_one("td:first-child, .title, h2, h3") or link_el
-            date_el = row.select_one("td:nth-child(2), time, .date, [class*='date']")
+            date_el = row.select_one("td:nth-child(2), time, .date, [class*='date'], li:nth-child(2), span[class*='date'], p[class*='date']")
             title = title_el.get_text(strip=True)
             div_date = date_el.get_text(strip=True) if date_el else ""
+            # Try to extract ISO date from any text in the row if date_el failed
+            if not div_date:
+                row_text = row.get_text(separator=" ", strip=True)
+                dm = re.search(r"\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{1,2}\s+\w+\s+\d{4}", row_text)
+                div_date = dm.group(0) if dm else ""
             if from_date and div_date and div_date[:10] < from_date:
                 continue
 

@@ -29,6 +29,9 @@ _MEMBERS_PAGE = 20
 class UKParliamentScraper(BaseScraper):
     def __init__(self):
         super().__init__("UK Parliament")
+        # Populated by fetch_members(); used by fetch_questions() / fetch_plenary_business()
+        # to resolve member names when the API returns null for askingMember / member fields.
+        self._member_cache: Dict[str, Dict] = {}
 
     # ------------------------------------------------------------------
     # Members (Commons — MPs)
@@ -70,6 +73,7 @@ class UKParliamentScraper(BaseScraper):
                     break
                 skip += _MEMBERS_PAGE
         logger.info(f"[UK Parliament] {len(all_members)} MPs fetched")
+        self._member_cache = {m["id"]: m for m in all_members}
         return all_members
 
     # ------------------------------------------------------------------
@@ -185,13 +189,15 @@ class UKParliamentScraper(BaseScraper):
                     answer = v.get("answerText", v.get("answer", ""))
                     combined = f"Question: {q_text}\n\nAnswer: {answer}" if answer else q_text
                     asking = v.get("askingMember") or {}
+                    member_id = str(v.get("askingMemberId") or v.get("memberId") or "")
+                    cached = self._member_cache.get(member_id, {})
                     records.append(self._make_record(
                         data_type="question",
                         member={
-                            "id": str(v.get("askingMemberId", v.get("memberId", ""))),
-                            "name": asking.get("name") or asking.get("listAs") or v.get("memberName") or "",
-                            "party": asking.get("party") or "",
-                            "constituency": asking.get("memberFrom") or "",
+                            "id": member_id,
+                            "name": asking.get("name") or asking.get("listAs") or cached.get("name") or "",
+                            "party": asking.get("party") or cached.get("party") or "",
+                            "constituency": asking.get("memberFrom") or cached.get("constituency") or "",
                             "role": "MP",
                         },
                         date=v.get("tabledWhen", v.get("dateTabled", "")),
@@ -274,15 +280,18 @@ class UKParliamentScraper(BaseScraper):
                     if not text:
                         continue
                     member_obj = (item.get("member") or item.get("Member") or {})
+                    plenary_mid = str(item.get("MemberId") or item.get("memberId") or member_obj.get("id") or "")
+                    cached = self._member_cache.get(plenary_mid, {})
                     records.append(self._make_record(
                         data_type=dtype,
                         member={
-                            "id": str(item.get("MemberId", item.get("memberId", member_obj.get("id", "")))),
+                            "id": plenary_mid,
                             "name": (item.get("AttributedTo") or item.get("attributedTo")
                                      or item.get("MemberName") or item.get("memberName")
-                                     or member_obj.get("name") or item.get("nameDisplayAs") or ""),
-                            "party": item.get("Party") or member_obj.get("party") or "",
-                            "constituency": item.get("MemberFrom") or member_obj.get("memberFrom") or "",
+                                     or member_obj.get("name") or item.get("nameDisplayAs")
+                                     or cached.get("name") or ""),
+                            "party": item.get("Party") or member_obj.get("party") or cached.get("party") or "",
+                            "constituency": item.get("MemberFrom") or member_obj.get("memberFrom") or cached.get("constituency") or "",
                             "role": "MP",
                         },
                         date=item.get("Date", item.get("date", item.get("SittingDate",

@@ -112,17 +112,18 @@ class ScottishParliamentScraper(BaseScraper):
         members = []
         for m in rows:
             member_id = str(
-                m.get("PersonId") or m.get("PersonID") or m.get("MemberID")
+                m.get("PersonID") or m.get("PersonId") or m.get("MemberID")
                 or m.get("MemberId") or m.get("Id") or m.get("id") or ""
             )
-            given = m.get("GivenName") or m.get("FirstName") or m.get("Forename") or ""
-            family = m.get("FamilyName") or m.get("LastName") or m.get("Surname") or ""
-            full_name = f"{given} {family}".strip()
-            if not full_name:
-                full_name = (
-                    m.get("DisplayName") or m.get("MemberName") or m.get("Name")
-                    or m.get("FullName") or m.get("PreferredName") or ""
-                )
+            # ParliamentaryName is "Surname, Forename" — reverse to "Forename Surname"
+            parl_name = m.get("ParliamentaryName") or ""
+            if parl_name and "," in parl_name:
+                surname, _, forename = parl_name.partition(",")
+                full_name = f"{forename.strip()} {surname.strip()}"
+            else:
+                full_name = (parl_name or m.get("PreferredName") or m.get("DisplayName")
+                             or m.get("MemberName") or m.get("Name") or "")
+            # Party not available in the Members OData entity — may be populated via PersonParties
             party = (
                 m.get("PartyName") or m.get("Party") or m.get("PartyAbbreviation")
                 or m.get("PartyGroupName") or m.get("PoliticalGroupName") or ""
@@ -137,10 +138,32 @@ class ScottishParliamentScraper(BaseScraper):
                 "party": party,
                 "constituency": constituency,
                 "role": "MSP",
-                "status": m.get("IsCurrent", ""),
+                "status": "current" if m.get("IsCurrent") else "historical",
             })
+        # Attempt to enrich party info from the PersonParties / Parties OData entities
+        if members:
+            self._enrich_msp_parties(members)
         logger.info(f"[Scottish Parliament] {len(members)} MSPs fetched")
         return members
+
+    def _enrich_msp_parties(self, members: List[Dict]) -> None:
+        """Try to look up party membership via adjacent OData entities and fill in party field."""
+        id_lookup = {m["id"]: m for m in members if m["id"]}
+        for entity in ["PersonParties", "Parties", "MemberParties", "MSPParties"]:
+            rows = self._odata_get(entity)
+            if not rows:
+                continue
+            if not hasattr(self, "_party_entity_logged"):
+                self._party_entity_logged = True
+                logger.warning(f"[Scottish Parliament] {entity} fields: {list(rows[0].keys())} | sample={rows[0]!r:.300}")
+            for row in rows:
+                pid = str(row.get("PersonID") or row.get("PersonId") or row.get("MemberID") or "")
+                party = (row.get("PartyName") or row.get("Party") or row.get("PartyAbbreviation")
+                         or row.get("Name") or "")
+                if pid and party and pid in id_lookup and not id_lookup[pid].get("party"):
+                    id_lookup[pid]["party"] = party
+            logger.info(f"[Scottish Parliament] Party enrichment via {entity}: done")
+            break
 
     def _member_lookup(self, members: List[Dict]) -> Dict[str, Dict]:
         return {m["id"]: m for m in members}
