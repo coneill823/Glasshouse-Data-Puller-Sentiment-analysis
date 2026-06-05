@@ -442,11 +442,140 @@ class ScottishParliamentScraper(BaseScraper):
             logger.warning(f"[Scottish Parliament] 0 contribs at {full_url} — snippet: {snippet[:200]}")
         return added
 
+    def _fetch_meeting_ids(self, from_date: Optional[str] = None) -> List[Dict]:
+        """Fetch meeting IDs from the Scottish Parliament OData events endpoint.
+
+        Returns list of dicts with keys: id, date, title.
+        """
+        params: Dict = {"$format": "json", "$orderby": "EventDate desc", "$top": 200}
+        if from_date:
+            params["$filter"] = f"EventDate ge datetime'{from_date}T00:00:00'"
+        meetings = []
+        for entity in ["Events", "Meetings", "PlenaryMeetings", "ChamberMeetings", "SittingDays"]:
+            url = f"{_API}/{entity}"
+            resp = self._get(url, params=params)
+            if not resp or not resp.ok:
+                status = resp.status_code if resp else "no response"
+                logger.warning(f"[Scottish Parliament] Events endpoint {entity}: HTTP {status}")
+                continue
+            try:
+                data = resp.json()
+                items = data if isinstance(data, list) else data.get("value", [])
+            except Exception:
+                continue
+            if not items:
+                logger.warning(f"[Scottish Parliament] Events endpoint {entity}: 0 items")
+                continue
+            logger.warning(f"[Scottish Parliament] Events fields: {list(items[0].keys())} | sample={items[0]!r:.300}")
+            for item in items:
+                meeting_id = str(
+                    item.get("EventId") or item.get("MeetingId") or item.get("Id") or item.get("id") or ""
+                )
+                event_date = str(
+                    item.get("EventDate") or item.get("MeetingDate") or item.get("Date") or ""
+                )
+                # EventDate often comes back as "/Date(1234567890000)/" — parse it
+                ts_match = re.search(r"/Date\((\d+)\)/", event_date)
+                if ts_match:
+                    from datetime import datetime, timezone
+                    ts = int(ts_match.group(1)) // 1000
+                    event_date = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
+                title = str(item.get("EventTitle") or item.get("Title") or item.get("Name") or "")
+                if meeting_id:
+                    meetings.append({"id": meeting_id, "date": event_date[:10], "title": title})
+            if meetings:
+                logger.info(f"[Scottish Parliament] {len(meetings)} meetings from {entity}")
+                break
+        return meetings
+
+    def _fetch_or_via_api(self, meeting_id: str, meeting_date: str,
+                           records: List[Dict], from_date: Optional[str]) -> int:
+        """Fetch Official Report for one meeting via the parliament.scot media API.
+
+        The API returns HTML with speaker contributions — parse each paragraph.
+        Returns number of records added.
+        """
+        if from_date and meeting_date and meeting_date < from_date:
+            return 0
+        url = f"{_WEB}/api/sitecore/CustomMedia/OfficialReport"
+        saved = dict(self.session.headers)
+        self.session.headers.update({
+            "User-Agent": _BROWSER_UA,
+            "Accept": "text/html,*/*;q=0.8",
+            "Referer": f"{_WEB}/chamber-and-committees/official-report/",
+        })
+        resp = self._get(url, params={"meetingId": meeting_id}, timeout=60)
+        self.session.headers.clear()
+        self.session.headers.update(saved)
+        if not resp or not resp.ok:
+            return 0
+        ct = resp.headers.get("Content-Type", "")
+        if "json" in ct:
+            try:
+                payload = resp.json()
+                html_content = payload.get("html") or payload.get("content") or ""
+                if not html_content:
+                    return 0
+                soup = BeautifulSoup(html_content, "lxml")
+            except Exception:
+                return 0
+        else:
+            soup = BeautifulSoup(resp.text, "lxml")
+
+        before = len(records)
+        # Each contribution is typically <p> with speaker name bolded or in a span,
+        # or structured as rows with speaker + text cells.
+        for contrib in soup.select("p, .contribution, tr, .or-contribution, .speech"):
+            text = contrib.get_text(strip=True)
+            if len(text) < 10:
+                continue
+            speaker_el = contrib.select_one("strong, b, .speaker, th, td:first-child")
+            name = speaker_el.get_text(strip=True) if speaker_el else ""
+            # If name is embedded at start of text "Name: speech..."
+            if not name and ":" in text:
+                prefix = text.split(":", 1)[0].strip()
+                if prefix and len(prefix) < 60:
+                    name = prefix
+            records.append(self._make_record(
+                data_type="plenary_speech",
+                member={"id": "", "name": name, "party": "", "constituency": "", "role": "MSP"},
+                date=meeting_date,
+                text=text,
+                title="",
+                source_url=f"{url}?meetingId={meeting_id}",
+            ))
+        added = len(records) - before
+        if added == 0 and not hasattr(self, "_or_api_empty_logged"):
+            self._or_api_empty_logged = True
+            snippet = soup.get_text(strip=True)[:300] if soup else ""
+            logger.warning(f"[Scottish Parliament] OR API meeting {meeting_id}: 0 contribs — snippet: {snippet}")
+        return added
+
     def fetch_plenary_business(self, from_date: Optional[str] = None) -> List[Dict]:
         records: List[Dict] = []
 
         # ----------------------------------------------------------------
-        # 1. Try RSS feed — the Scottish Parliament exposes one for the OR.
+        # 1. Official Report via parliament.scot media API.
+        #    GET /api/sitecore/CustomMedia/OfficialReport?meetingId=NNNN
+        #    Meeting IDs come from the data.parliament.scot OData Events entity.
+        # ----------------------------------------------------------------
+        meetings = self._fetch_meeting_ids(from_date)
+        if meetings:
+            logger.info(f"[Scottish Parliament] Fetching OR for {len(meetings)} meetings via API...")
+            hits = 0
+            for i, m in enumerate(meetings):
+                if i % 20 == 0:
+                    logger.info(f"[Scottish Parliament] OR API: {i}/{len(meetings)} meetings, {len(records)} records so far")
+                added = self._fetch_or_via_api(m["id"], m["date"], records, from_date)
+                if added > 0:
+                    hits += 1
+            logger.info(f"[Scottish Parliament] OR API: {hits}/{len(meetings)} meetings had content, {len(records)} total records")
+            if records:
+                logger.info(f"[Scottish Parliament] {len(records)} plenary records fetched (via OR API)")
+                return records
+
+        # ----------------------------------------------------------------
+        # 2. Try RSS feed — the Scottish Parliament exposes one for the OR.
         #    Each <item> has a <link> pointing to a session transcript.
         # ----------------------------------------------------------------
         rss_candidates = [
@@ -474,7 +603,6 @@ class ScottishParliamentScraper(BaseScraper):
                 break
 
         for href in rss_links[:30]:
-            # Extract date hint from URL if present
             m = re.search(r"(\d{4}-\d{2}-\d{2})", href)
             date_hint = m.group(1) if m else ""
             self._scrape_or_detail(href, date_hint, records, from_date)
@@ -483,9 +611,7 @@ class ScottishParliamentScraper(BaseScraper):
             return records
 
         # ----------------------------------------------------------------
-        # 2. Try the generic OR index pages and follow any date/session links.
-        #    parliament.scot redesign renders most of these pages as SPAs, so
-        #    this usually yields nothing — but try anyway in case they flip SSR.
+        # 3. Try the generic OR index pages.
         # ----------------------------------------------------------------
         _SKIP_SUBNAV = {
             "search-what-was-said-in-parliament",
@@ -528,12 +654,7 @@ class ScottishParliamentScraper(BaseScraper):
             return records
 
         # ----------------------------------------------------------------
-        # 3. Direct date-based URL construction for recent sitting days.
-        #    The Official Report URL pattern is:
-        #      /chamber-and-committees/official-report/what-was-said-in-parliament/
-        #      official-report-{day}-{month-name}-{year}
-        #    e.g. official-report-4-june-2026
-        #    Try the last ~60 weekdays (parliament sits most Tue–Thu in term).
+        # 4. Direct date-based URL construction for recent sitting days.
         # ----------------------------------------------------------------
         month_names = ["january", "february", "march", "april", "may", "june",
                        "july", "august", "september", "october", "november", "december"]
@@ -560,6 +681,94 @@ class ScottishParliamentScraper(BaseScraper):
     # ------------------------------------------------------------------
     # Votes on division
     # ------------------------------------------------------------------
+
+    def _scrape_motion_vote_page(self, motion_ref: str, records: List[Dict],
+                                  from_date: Optional[str]) -> int:
+        """Scrape a single S6M-NNNN votes-and-motions page. Returns records added."""
+        url = f"{_WEB}/chamber-and-committees/votes-and-motions/{motion_ref}"
+        detail = self._html_get(url)
+        if not detail:
+            return 0
+        date_el = detail.select_one("time[datetime], time, .date, [class*='date']")
+        date_str = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
+        if not date_str:
+            # Try parsing date from page text with regex
+            body_text = detail.get_text(separator=" ", strip=True)
+            dm = re.search(r"\d{1,2}\s+\w+\s+\d{4}|\d{4}-\d{2}-\d{2}", body_text)
+            date_str = dm.group(0) if dm else ""
+        if from_date and date_str and len(date_str) >= 10 and date_str[:10] < from_date:
+            return 0
+        title_el = detail.select_one("h1, h2, .title, .motion-title")
+        div_title = title_el.get_text(strip=True) if title_el else motion_ref
+
+        before = len(records)
+        for direction, sel_list in [
+            ("aye", [".ayes li", ".for li", "[class*='aye'] li", "[class*='for'] li",
+                     "table tr td:nth-child(1)", "ul.ayes li"]),
+            ("no", [".noes li", ".against li", "[class*='no'] li", "[class*='against'] li",
+                    "table tr td:nth-child(2)", "ul.noes li"]),
+            ("abstain", [".abstentions li", ".abstain li", "[class*='abstain'] li"]),
+        ]:
+            voters = []
+            for sel in sel_list:
+                voters = detail.select(sel)
+                if voters:
+                    break
+            for voter_el in voters:
+                name = voter_el.get_text(strip=True)
+                if not name or len(name) < 2:
+                    continue
+                records.append(self._make_record(
+                    data_type="vote",
+                    member={"id": "", "name": name, "party": "", "constituency": "", "role": "MSP"},
+                    date=date_str,
+                    text=f"Voted {direction} on: {div_title}",
+                    title=div_title,
+                    metadata={"vote_direction": direction, "division_result": "",
+                              "motion_ref": motion_ref},
+                    source_url=url,
+                ))
+        added = len(records) - before
+        if added == 0:
+            body = detail.find("body")
+            snippet = body.get_text(separator=" ", strip=True)[:200] if body else ""
+            logger.warning(f"[Scottish Parliament] No voters at {url} — snippet: {snippet}")
+        return added
+
+    def _enumerate_motion_pages(self, from_date: Optional[str], records: List[Dict]) -> int:
+        """Enumerate S6M-NNNN motion pages from the votes-and-motions index.
+
+        The index page at /chamber-and-committees/votes-and-motions/ lists motions
+        as links matching /S[0-9]+M-[0-9]+/.  We follow those and parse voter lists.
+        Returns total records added.
+        """
+        index_url = f"{_WEB}/chamber-and-committees/votes-and-motions/"
+        soup = self._html_get(index_url)
+        if not soup:
+            logger.warning(f"[Scottish Parliament] Could not load motions index: {index_url}")
+            return 0
+
+        # Collect motion refs from all links on the index page
+        motion_refs = []
+        seen = set()
+        for a in soup.select("a[href]"):
+            href = a.get("href", "")
+            m = re.search(r"(S\d+M-\d+)", href, re.I)
+            if m and m.group(1) not in seen:
+                seen.add(m.group(1))
+                motion_refs.append(m.group(1))
+
+        if not motion_refs:
+            body = soup.find("body")
+            snippet = body.get_text(separator=" ", strip=True)[:300] if body else ""
+            logger.warning(f"[Scottish Parliament] No motion refs on index — snippet: {snippet}")
+            return 0
+
+        logger.info(f"[Scottish Parliament] Found {len(motion_refs)} motion refs on index")
+        added_total = 0
+        for ref in motion_refs[:200]:
+            added_total += self._scrape_motion_vote_page(ref, records, from_date)
+        return added_total
 
     def fetch_votes_on_division(self, from_date: Optional[str] = None) -> List[Dict]:
         filters = None
@@ -601,17 +810,20 @@ class ScottishParliamentScraper(BaseScraper):
             logger.info(f"[Scottish Parliament] {len(records)} vote records fetched")
             return records
 
-        # Fallback: scrape votes/divisions from parliament.scot
-        records = []
+        # Fallback: enumerate S6M-NNNN motion pages from the votes-and-motions index
+        records: List[Dict] = []
+        added = self._enumerate_motion_pages(from_date, records)
+        if records:
+            logger.info(f"[Scottish Parliament] {len(records)} vote records fetched (via motion pages)")
+            return records
+
+        # Last resort: scrape whatever division links we can find
         for path in [
             "/chamber-and-committees/votes-and-divisions/search",
             "/chamber-and-committees/votes-and-divisions",
             "/chamber-and-committees/votes-and-divisions/",
             "/chamber-and-committees/votes/",
             "/chamber-and-committees/divisions/",
-            "/chamber-and-committees/how-parliament-works/votes-and-divisions",
-            "/chamber-and-committees/how-parliament-works/votes-and-divisions/",
-            "/the-work-of-the-parliament/votes-and-divisions",
             "/parliamentarybusiness/voting/",
             "/msps/voting-behaviour",
             "/msps/votes/",
@@ -623,7 +835,8 @@ class ScottishParliamentScraper(BaseScraper):
 
             links = [a["href"] for a in soup.select("a[href]")
                      if a.get("href", "").startswith(("/", "http"))
-                     and re.search(r"/division|/vote|\d{4}-\d{2}-\d{2}|/\d+", a.get("href", ""), re.I)]
+                     and re.search(r"/division|/vote|\d{4}-\d{2}-\d{2}|/\d+|S\d+M-\d+",
+                                   a.get("href", ""), re.I)]
 
             if not links:
                 body = soup.find("body")

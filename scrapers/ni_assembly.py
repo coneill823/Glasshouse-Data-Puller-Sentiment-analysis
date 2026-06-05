@@ -267,6 +267,14 @@ class NIAssemblyScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def fetch_register_of_interests(self, members: List[Dict]) -> List[Dict]:
+        records = self._fetch_interests_asmx(members)
+        if not records:
+            logger.info("[NI Assembly] ASMX register returned 0 — trying AIMS portal HTML")
+            records = self._fetch_interests_aims(members)
+        logger.info(f"[NI Assembly] {len(records)} interest records fetched")
+        return records
+
+    def _fetch_interests_asmx(self, members: List[Dict]) -> List[Dict]:
         known_interest_methods = [
             "GetAllRegisteredInterests_JSON",
             "GetCurrentMembersRegisteredInterests_JSON",
@@ -284,31 +292,50 @@ class NIAssemblyScraper(BaseScraper):
         ))
 
         rows = []
+        used_url = f"{_BASE}/register.asmx"
         for method in interest_methods:
-            url = f"{_BASE}/register.asmx/{method}"
-            resp = self._get(url)
-            if not resp:
-                continue
-            ct = resp.headers.get("Content-Type", "")
-            if "json" in ct or method.endswith("_JSON"):
+            # The NI Assembly register.asmx service is HTTP-only (not HTTPS).
+            # Build both HTTP and HTTPS variants so the correct one is tried first.
+            http_url = f"http://data.niassembly.gov.uk/register.asmx/{method}"
+            https_url = f"{_BASE}/register.asmx/{method}"
+            for url in (http_url, https_url):
+                resp = self._get(url)
+                if not resp:
+                    continue
+                ct = resp.headers.get("Content-Type", "")
+                if "json" in ct or method.endswith("_JSON"):
+                    try:
+                        rows = _first_list(resp.json())
+                        if rows:
+                            used_url = url
+                            logger.info(f"[NI Assembly] Register: got {len(rows)} rows from {url}")
+                            break
+                    except Exception:
+                        pass
                 try:
-                    rows = _first_list(resp.json())
-                    if rows:
+                    root = ET.fromstring(resp.text)
+                    for elem in root.iter():
+                        if "}" in elem.tag:
+                            elem.tag = elem.tag.split("}", 1)[1]
+                    xml_rows = []
+                    for interest in root.iter("RegisteredInterest"):
+                        xml_rows.append({k.tag: k.text for k in interest})
+                    if xml_rows:
+                        rows = xml_rows
+                        used_url = url
+                        logger.info(f"[NI Assembly] Register: got {len(rows)} XML rows from {url}")
                         break
-                except Exception:
+                except ET.ParseError:
                     pass
-            try:
-                root = ET.fromstring(resp.text)
-                for elem in root.iter():
-                    if "}" in elem.tag:
-                        elem.tag = elem.tag.split("}", 1)[1]
-                rows = []
-                for interest in root.iter("RegisteredInterest"):
-                    rows.append({k.tag: k.text for k in interest})
-                if rows:
-                    break
-            except ET.ParseError:
-                pass
+            if rows:
+                break
+
+        if not rows:
+            logger.warning("[NI Assembly] All register.asmx methods returned 0 rows")
+            return []
+
+        if rows:
+            logger.warning(f"[NI Assembly] Register sample fields: {list(rows[0].keys())} | sample={dict(list(rows[0].items())[:6])!r:.300}")
 
         lookup = self._member_lookup(members)
         records = []
@@ -334,9 +361,121 @@ class NIAssemblyScraper(BaseScraper):
                     "category": item.get("CategoryName", item.get("Category", "")),
                     "interest_id": str(item.get("InterestId", item.get("Id", ""))),
                 },
-                source_url=f"{_BASE}/register.asmx",
+                source_url=used_url,
             ))
-        logger.info(f"[NI Assembly] {len(records)} interest records fetched")
+        return records
+
+    def _fetch_interests_aims(self, members: List[Dict]) -> List[Dict]:
+        """Scrape register of interests from the AIMS public portal.
+
+        URL: https://aims.niassembly.gov.uk/mlas/registerofinterests.aspx
+        The page lists interests grouped by MLA with collapsible sections.
+        """
+        records = []
+        lookup_name = {m["name"].lower(): m for m in members}
+        lookup_id = {m["id"]: m for m in members}
+
+        for path in [
+            "/mlas/registerofinterests.aspx",
+            "/mlas/register.aspx",
+            "/mlas/interests.aspx",
+            "/mlas/registeredinterests.aspx",
+        ]:
+            soup = self._aims_html(path)
+            if not soup:
+                logger.warning(f"[NI Assembly] Register AIMS: could not load {_AIMS}{path}")
+                continue
+
+            body_text = soup.get_text(separator=" ", strip=True).lower()
+            if not any(kw in body_text for kw in ("interest", "register", "category")):
+                logger.warning(f"[NI Assembly] Register AIMS: no interest keywords at {_AIMS}{path}")
+                continue
+
+            logger.info(f"[NI Assembly] Register AIMS: loaded {_AIMS}{path}")
+
+            # The AIMS portal typically renders each MLA's interests in a panel/accordion.
+            # Selectors cover GridView rows, panel groups, and definition lists.
+            current_member: Dict = {}
+            current_category = ""
+
+            for el in soup.select("h2, h3, h4, tr, li, p, .panel-heading, .accordion-heading, dt, dd"):
+                tag = el.name
+                text = el.get_text(strip=True)
+                if not text:
+                    continue
+
+                # Detect MLA name headings
+                if tag in ("h2", "h3", "h4") or "panel-heading" in " ".join(el.get("class", [])):
+                    # Check if this matches a known member name
+                    cand = lookup_name.get(text.lower())
+                    if cand:
+                        current_member = cand
+                        current_category = ""
+                        continue
+                    # Also try PersonId embedded in anchor href
+                    link = el.select_one("a[href]")
+                    if link:
+                        m_id_match = re.search(r"[Pp]erson[Ii][Dd]=(\d+)|/(\d+)", link.get("href", ""))
+                        if m_id_match:
+                            pid = m_id_match.group(1) or m_id_match.group(2)
+                            cand = lookup_id.get(pid)
+                            if cand:
+                                current_member = cand
+                                current_category = ""
+                                continue
+                    # Treat as a category heading if we already have a member
+                    if current_member and len(text) < 100:
+                        current_category = text
+                    continue
+
+                # Category rows in table cells
+                if tag == "tr":
+                    cols = [td.get_text(strip=True) for td in el.find_all("td")]
+                    if len(cols) >= 2:
+                        # Try to identify member / category / interest columns
+                        possible_member = cols[0]
+                        m_cand = lookup_name.get(possible_member.lower())
+                        if m_cand:
+                            current_member = m_cand
+                        possible_cat = cols[1] if len(cols) > 1 else ""
+                        possible_desc = cols[2] if len(cols) > 2 else cols[-1]
+                        if not possible_desc:
+                            continue
+                        if possible_cat and len(possible_cat) < 80:
+                            current_category = possible_cat
+                        if current_member and possible_desc and len(possible_desc) > 3:
+                            records.append(self._make_record(
+                                data_type="register_of_interests",
+                                member=current_member,
+                                date="",
+                                text=possible_desc,
+                                title=current_category,
+                                metadata={"category": current_category, "source": "aims_portal"},
+                                source_url=f"{_AIMS}{path}",
+                            ))
+                    continue
+
+                # List items and definition terms/descriptions
+                if tag in ("li", "dd", "p") and current_member and len(text) > 5:
+                    if tag == "dt" and len(text) < 100:
+                        current_category = text
+                        continue
+                    records.append(self._make_record(
+                        data_type="register_of_interests",
+                        member=current_member,
+                        date="",
+                        text=text,
+                        title=current_category,
+                        metadata={"category": current_category, "source": "aims_portal"},
+                        source_url=f"{_AIMS}{path}",
+                    ))
+
+            if records:
+                logger.info(f"[NI Assembly] Register AIMS: {len(records)} records from {_AIMS}{path}")
+                break
+
+        if not records:
+            logger.warning("[NI Assembly] Register AIMS: 0 records parsed from all paths")
         return records
 
     # ------------------------------------------------------------------
