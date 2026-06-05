@@ -107,13 +107,35 @@ class ScottishParliamentScraper(BaseScraper):
 
     def fetch_members(self) -> List[Dict]:
         rows = self._odata_get("Members")
+        if rows:
+            logger.info(f"[Scottish Parliament] Members OData sample fields: {list(rows[0].keys())}")
         members = []
         for m in rows:
+            member_id = str(
+                m.get("PersonId") or m.get("PersonID") or m.get("MemberID")
+                or m.get("MemberId") or m.get("Id") or m.get("id") or ""
+            )
+            given = m.get("GivenName") or m.get("FirstName") or m.get("Forename") or ""
+            family = m.get("FamilyName") or m.get("LastName") or m.get("Surname") or ""
+            full_name = f"{given} {family}".strip()
+            if not full_name:
+                full_name = (
+                    m.get("DisplayName") or m.get("MemberName") or m.get("Name")
+                    or m.get("FullName") or m.get("PreferredName") or ""
+                )
+            party = (
+                m.get("PartyName") or m.get("Party") or m.get("PartyAbbreviation")
+                or m.get("PartyGroupName") or m.get("PoliticalGroupName") or ""
+            )
+            constituency = (
+                m.get("ConstituencyName") or m.get("RegionName")
+                or m.get("Constituency") or m.get("Region") or ""
+            )
             members.append({
-                "id": str(m.get("PersonId", m.get("MemberID", ""))),
-                "name": f"{m.get('GivenName', '')} {m.get('FamilyName', '')}".strip() or m.get("DisplayName", ""),
-                "party": m.get("PartyName", m.get("Party", "")),
-                "constituency": m.get("ConstituencyName", m.get("RegionName", "")),
+                "id": member_id,
+                "name": full_name,
+                "party": party,
+                "constituency": constituency,
                 "role": "MSP",
                 "status": m.get("IsCurrent", ""),
             })

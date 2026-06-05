@@ -598,10 +598,14 @@ class NIAssemblyScraper(BaseScraper):
                 text = item.get("ComponentText", item.get("Text", item.get("Speech", "")))
                 if not text or len(text.strip()) < 10:
                     continue
-                # ComponentText is the only source of speaker identity —
-                # the NI Assembly API does not include a separate MemberName field.
+                # NI Assembly API has no separate MemberName field in component records.
+                # Try ComponentHeader (often the speaker name for speech contributions),
+                # filtering out time-of-day strings like "10:30".
+                comp_header = item.get("ComponentHeader", "")
+                header_is_time = bool(re.match(r"^\d{1,2}:\d{2}", comp_header.strip())) if comp_header else True
+                speaker_from_header = comp_header if (comp_header and not header_is_time and len(comp_header) < 80) else ""
                 name = (item.get("MemberName") or item.get("Speaker")
-                        or _extract_ni_speaker(text) or "")
+                        or speaker_from_header or _extract_ni_speaker(text) or "")
                 records.append(self._make_record(
                     data_type="plenary_speech",
                     member={
