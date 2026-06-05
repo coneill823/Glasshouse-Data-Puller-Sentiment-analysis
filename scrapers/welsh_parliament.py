@@ -210,13 +210,27 @@ class WelshParliamentScraper(BaseScraper):
             cards = [el for el in soup.select("li, div") if el.select_one("h2, h3, h4")]
             logger.debug(f"[Welsh Parliament] Fallback card extraction: {len(cards)} candidates")
 
+        # Log card structure at WARNING so it appears even when test silences INFO
+        if cards:
+            sample_cls = sorted({c for el in cards[0].select("[class]") for c in el.get("class", [])})
+            logger.warning(
+                f"[Welsh Parliament] First member card CSS classes: {sample_cls[:30]}\n"
+                f"  Card HTML snippet: {str(cards[0])[:600]}"
+            )
+
         for card in cards:
             name_el = (
                 card.select_one("h2, h3, h4")
                 or card.select_one("[class*='name'], [class*='Name']")
                 or card.select_one("strong, b")
             )
-            party_el = card.select_one("[class*='party'], [class*='Party']")
+            party_el = (
+                card.select_one("[class*='party'], [class*='Party']")
+                or card.select_one("[class*='group'], [class*='Group']")
+                or card.select_one(".tag, .badge, .label, [class*='tag'], [class*='badge']")
+                or card.select_one("span.wp-block-post-terms, .wp-block-post-terms")
+                or card.select_one("p:has(span), .entry-content p:last-of-type")
+            )
             const_el = card.select_one(
                 "[class*='constituency'], [class*='region'], [class*='Constituency'], [class*='Region']"
             )

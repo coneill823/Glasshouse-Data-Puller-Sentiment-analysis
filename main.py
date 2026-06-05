@@ -40,11 +40,15 @@ from utils.storage import save_results, load_manifest, write_manifest
 _LOG_FORMAT = "%(asctime)s  %(levelname)-8s  %(name)s  %(message)s"
 _LOG_DATE = "%Y-%m-%d %H:%M:%S"
 
-def _setup_logging():
+logger = logging.getLogger("main")
+
+
+def _setup_logging(run_label: str = "all") -> Path:
+    """Configure console + file logging.  File name encodes the run type and timestamp."""
     logs_dir = Path("logs")
     logs_dir.mkdir(exist_ok=True)
     run_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
-    log_path = logs_dir / f"run_{run_ts}.log"
+    log_path = logs_dir / f"run_{run_label}_{run_ts}.log"
 
     root = logging.getLogger()
     root.setLevel(logging.INFO)
@@ -60,10 +64,6 @@ def _setup_logging():
     root.addHandler(fh)
 
     return log_path
-
-_log_path = _setup_logging()
-logger = logging.getLogger("main")
-logger.info(f"Log file: {_log_path.resolve()}")
 
 SCRAPERS = {
     "ni": ("ni_assembly", NIAssemblyScraper),
@@ -160,6 +160,10 @@ def main():
         help="Show what would be pulled without saving any files",
     )
     args = parser.parse_args()
+
+    run_label = "scheduled" if args.schedule else (args.parliament or "all")
+    log_path = _setup_logging(run_label)
+    logger.info(f"Log file: {log_path.resolve()}")
 
     if args.schedule:
         logger.info("Scheduler mode: will pull on the 1st of each month at 02:00 UTC")

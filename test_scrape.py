@@ -24,18 +24,43 @@ Usage
 import argparse
 import json
 import logging
+import re
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-# Silence scraper INFO/DEBUG — we control all output here
-logging.basicConfig(level=logging.WARNING, format="%(levelname)-8s %(message)s")
+
+class _Tee:
+    """Mirror writes to both the original stdout and a log file simultaneously."""
+
+    def __init__(self, path: Path):
+        self._orig = sys.__stdout__
+        self._f = open(path, "w", encoding="utf-8")
+        sys.stdout = self
+
+    def write(self, data: str) -> None:
+        self._orig.write(data)
+        self._f.write(data)
+
+    def flush(self) -> None:
+        self._orig.flush()
+        self._f.flush()
+
+    def isatty(self) -> bool:
+        return False
+
+    def close(self) -> None:
+        sys.stdout = self._orig
+        self._f.close()
+
+# Scraper WARNING/ERROR output will be routed to stdout inside main()
+# so it ends up in both terminal and log file.
 
 from config import PARLIAMENTS
-from scrapers.ni_assembly import NIAssemblyScraper, _first_list as _ni_list
+from scrapers.ni_assembly import NIAssemblyScraper, _first_list as _ni_list, _extract_ni_speaker
 from scrapers.uk_parliament import UKParliamentScraper
 from scrapers.scottish_parliament import ScottishParliamentScraper
 from scrapers.welsh_parliament import (
@@ -158,11 +183,17 @@ def _ni_plenary_sample(s: NIAssemblyScraper) -> Tuple[List[Dict], str]:
             text = item.get("ComponentText", item.get("Text", item.get("Speech", "")))
             if not text or len(text.strip()) < 10:
                 continue
+            comp_header = item.get("ComponentHeader", "")
+            # ComponentHeader is often the speaker name for speech contributions;
+            # exclude time-of-day strings ("10:30") and very long headers.
+            header_is_time = bool(re.match(r"^\d{1,2}:\d{2}", comp_header.strip())) if comp_header else True
+            speaker_from_header = comp_header if (comp_header and not header_is_time and len(comp_header) < 80) else ""
             records.append(s._make_record(
                 data_type="plenary_speech",
                 member={
                     "id": str(item.get("PersonId", item.get("MemberId", ""))),
-                    "name": item.get("MemberName", item.get("Speaker", "")),
+                    "name": (item.get("MemberName") or item.get("Speaker")
+                             or speaker_from_header or _extract_ni_speaker(text) or ""),
                     "party": item.get("PartyName", ""),
                     "constituency": item.get("ConstituencyName", ""),
                     "role": "MLA",
@@ -467,7 +498,10 @@ def _wales_votes_sample(s: WelshParliamentScraper) -> Tuple[List[Dict], str]:
         return [], "no division rows found on index page"
 
     records = []
-    for row in rows[:10]:
+    # Filter for rows that actually contain a division link (not nav/header rows)
+    division_rows = [r for r in rows if r.select_one("a[href]")
+                     and (r.select_one("a[href]")["href"] or "").startswith(("/", "http"))]
+    for row in division_rows[:20]:
         link_el = row.select_one("a[href]")
         if not link_el:
             continue
@@ -500,7 +534,7 @@ def _wales_votes_sample(s: WelshParliamentScraper) -> Tuple[List[Dict], str]:
                         metadata={"vote_direction": direction},
                         source_url=detail_url,
                     ))
-    return records, f"{len(rows)} rows on index page; first 10 division details fetched"
+    return records, f"{len(rows)} rows on index page; {len(division_rows)} division rows; first 20 fetched"
 
 
 def test_wales(verbose: bool = False, save_dir: Optional[Path] = None) -> List[Result]:
@@ -657,12 +691,35 @@ def main():
                         help="Write one sample record per test to test_data/")
     args = parser.parse_args()
 
+    # ── Log file setup ────────────────────────────────────────────────────
+    logs_dir = Path("logs")
+    logs_dir.mkdir(exist_ok=True)
+    run_ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    parl_label = args.parliament or "all"
+    log_path = logs_dir / f"test_{parl_label}_{run_ts}.log"
+    tee = _Tee(log_path)
+
+    # Route scraper WARNING/ERROR logs to stdout (captured by tee → log file)
+    _log_root = logging.getLogger()
+    _log_root.handlers.clear()
+    _sh = logging.StreamHandler(sys.stdout)
+    _sh.setLevel(logging.WARNING)
+    _sh.setFormatter(logging.Formatter("%(levelname)-8s %(name)s  %(message)s"))
+    _log_root.addHandler(_sh)
+    _log_root.setLevel(logging.WARNING)
+
+    print(f"Log: {log_path.resolve()}")
+    # ─────────────────────────────────────────────────────────────────────
+
     keys = [args.parliament] if args.parliament else list(_RUNNERS)
     t0 = time.time()
     all_results: List[Result] = []
-    for key in keys:
-        all_results.extend(_RUNNERS[key](verbose=args.verbose, save_dir=Path("test_data") if args.save else None))
-    _summary(all_results, time.time() - t0)
+    try:
+        for key in keys:
+            all_results.extend(_RUNNERS[key](verbose=args.verbose, save_dir=Path("test_data") if args.save else None))
+        _summary(all_results, time.time() - t0)
+    finally:
+        tee.close()
 
 
 if __name__ == "__main__":

@@ -373,7 +373,7 @@ class NIAssemblyScraper(BaseScraper):
                 data = self._parse_asmx_response(resp, url)
                 items = _first_list(data)
                 if items and not records:
-                    logger.info(f"[NI Assembly] Question sample fields ({q_type}): {list(items[0].keys())}")
+                    logger.warning(f"[NI Assembly] Question sample fields ({q_type}): {list(items[0].keys())} | sample={dict(list(items[0].items())[:6])!r:.300}")
                 for q in items:
                     q_text = q.get("QuestionText", q.get("Text", ""))
                     answer = q.get("AnswerText", q.get("Answer", ""))
@@ -590,18 +590,21 @@ class NIAssemblyScraper(BaseScraper):
             comp_items = _first_list(comp_data)
             if i == 0:
                 if comp_items:
-                    logger.info(f"[NI Assembly] Sample component fields: {list(comp_items[0].keys())}")
-                    logger.info(f"[NI Assembly] Sample component data: {comp_items[0]}")
+                    logger.warning(f"[NI Assembly] Plenary component fields: {list(comp_items[0].keys())} | sample={comp_items[0]!r:.400}")
                 else:
-                    logger.info(f"[NI Assembly] Component fetch for first report_id={report_id!r} returned 0 items (comp_resp={bool(comp_resp)})")
+                    logger.warning(f"[NI Assembly] Component fetch for first report_id={report_id!r} returned 0 items (comp_resp={bool(comp_resp)})")
             for item in comp_items:
                 text = item.get("ComponentText", item.get("Text", item.get("Speech", "")))
                 if not text or len(text.strip()) < 10:
                     continue
-                # ComponentText is the only source of speaker identity —
-                # the NI Assembly API does not include a separate MemberName field.
+                # NI Assembly API has no separate MemberName field in component records.
+                # Try ComponentHeader (often the speaker name for speech contributions),
+                # filtering out time-of-day strings like "10:30".
+                comp_header = item.get("ComponentHeader", "")
+                header_is_time = bool(re.match(r"^\d{1,2}:\d{2}", comp_header.strip())) if comp_header else True
+                speaker_from_header = comp_header if (comp_header and not header_is_time and len(comp_header) < 80) else ""
                 name = (item.get("MemberName") or item.get("Speaker")
-                        or _extract_ni_speaker(text) or "")
+                        or speaker_from_header or _extract_ni_speaker(text) or "")
                 records.append(self._make_record(
                     data_type="plenary_speech",
                     member={
@@ -712,7 +715,7 @@ class NIAssemblyScraper(BaseScraper):
             data = self._parse_asmx_response(resp, url)
             vote_items = _first_list(data)
             if vote_items and not records:
-                logger.info(f"[NI Assembly] Vote sample fields: {list(vote_items[0].keys())}")
+                logger.warning(f"[NI Assembly] Vote sample fields: {list(vote_items[0].keys())} | sample={dict(list(vote_items[0].items())[:6])!r:.300}")
             for vote in vote_items:
                 direction_raw = str(vote.get("VoteType", vote.get("Vote", vote.get("Type", "")))).lower()
                 if direction_raw in ("aye", "yes", "for", "1"):

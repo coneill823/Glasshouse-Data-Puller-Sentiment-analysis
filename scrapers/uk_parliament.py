@@ -175,16 +175,23 @@ class UKParliamentScraper(BaseScraper):
                         continue
                     if q_id:
                         seen_ids.add(q_id)
+                    if not seen_ids or len(seen_ids) == 1:
+                        asking_sample = v.get("askingMember")
+                        logger.warning(
+                            f"[UK Parliament] Questions first-record fields: {list(v.keys())} | "
+                            f"askingMember type={type(asking_sample).__name__} value={asking_sample!r:.200}"
+                        )
                     q_text = v.get("questionText", v.get("text", ""))
                     answer = v.get("answerText", v.get("answer", ""))
                     combined = f"Question: {q_text}\n\nAnswer: {answer}" if answer else q_text
+                    asking = v.get("askingMember") or {}
                     records.append(self._make_record(
                         data_type="question",
                         member={
                             "id": str(v.get("askingMemberId", v.get("memberId", ""))),
-                            "name": v.get("askingMember", {}).get("name", "") if isinstance(v.get("askingMember"), dict) else v.get("memberName", ""),
-                            "party": v.get("askingMember", {}).get("party", "") if isinstance(v.get("askingMember"), dict) else "",
-                            "constituency": v.get("askingMember", {}).get("memberFrom", "") if isinstance(v.get("askingMember"), dict) else "",
+                            "name": asking.get("name") or asking.get("listAs") or v.get("memberName") or "",
+                            "party": asking.get("party") or "",
+                            "constituency": asking.get("memberFrom") or "",
                             "role": "MP",
                         },
                         date=v.get("tabledWhen", v.get("dateTabled", "")),
@@ -253,21 +260,29 @@ class UKParliamentScraper(BaseScraper):
                         logger.warning(f"[UK Parliament] Plenary endpoint {url} responded but returned no items (keys: {keys})")
                     break
                 batch_found = True
+                if not hasattr(self, "_plenary_fields_logged"):
+                    self._plenary_fields_logged = True
+                    sample = items[0] if items else {}
+                    member_sample = sample.get("member") or sample.get("Member")
+                    logger.warning(
+                        f"[UK Parliament] Plenary first-item fields: {list(sample.keys())} | "
+                        f"member type={type(member_sample).__name__} value={member_sample!r:.200}"
+                    )
                 for item in items:
                     text = item.get("Value", item.get("text", item.get("body",
                            item.get("ContributionText", item.get("StatementText", "")))))
                     if not text:
                         continue
-                    member_obj = item.get("member", item.get("Member", {})) if isinstance(item.get("member", item.get("Member")), dict) else {}
+                    member_obj = (item.get("member") or item.get("Member") or {})
                     records.append(self._make_record(
                         data_type=dtype,
                         member={
                             "id": str(item.get("MemberId", item.get("memberId", member_obj.get("id", "")))),
-                            "name": item.get("AttributedTo", item.get("MemberName",
-                                   item.get("memberName", member_obj.get("name",
-                                   item.get("nameDisplayAs", ""))))),
-                            "party": item.get("Party", member_obj.get("party", "")),
-                            "constituency": item.get("MemberFrom", member_obj.get("memberFrom", "")),
+                            "name": (item.get("AttributedTo") or item.get("attributedTo")
+                                     or item.get("MemberName") or item.get("memberName")
+                                     or member_obj.get("name") or item.get("nameDisplayAs") or ""),
+                            "party": item.get("Party") or member_obj.get("party") or "",
+                            "constituency": item.get("MemberFrom") or member_obj.get("memberFrom") or "",
                             "role": "MP",
                         },
                         date=item.get("Date", item.get("date", item.get("SittingDate",
