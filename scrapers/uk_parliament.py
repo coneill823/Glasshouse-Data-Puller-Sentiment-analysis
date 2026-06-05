@@ -183,7 +183,8 @@ class UKParliamentScraper(BaseScraper):
                         asking_sample = v.get("askingMember")
                         logger.warning(
                             f"[UK Parliament] Questions first-record fields: {list(v.keys())} | "
-                            f"askingMember type={type(asking_sample).__name__} value={asking_sample!r:.200}"
+                            f"askingMember type={type(asking_sample).__name__} value={asking_sample!r:.200} | "
+                            f"askingMemberId={v.get('askingMemberId')!r} cache_size={len(self._member_cache)}"
                         )
                     q_text = v.get("questionText", v.get("text", ""))
                     answer = v.get("answerText", v.get("answer", ""))
@@ -272,7 +273,8 @@ class UKParliamentScraper(BaseScraper):
                     member_sample = sample.get("member") or sample.get("Member")
                     logger.warning(
                         f"[UK Parliament] Plenary first-item fields: {list(sample.keys())} | "
-                        f"member type={type(member_sample).__name__} value={member_sample!r:.200}"
+                        f"member type={type(member_sample).__name__} value={member_sample!r:.200} | "
+                        f"memberId={sample.get('memberId')!r} cache_size={len(self._member_cache)}"
                     )
                 for item in items:
                     text = item.get("Value", item.get("text", item.get("body",

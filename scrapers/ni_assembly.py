@@ -348,18 +348,27 @@ class NIAssemblyScraper(BaseScraper):
                 "constituency": "",
                 "role": "MLA",
             })
-            desc = item.get("InterestDescription", item.get("Description", item.get("Interest", "")))
+            # Confirmed field name from API: RegisterEntry (not InterestDescription/Description)
+            desc = (item.get("RegisterEntry") or item.get("InterestDescription")
+                    or item.get("Description") or item.get("Interest") or "")
             if not desc:
                 continue
+            # Confirmed: RegisterCategory, RegisterCategoryId, RegisterEntryStartDate
+            cat = (item.get("RegisterCategory") or item.get("CategoryName")
+                   or item.get("Category") or "")
+            cat_id = str(item.get("RegisterCategoryId") or item.get("InterestId")
+                        or item.get("Id") or "")
+            reg_date = (item.get("RegisterEntryStartDate") or item.get("RegisteredDate")
+                        or item.get("Date") or "")
             records.append(self._make_record(
                 data_type="register_of_interests",
                 member=member,
-                date=item.get("RegisteredDate", item.get("Date", "")),
+                date=reg_date,
                 text=desc,
-                title=item.get("CategoryName", item.get("Category", "")),
+                title=cat,
                 metadata={
-                    "category": item.get("CategoryName", item.get("Category", "")),
-                    "interest_id": str(item.get("InterestId", item.get("Id", ""))),
+                    "category": cat,
+                    "interest_id": cat_id,
                 },
                 source_url=used_url,
             ))
@@ -838,8 +847,65 @@ class NIAssemblyScraper(BaseScraper):
         logger.info(f"[NI Assembly] {len(records)} vote records fetched")
         return records
 
+    def _parse_member_votes(self, member_votes, div_id: str, div_title: str,
+                            div_date: str, div_result: str, div_type: str,
+                            source_url: str) -> List[Dict]:
+        """Convert a list of MemberVoting dicts into vote records."""
+        records = []
+        for mv in member_votes:
+            if not isinstance(mv, dict):
+                continue
+            mv_dir = str(mv.get("VoteType") or mv.get("Vote") or mv.get("Decision")
+                         or mv.get("VotedFor") or "").lower()
+            if mv_dir in ("aye", "yes", "for", "1", "true"):
+                direction = "aye"
+            elif mv_dir in ("no", "noe", "noes", "against", "2", "false"):
+                direction = "no"
+            else:
+                direction = mv_dir or "unknown"
+            records.append(self._make_record(
+                data_type="vote",
+                member={
+                    "id": str(mv.get("PersonId") or mv.get("MemberId") or mv.get("MemberID") or ""),
+                    "name": mv.get("MemberName") or mv.get("Name") or mv.get("DisplayName") or "",
+                    "party": mv.get("PartyName") or mv.get("Party") or "",
+                    "constituency": mv.get("ConstituencyName") or mv.get("Constituency") or "",
+                    "role": "MLA",
+                },
+                date=div_date,
+                text=f"Voted {direction} on: {div_title}",
+                title=div_title,
+                metadata={
+                    "division_id": div_id,
+                    "vote_direction": direction,
+                    "division_result": div_result,
+                    "division_type": div_type,
+                },
+                source_url=source_url,
+            ))
+        return records
+
     def _fetch_votes_asmx(self, from_date: Optional[str] = None) -> List[Dict]:
         # Skip SOAP (consistently 500 for date params) — use HTTP GET directly.
+        # Discover available plenary methods so we can try per-division endpoints
+        # when the bulk GetVotesOnDivision_JSON returns empty MemberVoting lists.
+        if not hasattr(self, "_plenary_methods"):
+            self._plenary_methods = self._discover_asmx_methods("plenary")
+            if self._plenary_methods:
+                logger.warning(f"[NI Assembly] plenary.asmx methods: {self._plenary_methods}")
+        # Per-division member vote methods (try in priority order)
+        _PER_DIV_METHODS = [
+            "GetMemberVotingByEventId_JSON",
+            "GetMembersVotingByEventId_JSON",
+            "GetMemberVotesForEvent_JSON",
+            "GetVotingByEventId_JSON",
+            "GetMemberVotingByDocumentId_JSON",
+            "GetMembersVotingByDocumentId_JSON",
+            # discovered methods with "member" + "vot" in name
+        ] + [m for m in getattr(self, "_plenary_methods", [])
+             if re.search(r"member.*vot|vot.*member", m, re.I)
+             and m not in ("GetVotesOnDivision_JSON",)]
+
         records = []
         for start, end in _date_chunks(from_date):
             url = f"{_BASE}/plenary.asmx/GetVotesOnDivision_JSON"
@@ -862,7 +928,6 @@ class NIAssemblyScraper(BaseScraper):
 
                 member_votes = division.get("MemberVoting") or []
                 if isinstance(member_votes, dict):
-                    # Unwrap single-item dict (e.g. {"MemberVote": [...]})
                     member_votes = next(iter(member_votes.values()), []) if member_votes else []
                 if not isinstance(member_votes, list):
                     member_votes = []
@@ -871,6 +936,44 @@ class NIAssemblyScraper(BaseScraper):
                     self._vote_member_fields_logged = True
                     sample_mv = member_votes[0] if member_votes else {}
                     logger.warning(f"[NI Assembly] MemberVoting[0]: type={type(sample_mv).__name__} | {sample_mv!r:.300}")
+
+                if not member_votes and div_id:
+                    # MemberVoting is empty in the bulk response — try per-division endpoints.
+                    # Only attempt once per method to avoid thundering-herd on failures.
+                    if not hasattr(self, "_per_div_method_found"):
+                        for method in _PER_DIV_METHODS:
+                            per_url = f"{_BASE}/plenary.asmx/{method}"
+                            for id_param, id_val in [
+                                ("EventId", div_id), ("eventId", div_id),
+                                ("DocumentId", division.get("DocumentID", div_id)),
+                                ("documentId", division.get("DocumentID", div_id)),
+                            ]:
+                                per_resp = self._get(per_url, params={id_param: id_val})
+                                if not per_resp:
+                                    continue
+                                per_data = self._parse_asmx_response(per_resp, per_url)
+                                candidate = _first_list(per_data)
+                                if candidate and isinstance(candidate[0], dict):
+                                    member_votes = candidate
+                                    self._per_div_method_found = method
+                                    self._per_div_method_param = id_param
+                                    logger.warning(f"[NI Assembly] Per-division method found: {method} (param={id_param}) → {len(member_votes)} votes | sample={member_votes[0]!r:.300}")
+                                    break
+                            if member_votes:
+                                break
+                        if not member_votes:
+                            self._per_div_method_found = None  # mark as not found
+                    elif getattr(self, "_per_div_method_found", None):
+                        # Re-use the working method
+                        method = self._per_div_method_found
+                        param = self._per_div_method_param
+                        per_url = f"{_BASE}/plenary.asmx/{method}"
+                        per_resp = self._get(per_url, params={param: div_id})
+                        if per_resp:
+                            per_data = self._parse_asmx_response(per_resp, per_url)
+                            candidate = _first_list(per_data)
+                            if candidate and isinstance(candidate[0], dict):
+                                member_votes = candidate
 
                 if not member_votes:
                     records.append(self._make_record(
@@ -883,36 +986,10 @@ class NIAssemblyScraper(BaseScraper):
                         source_url=f"{_BASE}/plenary.asmx",
                     ))
                 else:
-                    for mv in member_votes:
-                        if not isinstance(mv, dict):
-                            continue
-                        mv_dir = str(mv.get("VoteType") or mv.get("Vote") or mv.get("Decision") or mv.get("VotedFor") or "").lower()
-                        if mv_dir in ("aye", "yes", "for", "1", "true"):
-                            direction = "aye"
-                        elif mv_dir in ("no", "noe", "noes", "against", "2", "false"):
-                            direction = "no"
-                        else:
-                            direction = mv_dir or "unknown"
-                        records.append(self._make_record(
-                            data_type="vote",
-                            member={
-                                "id": str(mv.get("PersonId") or mv.get("MemberId") or mv.get("MemberID") or ""),
-                                "name": mv.get("MemberName") or mv.get("Name") or mv.get("DisplayName") or "",
-                                "party": mv.get("PartyName") or mv.get("Party") or "",
-                                "constituency": mv.get("ConstituencyName") or mv.get("Constituency") or "",
-                                "role": "MLA",
-                            },
-                            date=div_date,
-                            text=f"Voted {direction} on: {div_title}",
-                            title=div_title,
-                            metadata={
-                                "division_id": div_id,
-                                "vote_direction": direction,
-                                "division_result": div_result,
-                                "division_type": div_type,
-                            },
-                            source_url=f"{_BASE}/plenary.asmx",
-                        ))
+                    records.extend(self._parse_member_votes(
+                        member_votes, div_id, div_title, div_date,
+                        div_result, div_type, f"{_BASE}/plenary.asmx",
+                    ))
         return records
 
     def _fetch_votes_aims(self, from_date: Optional[str] = None) -> List[Dict]:
