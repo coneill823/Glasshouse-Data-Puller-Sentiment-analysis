@@ -126,14 +126,22 @@ class UKParliamentScraper(BaseScraper):
             # Incremental pull — single range, unlikely to exceed the per-chunk cap
             chunks = [(from_date, today)]
         else:
-            # Full pull — year-by-year from 2015 to present
+            # Full pull — quarterly from 2015 to present.
+            # Year-level chunks exceeded the 20K/page-200 hard cap for high-volume years
+            # (2017, 2018, 2019, 2021, 2024 each had 25K–32K questions per year).
+            # Quarterly chunks keep each chunk under ~10K, safely below the cap.
             start_year = 2015
             current_year = _date.today().year
             chunks = []
+            quarter_starts = ["01-01", "04-01", "07-01", "10-01"]
+            quarter_ends   = ["03-31", "06-30", "09-30", "12-31"]
             for year in range(start_year, current_year + 1):
-                year_start = f"{year}-01-01"
-                year_end = f"{year}-12-31" if year < current_year else today
-                chunks.append((year_start, year_end))
+                for i in range(4):
+                    q_start = f"{year}-{quarter_starts[i]}"
+                    if q_start > today:
+                        break
+                    q_end = min(f"{year}-{quarter_ends[i]}", today)
+                    chunks.append((q_start, q_end))
 
         records = []
         seen_ids: set = set()
