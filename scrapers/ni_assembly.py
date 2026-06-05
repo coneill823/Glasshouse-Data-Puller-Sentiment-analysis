@@ -866,7 +866,7 @@ class NIAssemblyScraper(BaseScraper):
             records.append(self._make_record(
                 data_type="vote",
                 member={
-                    "id": str(mv.get("PersonId") or mv.get("MemberId") or mv.get("MemberID") or ""),
+                    "id": str(mv.get("PersonID") or mv.get("PersonId") or mv.get("MemberId") or mv.get("MemberID") or ""),
                     "name": mv.get("MemberName") or mv.get("Name") or mv.get("DisplayName") or "",
                     "party": mv.get("PartyName") or mv.get("Party") or "",
                     "constituency": mv.get("ConstituencyName") or mv.get("Constituency") or "",
@@ -893,18 +893,20 @@ class NIAssemblyScraper(BaseScraper):
             self._plenary_methods = self._discover_asmx_methods("plenary")
             if self._plenary_methods:
                 logger.warning(f"[NI Assembly] plenary.asmx methods: {self._plenary_methods}")
-        # Per-division member vote methods (try in priority order)
-        _PER_DIV_METHODS = [
+        # Per-division member vote methods — confirmed working method first to avoid 500-storm
+        _CONFIRMED = [
+            ("GetDivisionMemberVoting_JSON", "DocumentId"),
+        ]
+        _FALLBACK_METHODS = [
             "GetMemberVotingByEventId_JSON",
             "GetMembersVotingByEventId_JSON",
             "GetMemberVotesForEvent_JSON",
             "GetVotingByEventId_JSON",
             "GetMemberVotingByDocumentId_JSON",
             "GetMembersVotingByDocumentId_JSON",
-            # discovered methods with "member" + "vot" in name
         ] + [m for m in getattr(self, "_plenary_methods", [])
              if re.search(r"member.*vot|vot.*member", m, re.I)
-             and m not in ("GetVotesOnDivision_JSON",)]
+             and m not in ("GetVotesOnDivision_JSON", "GetDivisionMemberVoting_JSON")]
 
         records = []
         for start, end in _date_chunks(from_date):
@@ -937,38 +939,57 @@ class NIAssemblyScraper(BaseScraper):
                     sample_mv = member_votes[0] if member_votes else {}
                     logger.warning(f"[NI Assembly] MemberVoting[0]: type={type(sample_mv).__name__} | {sample_mv!r:.300}")
 
+                doc_id = str(division.get("DocumentID") or division.get("DocumentId") or div_id)
                 if not member_votes and div_id:
                     # MemberVoting is empty in the bulk response — try per-division endpoints.
-                    # Only attempt once per method to avoid thundering-herd on failures.
+                    # Try confirmed working method (GetDivisionMemberVoting_JSON + DocumentId) first
+                    # to avoid the thundering-herd of HTTP-500 retries from other candidates.
                     if not hasattr(self, "_per_div_method_found"):
-                        for method in _PER_DIV_METHODS:
+                        # Try confirmed pairs first
+                        for method, id_param in _CONFIRMED:
+                            id_val = doc_id if id_param.lower().startswith("document") else div_id
                             per_url = f"{_BASE}/plenary.asmx/{method}"
-                            for id_param, id_val in [
-                                ("EventId", div_id), ("eventId", div_id),
-                                ("DocumentId", division.get("DocumentID", div_id)),
-                                ("documentId", division.get("DocumentID", div_id)),
-                            ]:
-                                per_resp = self._get(per_url, params={id_param: id_val})
-                                if not per_resp:
-                                    continue
-                                per_data = self._parse_asmx_response(per_resp, per_url)
-                                candidate = _first_list(per_data)
-                                if candidate and isinstance(candidate[0], dict):
-                                    member_votes = candidate
-                                    self._per_div_method_found = method
-                                    self._per_div_method_param = id_param
-                                    logger.warning(f"[NI Assembly] Per-division method found: {method} (param={id_param}) → {len(member_votes)} votes | sample={member_votes[0]!r:.300}")
-                                    break
-                            if member_votes:
+                            per_resp = self._get(per_url, params={id_param: id_val})
+                            if not per_resp:
+                                continue
+                            per_data = self._parse_asmx_response(per_resp, per_url)
+                            candidate = _first_list(per_data)
+                            if candidate and isinstance(candidate[0], dict):
+                                member_votes = candidate
+                                self._per_div_method_found = method
+                                self._per_div_method_param = id_param
+                                logger.warning(f"[NI Assembly] Per-division method found: {method} (param={id_param}) → {len(member_votes)} votes | sample={member_votes[0]!r:.300}")
                                 break
+                        # If confirmed methods failed, try fallbacks
+                        if not member_votes:
+                            for method in _FALLBACK_METHODS:
+                                per_url = f"{_BASE}/plenary.asmx/{method}"
+                                for id_param, id_val in [
+                                    ("EventId", div_id), ("eventId", div_id),
+                                    ("DocumentId", doc_id), ("documentId", doc_id),
+                                ]:
+                                    per_resp = self._get(per_url, params={id_param: id_val})
+                                    if not per_resp:
+                                        continue
+                                    per_data = self._parse_asmx_response(per_resp, per_url)
+                                    candidate = _first_list(per_data)
+                                    if candidate and isinstance(candidate[0], dict):
+                                        member_votes = candidate
+                                        self._per_div_method_found = method
+                                        self._per_div_method_param = id_param
+                                        logger.warning(f"[NI Assembly] Per-division fallback found: {method} (param={id_param}) → {len(member_votes)} votes | sample={member_votes[0]!r:.300}")
+                                        break
+                                if member_votes:
+                                    break
                         if not member_votes:
                             self._per_div_method_found = None  # mark as not found
                     elif getattr(self, "_per_div_method_found", None):
-                        # Re-use the working method
+                        # Re-use the working method with correct param value
                         method = self._per_div_method_found
                         param = self._per_div_method_param
+                        id_val = doc_id if param.lower().startswith("document") else div_id
                         per_url = f"{_BASE}/plenary.asmx/{method}"
-                        per_resp = self._get(per_url, params={param: div_id})
+                        per_resp = self._get(per_url, params={param: id_val})
                         if per_resp:
                             per_data = self._parse_asmx_response(per_resp, per_url)
                             candidate = _first_list(per_data)

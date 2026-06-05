@@ -506,8 +506,8 @@ def _wales_votes_sample(s: WelshParliamentScraper) -> Tuple[List[Dict], str]:
         if not link_el:
             continue
         title  = (row.select_one("td:first-child, .title, h2, h3") or link_el).get_text(strip=True)
-        date_el = row.select_one("td:nth-child(2), time, .date, [class*='date'], li:nth-child(2), span[class*='date']")
-        div_date = date_el.get_text(strip=True) if date_el else ""
+        date_el = row.select_one("time[datetime], td:nth-child(2), time, .date, [class*='date'], li:nth-child(2)")
+        div_date = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
         if not div_date:
             row_text = row.get_text(separator=" ", strip=True)
             dm = re.search(r"\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{1,2}\s+\w+\s+\d{4}", row_text)
@@ -519,12 +519,34 @@ def _wales_votes_sample(s: WelshParliamentScraper) -> Tuple[List[Dict], str]:
         detail_soup = s._html_get(detail_url)
         if not detail_soup:
             continue
+        # Try to extract date from the detail page if not found in index row
+        if not div_date:
+            for sel in ["time[datetime]", "time", ".date", "[class*='date']", "h1", "h2"]:
+                el = detail_soup.select_one(sel)
+                if el:
+                    candidate = el.get("datetime", el.get_text(strip=True))
+                    dm = re.search(r"\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{1,2}\s+\w+\s+\d{4}", candidate)
+                    if dm:
+                        div_date = dm.group(0)
+                        break
         for direction, sels in [
-            ("aye",     [".ayes li", ".for li", "[class*='aye'] li", "[class*='For'] li"]),
-            ("no",      [".noes li", ".against li", "[class*='no'] li", "[class*='Against'] li"]),
-            ("abstain", [".abstentions li", ".abstain li", "[class*='abstain'] li"]),
+            ("aye",     [".ayes li", ".for li", "[class*='aye'] li", "[class*='For'] li",
+                         ".vote-aye li", ".vote-for li", "ul.for li", "ul.ayes li"]),
+            ("no",      [".noes li", ".against li", "[class*='no'] li", "[class*='Against'] li",
+                         ".vote-no li", ".vote-against li", "ul.against li", "ul.noes li"]),
+            ("abstain", [".abstentions li", ".abstain li", "[class*='abstain'] li",
+                         ".vote-abstain li"]),
         ]:
             voters = next((detail_soup.select(sel) for sel in sels if detail_soup.select(sel)), [])
+            if not voters:
+                # Log CSS classes once so we know what's on the page
+                if not hasattr(s, "_wales_vote_detail_logged"):
+                    s._wales_vote_detail_logged = True
+                    all_cls = sorted({c for el in detail_soup.select("[class]") for c in el.get("class", [])})
+                    import logging as _logging
+                    _logging.getLogger(__name__).warning(
+                        f"[Wales votes detail] {detail_url} CSS classes: {all_cls[:30]}"
+                    )
             for voter_el in voters:
                 name = voter_el.get_text(strip=True)
                 if name:

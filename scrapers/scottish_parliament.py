@@ -106,7 +106,23 @@ class ScottishParliamentScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def fetch_members(self) -> List[Dict]:
-        rows = self._odata_get("Members")
+        # Try expanding MemberParties navigation property inline
+        expand_rows = []
+        try:
+            url = f"{_API}/Members"
+            resp = self._get(url, params={"$format": "json", "$top": 1000,
+                                           "$expand": "MemberParties"})
+            if resp and resp.ok:
+                data = resp.json()
+                expand_rows = data if isinstance(data, list) else data.get("value", [])
+                if expand_rows and not hasattr(self, "_expand_logged"):
+                    self._expand_logged = True
+                    sample = expand_rows[0]
+                    mp = sample.get("MemberParties")
+                    logger.warning(f"[Scottish Parliament] Members?$expand=MemberParties sample MemberParties={mp!r:.200}")
+        except Exception:
+            pass
+        rows = expand_rows or self._odata_get("Members")
         if rows:
             logger.warning(f"[Scottish Parliament] Members OData sample fields: {list(rows[0].keys())} | sample={dict(list(rows[0].items())[:8])!r:.400}")
         members = []
@@ -123,11 +139,20 @@ class ScottishParliamentScraper(BaseScraper):
             else:
                 full_name = (parl_name or m.get("PreferredName") or m.get("DisplayName")
                              or m.get("MemberName") or m.get("Name") or "")
-            # Party not available in the Members OData entity — may be populated via PersonParties
+            # Party — try inline expanded MemberParties first, then direct fields
             party = (
                 m.get("PartyName") or m.get("Party") or m.get("PartyAbbreviation")
                 or m.get("PartyGroupName") or m.get("PoliticalGroupName") or ""
             )
+            if not party:
+                mp_list = m.get("MemberParties")
+                if isinstance(mp_list, list) and mp_list:
+                    latest = max(mp_list, key=lambda x: str(x.get("ValidFromDate") or ""))
+                    party = (latest.get("PartyName") or latest.get("Party")
+                             or latest.get("PartyAbbreviation") or latest.get("Name") or "")
+                elif isinstance(mp_list, dict):
+                    party = (mp_list.get("PartyName") or mp_list.get("Party")
+                             or mp_list.get("Name") or "")
             constituency = (
                 m.get("ConstituencyName") or m.get("RegionName")
                 or m.get("Constituency") or m.get("Region") or ""

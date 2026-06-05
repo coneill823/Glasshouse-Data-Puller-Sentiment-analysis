@@ -121,6 +121,8 @@ class UKParliamentScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def fetch_questions(self, from_date: Optional[str] = None) -> List[Dict]:
+        if not self._member_cache:
+            self.fetch_members()
         # questions-statements-api hard-caps at page 200 (offset 20,000) with HTTP 500.
         # Chunk by year so each chunk's offset pagination stays well below that limit.
         url = f"{_QUESTIONS}/writtenquestions/questions"
@@ -228,6 +230,8 @@ class UKParliamentScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def fetch_plenary_business(self, from_date: Optional[str] = None) -> List[Dict]:
+        if not self._member_cache:
+            self.fetch_members()
         records = []
         # Written statements live on the same API as questions, not hansard.parliament.uk
         # hansard.parliament.uk/api/* all return 404; correct domain is questions-statements-api

@@ -178,6 +178,58 @@ class WelshParliamentScraper(BaseScraper):
         logger.info(f"[Welsh Parliament] {len(members)} MSs fetched")
         return members
 
+    def _try_wp_rest_members(self) -> List[Dict]:
+        """Attempt to get MS data from the WordPress REST API.
+
+        senedd.wales runs WordPress; custom post types for MSs are accessible via
+        /wp-json/wp/v2/<post-type>?_embed&per_page=100
+        """
+        for post_type in ["ms", "aelod", "member", "senedd-member", "mlas", "ms-profile"]:
+            for base in [_BASE, f"{_BASE}/en"]:
+                url = f"{base}/wp-json/wp/v2/{post_type}"
+                resp = self._api_get(url, params={"per_page": 100, "_embed": 1})
+                if not resp or not isinstance(resp, list) or not resp:
+                    continue
+                if not resp[0].get("title"):
+                    continue
+                members = []
+                for post in resp:
+                    title = post.get("title", {})
+                    name = title.get("rendered", "") if isinstance(title, dict) else str(title)
+                    name = re.sub(r"<[^>]+>", "", name).strip()
+                    if not name or len(name) < 3:
+                        continue
+                    # Try embedded terms for party / constituency
+                    embedded = post.get("_embedded", {})
+                    terms = embedded.get("wp:term", [])
+                    party = ""
+                    constituency = ""
+                    for term_group in terms:
+                        for term in (term_group if isinstance(term_group, list) else [term_group]):
+                            taxonomy = term.get("taxonomy", "")
+                            term_name = term.get("name", "")
+                            if "party" in taxonomy.lower() or "group" in taxonomy.lower():
+                                party = term_name
+                            elif "constituency" in taxonomy.lower() or "region" in taxonomy.lower():
+                                constituency = term_name
+                    meta = post.get("meta", {}) if isinstance(post.get("meta"), dict) else {}
+                    if not party:
+                        party = meta.get("party", meta.get("political_party", ""))
+                    if not constituency:
+                        constituency = meta.get("constituency", meta.get("region", ""))
+                    members.append({
+                        "id": str(post.get("id", post.get("slug", ""))),
+                        "name": name,
+                        "party": party,
+                        "constituency": constituency,
+                        "role": "MS",
+                        "status": "current",
+                    })
+                if members:
+                    logger.warning(f"[Welsh Parliament] WP REST API {url}: {len(members)} MSs, sample={members[0]!r:.200}")
+                    return members
+        return []
+
     def _scrape_members(self) -> List[Dict]:
         soup = self._try_paths(_BASE, _MEMBER_PATHS)
         if not soup:
@@ -187,12 +239,23 @@ class WelshParliamentScraper(BaseScraper):
         members = []
 
         # Primary approach: find member profile links and scrape each profile.
-        # senedd.wales profile URLs match /find-a-member-of-the-senedd/{slug}/
+        # Try the WordPress REST API first (fastest, most reliable for party data).
+        wp_members = self._try_wp_rest_members()
+        if wp_members:
+            logger.info(f"[Welsh Parliament] {len(wp_members)} MSs fetched via WordPress REST API")
+            return wp_members
+
+        # Fallback: scrape profile pages from the member listing
+        # senedd.wales profile URLs match /find-a-member-of-the-senedd/{slug}/ or /senedd-members/{slug}/
+        sample_hrefs = [a.get("href", "") for a in soup.select("a[href]")][:20]
+        logger.warning(f"[Welsh Parliament] Sample hrefs on listing page: {sample_hrefs}")
         profile_links = list(dict.fromkeys(
             (a["href"] if a["href"].startswith("http") else f"{_BASE}{a['href']}")
             for a in soup.select("a[href]")
-            if re.search(r"/find-a-member-of-the-senedd/[a-z][a-z0-9-]+/?$",
-                         a.get("href", ""), re.I)
+            if re.search(
+                r"/(find-a-member-of-the-senedd|senedd-members|members|aelodau-senedd)/[a-z][a-z0-9-]+/?$",
+                a.get("href", ""), re.I)
+            and not re.search(r"/(category|tag|page|search|help|glossary|contact)", a.get("href", ""), re.I)
         ))
         logger.warning(f"[Welsh Parliament] Member profile links found: {len(profile_links)} — e.g. {profile_links[:3]}")
 
@@ -490,10 +553,41 @@ class WelshParliamentScraper(BaseScraper):
                 combined = f"Question: {q_text}\n\nAnswer: {answer}" if answer else q_text
                 if not combined:
                     combined = q_detail.get_text(separator=" ", strip=True)[:500]
-                member_el = q_detail.select_one(
-                    ".member-name, .asked-by, [class*='member'], strong, h2"
-                )
-                member_name = member_el.get_text(strip=True) if member_el else ""
+                member_name = ""
+                # Try specific Senedd member selectors first
+                for sel in [
+                    ".member-name", ".asked-by", "[class*='member-name']",
+                    "[class*='asked-by']", "[class*='tabled-by']",
+                ]:
+                    el = q_detail.select_one(sel)
+                    if el:
+                        member_name = el.get_text(strip=True)
+                        break
+                # Try label-value patterns: <dt>Tabled by</dt><dd>Name</dd>
+                if not member_name:
+                    for dt in q_detail.select("dt"):
+                        dt_text = dt.get_text(strip=True).lower()
+                        if any(kw in dt_text for kw in ("tabled", "asked", "member")):
+                            dd = dt.find_next_sibling("dd")
+                            if dd:
+                                member_name = dd.get_text(strip=True)
+                                break
+                # Try looking for "Asked by:" / "Tabled by:" pattern in paragraph text
+                if not member_name:
+                    for p in q_detail.select("p, span, td"):
+                        text_raw = p.get_text(strip=True)
+                        m = re.match(r"(?:Asked|Tabled)\s+by[:\s]+(.+)", text_raw, re.I)
+                        if m:
+                            member_name = m.group(1).strip()
+                            break
+                # Last resort: first <strong> or <b> that looks like a name (2+ words, title-case)
+                if not member_name:
+                    for el in q_detail.select("strong, b"):
+                        candidate = el.get_text(strip=True)
+                        words = candidate.split()
+                        if 2 <= len(words) <= 5 and all(w[0].isupper() for w in words if w):
+                            member_name = candidate
+                            break
                 date_el = q_detail.select_one("time[datetime], time, .date, [class*='date']")
                 q_date = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else current.isoformat()
                 subject_el = q_detail.select_one("h1, .subject, .title, [class*='subject']")
@@ -890,20 +984,52 @@ class WelshParliamentScraper(BaseScraper):
                 continue
             for a in soup.select("a[href]"):
                 href = a.get("href", "")
-                m = re.search(r"[Mm]eeting[Ii][Dd]=(\d+)|/[Mm]eeting/(\d+)", href)
+                m = re.search(r"[Mm]eeting[Ii][Dd]=(\d+)|/[Mm]eeting/(\d+)|/(\d{4,})", href)
                 if m:
-                    mid = m.group(1) or m.group(2)
+                    mid = m.group(1) or m.group(2) or m.group(3)
                     if mid not in seen:
                         seen.add(mid)
-                        # Try to get date from link text or parent row
-                        row = a.find_parent("tr") or a.find_parent("li")
-                        row_text = row.get_text(separator=" ", strip=True) if row else ""
-                        dm = re.search(r"\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{4}|\d{1,2}\s+\w+\s+\d{4}", row_text)
-                        m_date = dm.group(0) if dm else ""
+                        # Try to get date from time element, link text, or parent row
+                        row = a.find_parent("tr") or a.find_parent("li") or a.find_parent("div")
+                        time_el = (row.select_one("time[datetime]") if row else None) or a.select_one("time[datetime]")
+                        if time_el:
+                            m_date = time_el.get("datetime", "")[:10]
+                        else:
+                            row_text = " ".join([
+                                a.get_text(strip=True),
+                                row.get_text(separator=" ", strip=True) if row else "",
+                            ])
+                            dm = re.search(
+                                r"\d{4}-\d{2}-\d{2}"
+                                r"|\d{1,2}/\d{1,2}/\d{4}"
+                                r"|\d{1,2}\s+\w+\s+\d{4}"
+                                r"|\d{1,2}\s+\w{3,}\s+\d{4}",
+                                row_text,
+                            )
+                            m_date = dm.group(0) if dm else ""
+                            # Convert "6 June 2025" to ISO if needed
+                            if m_date and not re.match(r"\d{4}-\d{2}-\d{2}", m_date):
+                                try:
+                                    from datetime import datetime as _dt
+                                    for fmt in ("%d %B %Y", "%d/%m/%Y", "%d %b %Y"):
+                                        try:
+                                            m_date = _dt.strptime(m_date, fmt).strftime("%Y-%m-%d")
+                                            break
+                                        except ValueError:
+                                            continue
+                                except Exception:
+                                    pass
                         meetings.append({"id": mid, "date": m_date})
             if meetings:
                 logger.info(f"[Welsh Parliament] Found {len(meetings)} meeting IDs from {url}")
+                sample_dated = [x for x in meetings if x["date"]][:3]
+                sample_undated = [x for x in meetings if not x["date"]][:3]
+                logger.warning(f"[Welsh Parliament] Meeting sample dated={sample_dated} undated={sample_undated}")
                 break
+            else:
+                # Log sample hrefs to diagnose why no meeting IDs were found
+                sample_hrefs = [a.get("href", "") for a in soup.select("a[href]")][:10]
+                logger.warning(f"[Welsh Parliament] No meeting IDs at {url} — sample hrefs: {sample_hrefs}")
         return meetings
 
     def _fetch_votes_xml_export(self, meeting_id: str, meeting_date: str,
@@ -946,10 +1072,18 @@ class WelshParliamentScraper(BaseScraper):
             if "}" in el.tag:
                 el.tag = el.tag.split("}", 1)[1]
 
-        # Extract date from XML if not provided
+        # Extract date from XML — try multiple element names
         if not meeting_date:
-            date_el = root.find(".//SittingDate") or root.find(".//MeetingDate") or root.find(".//Date")
-            meeting_date = date_el.text[:10] if date_el is not None and date_el.text else ""
+            for date_tag in ("SittingDate", "MeetingDate", "Date", "PlnryDate",
+                             "PlenaryDate", "SessionDate", "DateOfSitting"):
+                date_el = root.find(f".//{date_tag}")
+                if date_el is not None and date_el.text:
+                    meeting_date = date_el.text.strip()[:10]
+                    break
+        if not meeting_date and not hasattr(self, "_xml_date_logged"):
+            self._xml_date_logged = True
+            all_tags = list({el.tag for el in root.iter()})
+            logger.warning(f"[Welsh Parliament] XML meeting {meeting_id}: could not find date. Tags present: {all_tags[:20]}")
 
         before = len(records)
         for div_el in root.iter("Division"):
