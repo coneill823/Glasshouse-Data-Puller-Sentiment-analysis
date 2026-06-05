@@ -37,9 +37,10 @@ class UKParliamentScraper(BaseScraper):
     # Members (Commons — MPs)
     # ------------------------------------------------------------------
 
-    def _fetch_member_page(self, url: str, is_current: bool, skip: int) -> List[Dict]:
+    def _fetch_member_page(self, url: str, is_current: bool, skip: int,
+                            house: str = "Commons") -> List[Dict]:
         resp = self._get(url, params={
-            "House": "Commons",
+            "House": house,
             "IsCurrentMember": "true" if is_current else "false",
             "skip": skip,
             "take": _MEMBERS_PAGE,
@@ -56,7 +57,7 @@ class UKParliamentScraper(BaseScraper):
                 "name": v.get("nameDisplayAs", v.get("nameFullTitle", "")),
                 "party": v.get("latestParty", {}).get("name", "") if isinstance(v.get("latestParty"), dict) else "",
                 "constituency": v.get("latestHouseMembership", {}).get("membershipFrom", "") if isinstance(v.get("latestHouseMembership"), dict) else "",
-                "role": "MP",
+                "role": "MP" if house == "Commons" else "Lord",
                 "status": "current" if is_current else "historical",
             })
         return members
@@ -74,6 +75,22 @@ class UKParliamentScraper(BaseScraper):
                 skip += _MEMBERS_PAGE
         logger.info(f"[UK Parliament] {len(all_members)} MPs fetched")
         self._member_cache = {m["id"]: m for m in all_members}
+        # Also populate the cache with Lords members so written-statement authors
+        # from the upper House resolve too (statements API mixes both Houses).
+        # Lords are added to the cache only — not the returned MP list.
+        lords_count = 0
+        for is_current in (True, False):
+            skip = 0
+            while True:
+                batch = self._fetch_member_page(url, is_current, skip, house="Lords")
+                for m in batch:
+                    if m["id"] and m["id"] not in self._member_cache:
+                        self._member_cache[m["id"]] = m
+                        lords_count += 1
+                if len(batch) < _MEMBERS_PAGE:
+                    break
+                skip += _MEMBERS_PAGE
+        logger.info(f"[UK Parliament] {lords_count} Lords added to member cache (cache size {len(self._member_cache)})")
         return all_members
 
     # ------------------------------------------------------------------

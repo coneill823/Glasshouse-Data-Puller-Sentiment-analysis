@@ -484,7 +484,21 @@ def test_scotland(verbose: bool = False, save_dir: Optional[Path] = None) -> Lis
 # ── Welsh Parliament ──────────────────────────────────────────────────────────
 
 def _wales_votes_sample(s: WelshParliamentScraper) -> Tuple[List[Dict], str]:
-    """Fetch division index then detail for first 10 rows only."""
+    """Prefer the production XML-export path (reliable dates+names); fall back to
+    HTML division-index scraping for the first 20 rows only."""
+    # 1. Production path: meeting IDs → XML transcript export
+    meeting_ids = s._fetch_meeting_ids_wales(RECENT_90)
+    if meeting_ids:
+        records: List[Dict] = []
+        hits = 0
+        for m in meeting_ids[:10]:
+            added = s._fetch_votes_xml_export(m["id"], m.get("date", ""), None, records)
+            if added > 0:
+                hits += 1
+        if records:
+            return records, f"{len(meeting_ids)} meetings found; XML export for first 10 ({hits} had votes)"
+
+    # 2. Fallback: HTML division-index scraping
     soup = s._try_paths(_WALES_RECORD, _WALES_DIV_PATHS)
     if not soup:
         return [], "could not load divisions index from record.senedd.wales"
@@ -498,11 +512,26 @@ def _wales_votes_sample(s: WelshParliamentScraper) -> Tuple[List[Dict], str]:
         return [], "no division rows found on index page"
 
     records = []
-    # Filter for rows that actually contain a division link (not nav/header rows)
-    division_rows = [r for r in rows if r.select_one("a[href]")
-                     and (r.select_one("a[href]")["href"] or "").startswith(("/", "http"))]
-    for row in division_rows[:20]:
-        link_el = row.select_one("a[href]")
+    # A real division link points at a vote/division/meeting detail page — not the
+    # site nav (glossary, help, contact, senedd-business, etc.).
+    _NAV_RE = re.compile(r"/(glossary|help|contact|search|senedd-business|committees|"
+                         r"legislation|about|cookie|privacy|accessibility)", re.I)
+    _DIV_RE = re.compile(r"vot|division|meeting|plenary|cofnod|record", re.I)
+
+    def _division_link(r):
+        for a in r.select("a[href]"):
+            href = a.get("href", "")
+            if not href.startswith(("/", "http")):
+                continue
+            if _NAV_RE.search(href):
+                continue
+            if _DIV_RE.search(href):
+                return a
+        return None
+
+    division_rows = [(r, _division_link(r)) for r in rows]
+    division_rows = [(r, a) for r, a in division_rows if a is not None]
+    for row, link_el in division_rows[:20]:
         if not link_el:
             continue
         title  = (row.select_one("td:first-child, .title, h2, h3") or link_el).get_text(strip=True)

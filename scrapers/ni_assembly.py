@@ -244,8 +244,17 @@ class NIAssemblyScraper(BaseScraper):
 
 
     def fetch_members(self) -> List[Dict]:
-        data = self._asmx("members", "GetAllCurrentMembers_JSON")
-        rows = _first_list(data)
+        # GetAllCurrentMembers_JSON is the primary method; fall back to alternates
+        # if the first call flakes (the endpoint occasionally returns empty on a
+        # cold connection — register/questions on the same host work seconds later).
+        rows = []
+        for method in ("GetAllCurrentMembers_JSON", "GetAllMembers_JSON",
+                       "GetMembers_JSON", "GetAllMembersList_JSON"):
+            rows = _first_list(self._asmx("members", method))
+            if rows:
+                if method != "GetAllCurrentMembers_JSON":
+                    logger.warning(f"[NI Assembly] fetched members via fallback method {method}")
+                break
         members = []
         for m in rows:
             members.append({
@@ -256,6 +265,21 @@ class NIAssemblyScraper(BaseScraper):
                 "role": "MLA",
                 "status": "current",
             })
+        # Last-resort fallback: derive a partial member roster from the register
+        # of interests (which exposes PersonId + MemberName) so a transient members
+        # outage doesn't zero out the whole correlation cache.
+        if not members:
+            logger.warning("[NI Assembly] members endpoint returned 0 — deriving roster from register of interests")
+            seen = set()
+            for entry in _first_list(self._asmx("register", "GetAllRegisteredInterests_JSON")):
+                pid = str(entry.get("PersonId", ""))
+                name = entry.get("MemberName", "")
+                if pid and pid not in seen and name:
+                    seen.add(pid)
+                    members.append({
+                        "id": pid, "name": name, "party": "",
+                        "constituency": "", "role": "MLA", "status": "current",
+                    })
         logger.info(f"[NI Assembly] {len(members)} MLAs fetched")
         return members
 
