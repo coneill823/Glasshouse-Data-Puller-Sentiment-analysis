@@ -175,6 +175,12 @@ class UKParliamentScraper(BaseScraper):
                         continue
                     if q_id:
                         seen_ids.add(q_id)
+                    if not seen_ids or len(seen_ids) == 1:
+                        asking_sample = v.get("askingMember")
+                        logger.warning(
+                            f"[UK Parliament] Questions first-record fields: {list(v.keys())} | "
+                            f"askingMember type={type(asking_sample).__name__} value={asking_sample!r:.200}"
+                        )
                     q_text = v.get("questionText", v.get("text", ""))
                     answer = v.get("answerText", v.get("answer", ""))
                     combined = f"Question: {q_text}\n\nAnswer: {answer}" if answer else q_text
@@ -254,6 +260,14 @@ class UKParliamentScraper(BaseScraper):
                         logger.warning(f"[UK Parliament] Plenary endpoint {url} responded but returned no items (keys: {keys})")
                     break
                 batch_found = True
+                if not hasattr(self, "_plenary_fields_logged"):
+                    self._plenary_fields_logged = True
+                    sample = items[0] if items else {}
+                    member_sample = sample.get("member") or sample.get("Member")
+                    logger.warning(
+                        f"[UK Parliament] Plenary first-item fields: {list(sample.keys())} | "
+                        f"member type={type(member_sample).__name__} value={member_sample!r:.200}"
+                    )
                 for item in items:
                     text = item.get("Value", item.get("text", item.get("body",
                            item.get("ContributionText", item.get("StatementText", "")))))

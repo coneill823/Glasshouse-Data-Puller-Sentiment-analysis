@@ -28,12 +28,36 @@ import re
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-# Silence scraper INFO/DEBUG — we control all output here
-logging.basicConfig(level=logging.WARNING, format="%(levelname)-8s %(message)s")
+
+class _Tee:
+    """Mirror writes to both the original stdout and a log file simultaneously."""
+
+    def __init__(self, path: Path):
+        self._orig = sys.__stdout__
+        self._f = open(path, "w", encoding="utf-8")
+        sys.stdout = self
+
+    def write(self, data: str) -> None:
+        self._orig.write(data)
+        self._f.write(data)
+
+    def flush(self) -> None:
+        self._orig.flush()
+        self._f.flush()
+
+    def isatty(self) -> bool:
+        return False
+
+    def close(self) -> None:
+        sys.stdout = self._orig
+        self._f.close()
+
+# Scraper WARNING/ERROR output will be routed to stdout inside main()
+# so it ends up in both terminal and log file.
 
 from config import PARLIAMENTS
 from scrapers.ni_assembly import NIAssemblyScraper, _first_list as _ni_list, _extract_ni_speaker
@@ -667,12 +691,35 @@ def main():
                         help="Write one sample record per test to test_data/")
     args = parser.parse_args()
 
+    # ── Log file setup ────────────────────────────────────────────────────
+    logs_dir = Path("logs")
+    logs_dir.mkdir(exist_ok=True)
+    run_ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    parl_label = args.parliament or "all"
+    log_path = logs_dir / f"test_{parl_label}_{run_ts}.log"
+    tee = _Tee(log_path)
+
+    # Route scraper WARNING/ERROR logs to stdout (captured by tee → log file)
+    _log_root = logging.getLogger()
+    _log_root.handlers.clear()
+    _sh = logging.StreamHandler(sys.stdout)
+    _sh.setLevel(logging.WARNING)
+    _sh.setFormatter(logging.Formatter("%(levelname)-8s %(name)s  %(message)s"))
+    _log_root.addHandler(_sh)
+    _log_root.setLevel(logging.WARNING)
+
+    print(f"Log: {log_path.resolve()}")
+    # ─────────────────────────────────────────────────────────────────────
+
     keys = [args.parliament] if args.parliament else list(_RUNNERS)
     t0 = time.time()
     all_results: List[Result] = []
-    for key in keys:
-        all_results.extend(_RUNNERS[key](verbose=args.verbose, save_dir=Path("test_data") if args.save else None))
-    _summary(all_results, time.time() - t0)
+    try:
+        for key in keys:
+            all_results.extend(_RUNNERS[key](verbose=args.verbose, save_dir=Path("test_data") if args.save else None))
+        _summary(all_results, time.time() - t0)
+    finally:
+        tee.close()
 
 
 if __name__ == "__main__":

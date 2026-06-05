@@ -108,7 +108,7 @@ class ScottishParliamentScraper(BaseScraper):
     def fetch_members(self) -> List[Dict]:
         rows = self._odata_get("Members")
         if rows:
-            logger.info(f"[Scottish Parliament] Members OData sample fields: {list(rows[0].keys())}")
+            logger.warning(f"[Scottish Parliament] Members OData sample fields: {list(rows[0].keys())} | sample={dict(list(rows[0].items())[:8])!r:.400}")
         members = []
         for m in rows:
             member_id = str(

@@ -373,7 +373,7 @@ class NIAssemblyScraper(BaseScraper):
                 data = self._parse_asmx_response(resp, url)
                 items = _first_list(data)
                 if items and not records:
-                    logger.info(f"[NI Assembly] Question sample fields ({q_type}): {list(items[0].keys())}")
+                    logger.warning(f"[NI Assembly] Question sample fields ({q_type}): {list(items[0].keys())} | sample={dict(list(items[0].items())[:6])!r:.300}")
                 for q in items:
                     q_text = q.get("QuestionText", q.get("Text", ""))
                     answer = q.get("AnswerText", q.get("Answer", ""))
@@ -590,10 +590,9 @@ class NIAssemblyScraper(BaseScraper):
             comp_items = _first_list(comp_data)
             if i == 0:
                 if comp_items:
-                    logger.info(f"[NI Assembly] Sample component fields: {list(comp_items[0].keys())}")
-                    logger.info(f"[NI Assembly] Sample component data: {comp_items[0]}")
+                    logger.warning(f"[NI Assembly] Plenary component fields: {list(comp_items[0].keys())} | sample={comp_items[0]!r:.400}")
                 else:
-                    logger.info(f"[NI Assembly] Component fetch for first report_id={report_id!r} returned 0 items (comp_resp={bool(comp_resp)})")
+                    logger.warning(f"[NI Assembly] Component fetch for first report_id={report_id!r} returned 0 items (comp_resp={bool(comp_resp)})")
             for item in comp_items:
                 text = item.get("ComponentText", item.get("Text", item.get("Speech", "")))
                 if not text or len(text.strip()) < 10:
@@ -716,7 +715,7 @@ class NIAssemblyScraper(BaseScraper):
             data = self._parse_asmx_response(resp, url)
             vote_items = _first_list(data)
             if vote_items and not records:
-                logger.info(f"[NI Assembly] Vote sample fields: {list(vote_items[0].keys())}")
+                logger.warning(f"[NI Assembly] Vote sample fields: {list(vote_items[0].keys())} | sample={dict(list(vote_items[0].items())[:6])!r:.300}")
             for vote in vote_items:
                 direction_raw = str(vote.get("VoteType", vote.get("Vote", vote.get("Type", "")))).lower()
                 if direction_raw in ("aye", "yes", "for", "1"):

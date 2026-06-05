@@ -210,10 +210,13 @@ class WelshParliamentScraper(BaseScraper):
             cards = [el for el in soup.select("li, div") if el.select_one("h2, h3, h4")]
             logger.debug(f"[Welsh Parliament] Fallback card extraction: {len(cards)} candidates")
 
-        # Log card CSS classes from first card to help diagnose selector misses
+        # Log card structure at WARNING so it appears even when test silences INFO
         if cards:
             sample_cls = sorted({c for el in cards[0].select("[class]") for c in el.get("class", [])})
-            logger.debug(f"[Welsh Parliament] First member card CSS classes: {sample_cls[:30]}")
+            logger.warning(
+                f"[Welsh Parliament] First member card CSS classes: {sample_cls[:30]}\n"
+                f"  Card HTML snippet: {str(cards[0])[:600]}"
+            )
 
         for card in cards:
             name_el = (
