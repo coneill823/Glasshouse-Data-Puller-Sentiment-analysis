@@ -83,7 +83,7 @@ class Result:
 
 
 def _assess(records: List[Dict], soft: bool = False) -> Tuple[str, List[str]]:
-    """Check field completeness; soft=True returns WARN instead of FAIL for empty results."""
+    """Check field completeness for _make_record() output; soft=True returns WARN instead of FAIL."""
     if not records:
         return ("WARN" if soft else "FAIL"), ["no records returned"]
     n = len(records)
@@ -99,6 +99,21 @@ def _assess(records: List[Dict], soft: bool = False) -> Tuple[str, List[str]]:
         issues.append(f"{empty_date}/{n} date fields empty")
     if empty_name > n // 2:
         issues.append(f"{empty_name}/{n} member name fields empty")
+    return ("WARN" if issues else "PASS"), issues
+
+
+def _assess_members(records: List[Dict]) -> Tuple[str, List[str]]:
+    """Check completeness of raw member dicts (name/party/id fields, not _make_record shape)."""
+    if not records:
+        return "FAIL", ["no members returned"]
+    n = len(records)
+    issues = []
+    empty_name  = sum(1 for r in records if not str(r.get("name", "")).strip())
+    empty_party = sum(1 for r in records if not str(r.get("party", "")).strip())
+    empty_id    = sum(1 for r in records if not str(r.get("id", "")).strip())
+    if empty_name  > n // 2: issues.append(f"{empty_name}/{n} name fields empty")
+    if empty_party == n:     issues.append("ALL party fields empty")
+    if empty_id    == n:     issues.append("ALL id fields empty")
     return ("WARN" if issues else "PASS"), issues
 
 
@@ -185,7 +200,10 @@ def test_ni(verbose: bool = False, save_dir: Optional[Path] = None) -> List[Resu
         try:
             records = fn()
             r.elapsed = time.time() - t0
-            r.status, r.issues = _assess(records, soft=soft)
+            if dtype == "members":
+                r.status, r.issues = _assess_members(records)
+            else:
+                r.status, r.issues = _assess(records, soft=soft)
             r.count = len(records)
             r.sample = records[0] if records else None
             if dtype == "members":
@@ -291,7 +309,7 @@ def test_uk(verbose: bool = False, save_dir: Optional[Path] = None) -> List[Resu
                     "role": "MP", "status": "current",
                 })
         r.elapsed = time.time() - t0
-        r.status, r.issues = _assess(members)
+        r.status, r.issues = _assess_members(members)
         r.count = len(members)
         r.sample = members[0] if members else None
     except Exception as e:
@@ -397,7 +415,10 @@ def test_scotland(verbose: bool = False, save_dir: Optional[Path] = None) -> Lis
         try:
             records = fn()
             r.elapsed = time.time() - t0
-            r.status, r.issues = _assess(records, soft=soft)
+            if dtype == "members":
+                r.status, r.issues = _assess_members(records)
+            else:
+                r.status, r.issues = _assess(records, soft=soft)
             r.count = len(records)
             r.sample = records[0] if records else None
             if dtype == "members":
@@ -507,7 +528,10 @@ def test_wales(verbose: bool = False, save_dir: Optional[Path] = None) -> List[R
         try:
             records = fn()
             r.elapsed = time.time() - t0
-            r.status, r.issues = _assess(records, soft=soft)
+            if dtype == "members":
+                r.status, r.issues = _assess_members(records)
+            else:
+                r.status, r.issues = _assess(records, soft=soft)
             r.count = len(records)
             r.sample = records[0] if records else None
             if dtype == "members":

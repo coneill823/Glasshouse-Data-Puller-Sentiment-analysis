@@ -22,6 +22,34 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, date
 from typing import Dict, Generator, List, Optional, Tuple
 
+
+def _extract_ni_speaker(text: str) -> str:
+    """Extract speaker name from NI Assembly ComponentText.
+
+    Official Report components don't carry a separate MemberName field —
+    the speaker is embedded at the start of ComponentText in the form:
+      "Mr Smith: speech text"
+      "Mrs O'Neill (Constituency): text"
+      "The Speaker: procedural text"
+    Returns empty string for procedure/header lines that have no attribution.
+    """
+    if not text or ":" not in text:
+        return ""
+    prefix = text.split(":", 1)[0].strip()
+    if not prefix or len(prefix) > 70:
+        return ""
+    # Accept if it starts with a recognised title
+    if re.match(
+        r"^(?:Mr|Mrs|Ms|Dr|Prof|Rev|Lord|Lady|Sir|Dame|The\s+(?:Speaker|Presiding Officer|Deputy Speaker|Minister|Principal Deputy Speaker))\b",
+        prefix,
+    ):
+        return prefix
+    # Or two or more words all starting with a capital (e.g. "John Smith")
+    words = prefix.split()
+    if len(words) >= 2 and all(w and w[0].isupper() for w in words):
+        return prefix
+    return ""
+
 from bs4 import BeautifulSoup
 
 from .base_scraper import BaseScraper
@@ -343,7 +371,10 @@ class NIAssemblyScraper(BaseScraper):
                 if not resp:
                     continue
                 data = self._parse_asmx_response(resp, url)
-                for q in _first_list(data):
+                items = _first_list(data)
+                if items and not records:
+                    logger.info(f"[NI Assembly] Question sample fields ({q_type}): {list(items[0].keys())}")
+                for q in items:
                     q_text = q.get("QuestionText", q.get("Text", ""))
                     answer = q.get("AnswerText", q.get("Answer", ""))
                     combined = f"Question: {q_text}\n\nAnswer: {answer}" if answer else q_text
@@ -351,7 +382,9 @@ class NIAssemblyScraper(BaseScraper):
                         data_type="question",
                         member={
                             "id": str(q.get("PersonId", q.get("MemberId", ""))),
-                            "name": q.get("MemberName", q.get("Member", "")),
+                            "name": (q.get("MemberName") or q.get("Member")
+                                     or q.get("AskingMemberName") or q.get("TabledByMember")
+                                     or q.get("MemberDisplayName") or ""),
                             "party": q.get("PartyName", q.get("Party", "")),
                             "constituency": q.get("ConstituencyName", q.get("Constituency", "")),
                             "role": "MLA",
@@ -565,11 +598,15 @@ class NIAssemblyScraper(BaseScraper):
                 text = item.get("ComponentText", item.get("Text", item.get("Speech", "")))
                 if not text or len(text.strip()) < 10:
                     continue
+                # ComponentText is the only source of speaker identity —
+                # the NI Assembly API does not include a separate MemberName field.
+                name = (item.get("MemberName") or item.get("Speaker")
+                        or _extract_ni_speaker(text) or "")
                 records.append(self._make_record(
                     data_type="plenary_speech",
                     member={
                         "id": str(item.get("PersonId", item.get("MemberId", ""))),
-                        "name": item.get("MemberName", item.get("Speaker", "")),
+                        "name": name,
                         "party": item.get("PartyName", item.get("Party", "")),
                         "constituency": item.get("ConstituencyName", ""),
                         "role": "MLA",
@@ -673,7 +710,10 @@ class NIAssemblyScraper(BaseScraper):
             if not resp:
                 continue
             data = self._parse_asmx_response(resp, url)
-            for vote in _first_list(data):
+            vote_items = _first_list(data)
+            if vote_items and not records:
+                logger.info(f"[NI Assembly] Vote sample fields: {list(vote_items[0].keys())}")
+            for vote in vote_items:
                 direction_raw = str(vote.get("VoteType", vote.get("Vote", vote.get("Type", "")))).lower()
                 if direction_raw in ("aye", "yes", "for", "1"):
                     direction = "aye"
@@ -686,7 +726,8 @@ class NIAssemblyScraper(BaseScraper):
                     data_type="vote",
                     member={
                         "id": str(vote.get("PersonId", vote.get("MemberId", ""))),
-                        "name": vote.get("MemberName", vote.get("Name", "")),
+                        "name": (vote.get("MemberName") or vote.get("Name")
+                                 or vote.get("VoterName") or vote.get("MemberDisplayName") or ""),
                         "party": vote.get("PartyName", vote.get("Party", "")),
                         "constituency": vote.get("ConstituencyName", vote.get("Constituency", "")),
                         "role": "MLA",
