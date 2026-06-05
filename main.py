@@ -10,7 +10,7 @@ for MPs / MLAs / MSPs / MSs from:
   - Welsh Parliament / Senedd
 
 Usage
------
+---h
   python main.py                        # pull all parliaments, all history
   python main.py --parliament ni        # pull NI Assembly only
   python main.py --from 2024-01-01     # pull from a specific date
