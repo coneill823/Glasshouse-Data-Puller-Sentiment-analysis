@@ -1758,7 +1758,6 @@ class WelshParliamentScraper(BaseScraper):
         # (status, content-type, redirect target, body).  The next run's log tells us
         # the real endpoint/range so we can target it precisely.
         logger.info("[Welsh Parliament] Probing meeting IDs via XML export…")
-        export_hosts = [_RECORD, "https://cofnod.senedd.cymru"]
 
         def _try_export(host: str, mid: int):
             export_url = f"{host}/XMLExport/Download"
@@ -1773,38 +1772,27 @@ class WelshParliamentScraper(BaseScraper):
             self.session.headers.update(saved_h)
             return export_url, r
 
-        # Diagnostic sample — log what the export returns for known-ish sample IDs.
-        if not hasattr(self, "_xml_probe_logged"):
-            self._xml_probe_logged = True
-            for host in export_hosts:
-                for sample_mid in (6500, 6600, 6700, 6800, 6999):
-                    su, sr = _try_export(host, sample_mid)
-                    if sr is not None:
-                        logger.warning(
-                            f"[Welsh Parliament] XMLExport DIAG {su}?meetingID={sample_mid}: "
-                            f"status={sr.status_code} ct={sr.headers.get('Content-Type','')!r} "
-                            f"final_url={sr.url!r} body[:250]={sr.text[:250]!r}"
-                        )
-                    else:
-                        logger.warning(f"[Welsh Parliament] XMLExport DIAG {su}?meetingID={sample_mid}: no response")
-
-        # Bounded descending scan (capped so it can't waste minutes).  Targets the
-        # most likely recent-session range; refine the bounds once the DIAG log above
-        # shows where real meetings live.
-        probe_start = 6501
-        probe_end = 6999
+        # Diagnostics (06-2026) confirmed the XMLExport endpoint only serves up to
+        # ~meetingID 6600 (5th Senedd, Assembly=5).  IDs from 6700 upward redirect to
+        # /Error/Error, so 6th Senedd (2021-present) plenary divisions are NOT exposed
+        # here.  We scan the known-valid band descending for historical runs, using a
+        # single host and fast error detection so the probe can't burn minutes.
+        probe_start = 6300
+        probe_end = 6650
         consecutive_miss = 0
         attempts = 0
+        primary_host = _RECORD
         for mid in range(probe_end, probe_start - 1, -1):  # newest first
-            if consecutive_miss > 60 or attempts > 200:
+            if consecutive_miss > 40 or attempts > 150:
                 break
             attempts += 1
-            resp = None
-            for export_host in export_hosts:
-                _, resp = _try_export(export_host, mid)
-                if resp is not None and resp.ok and "html" not in resp.headers.get("Content-Type", "") \
-                        and not resp.text.strip()[:5].lower().startswith("<!doc"):
-                    break  # got real XML from this host
+            _, resp = _try_export(primary_host, mid)
+            # Fast miss: redirect to an error page or HTML shell instead of XML.
+            if resp is not None and ("/Error" in resp.url
+                                     or "html" in resp.headers.get("Content-Type", "")
+                                     or resp.text.strip()[:5].lower().startswith("<!doc")):
+                consecutive_miss += 1
+                continue
             if not resp or not resp.ok:
                 consecutive_miss += 1
                 continue
