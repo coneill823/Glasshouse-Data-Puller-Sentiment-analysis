@@ -420,17 +420,13 @@ class WelshParliamentScraper(BaseScraper):
 
     # Known REST API endpoint patterns for Senedd questions.
     # Both sites are React SPAs; the underlying APIs serve the actual data.
+    # NOTE: business.senedd.wales API endpoints consistently TIME OUT (30s × 3 retries
+    # each = ~7 min wasted) and senedd.wales/api/* all 404.  Only record.senedd.wales/api
+    # is kept (it returns the SPA shell quickly, which _api_get rejects fast).
     _QUESTION_API_CANDIDATES = [
         f"{_RECORD}/api/questions",
         f"{_RECORD}/api/written-questions",
         f"{_RECORD}/api/oral-questions",
-        f"{_BUSINESS}/api/questions",
-        f"{_BUSINESS}/api/written-questions",
-        f"{_BUSINESS}/api/oral-questions",
-        f"{_BUSINESS}/api/businessquestions",
-        "https://senedd.wales/api/questions",
-        "https://senedd.wales/api/written-questions",
-        "https://senedd.wales/api/oral-questions",
     ]
 
     def _search_soup(self, params: Dict) -> Optional[BeautifulSoup]:
@@ -441,30 +437,138 @@ class WelshParliamentScraper(BaseScraper):
                 return soup
         return None
 
-    def _fetch_questions_search(self, from_date: Optional[str] = None) -> List[Dict]:
-        """Fetch questions from record.assembly.wales/Search (confirmed SSR, shows member names).
+    def _try_search_api(self, from_date: Optional[str] = None) -> List[Dict]:
+        """Discover and call the JSON search API behind the record.senedd.wales SPA.
 
-        The Search page renders result cards server-side including WQ number, tabling date,
-        question text preview, and the member's name.  We page through results for both
-        written and oral questions filtering by date.
+        The SPA shell references JS bundles and often embeds an API base URL or calls
+        a predictable controller endpoint.  We try a list of likely JSON endpoints with
+        a JSON Accept header; any that return real JSON (not the HTML shell) are parsed.
+        Logs the raw response keys so we can refine extraction on the next run.
+        """
+        records: List[Dict] = []
+
+        # Candidate JSON search endpoints (ASP.NET MVC / Cofnod conventions).
+        # ?term= / ?searchTerm= empty returns recent items in most implementations.
+        api_candidates = [
+            f"{_RECORD}/Search/Results",
+            f"{_RECORD}/Search/GetResults",
+            f"{_RECORD}/api/search",
+            f"{_RECORD}/Search/Search",
+            f"{_RECORD}/SearchResults",
+            f"{_RECORD_ALT}/Search/Results",
+            f"{_RECORD_ALT}/api/search",
+        ]
+        param_variants = [
+            {"searchTerm": "", "page": 1},
+            {"term": "", "page": 1},
+            {"query": "", "page": 1},
+            {"q": ""},
+        ]
+
+        for api_url in api_candidates:
+            for params in param_variants:
+                p = dict(params)
+                if from_date:
+                    p["dateFrom"] = from_date
+                data = self._api_get(api_url, params=p)
+                if not data:
+                    continue
+                # Found JSON! Log its shape so we can map fields next run.
+                if isinstance(data, dict):
+                    logger.warning(
+                        f"[Welsh Parliament] Search API responded: {api_url} params={p} "
+                        f"keys={list(data.keys())[:15]}"
+                    )
+                    items = (data.get("results") or data.get("items")
+                             or data.get("Results") or data.get("data") or [])
+                elif isinstance(data, list):
+                    logger.warning(
+                        f"[Welsh Parliament] Search API responded (list): {api_url} "
+                        f"len={len(data)} sample_keys={list(data[0].keys())[:15] if data and isinstance(data[0], dict) else 'n/a'}"
+                    )
+                    items = data
+                else:
+                    continue
+
+                for item in items if isinstance(items, list) else []:
+                    if not isinstance(item, dict):
+                        continue
+                    name = (item.get("memberName") or item.get("MemberName")
+                            or item.get("tabledBy") or item.get("askedBy")
+                            or item.get("author") or "")
+                    text = (item.get("text") or item.get("Text") or item.get("body")
+                            or item.get("questionText") or item.get("title") or "")
+                    q_date = (item.get("date") or item.get("Date")
+                              or item.get("tabledDate") or "")[:10]
+                    if not text:
+                        continue
+                    records.append(self._make_record(
+                        data_type="question",
+                        member={"id": "", "name": name, "party": "",
+                                "constituency": "", "role": "MS"},
+                        date=q_date,
+                        text=text,
+                        title=item.get("title", item.get("Title", "")),
+                        metadata={"question_type": "written"},
+                        source_url=api_url,
+                    ))
+                if records:
+                    logger.info(f"[Welsh Parliament] Search API: {len(records)} records from {api_url}")
+                    return records
+
+        logger.warning("[Welsh Parliament] No working JSON search API found — Welsh questions "
+                       "will fall back to order-paper enumeration (text only, no member names)")
+        return records
+
+    def _is_spa_shell(self, soup: BeautifulSoup) -> bool:
+        """Detect the record.senedd.wales JS nav-shell (no SSR content).
+
+        The shell's entire body text starts with the site chrome
+        ("National Assembly for Wales Help ... Glossary Contact us ...") and
+        contains no result content.  Returns True if this looks like the empty shell.
+        """
+        if not soup:
+            return True
+        body = soup.find("body")
+        text = body.get_text(separator=" ", strip=True) if body else ""
+        # The shell is short-ish and dominated by nav chrome
+        shell_markers = ("National Assembly for Wales Help", "Glossary Contact us",
+                         "What is Plenary", "Go to Senedd Business")
+        has_chrome = sum(1 for m in shell_markers if m in text) >= 2
+        # Real result pages contain WQ/AQ numbers or multiple result/article elements
+        has_results = bool(re.search(r"(WQ|AQ|OQ)[- ]?\d{3,}", text)) or \
+            len(soup.select("article, [class*='result']")) > 2
+        return has_chrome and not has_results
+
+    def _fetch_questions_search(self, from_date: Optional[str] = None) -> List[Dict]:
+        """Fetch questions from record.senedd.wales/Search.
+
+        NOTE: This page is a JavaScript SPA — the server returns only a nav shell.
+        Result cards (with member names, WQ numbers, dates) are rendered client-side.
+        We detect the shell early and bail so we don't waste time probing dead filters.
+        If the Senedd ever serves SSR content here (or we find the JSON API), this
+        path will pick it up automatically.
         """
         records: List[Dict] = []
         seen_ids: set = set()
 
-        # Verify the search page is reachable and contains question content
+        # Verify the search page is reachable and is NOT just the JS shell
         probe = self._search_soup({})
         if not probe:
             logger.warning("[Welsh Parliament] Search page not reachable — all URLs failed")
             return records
 
-        probe_text = probe.get_text(strip=True)
-        if not re.search(r"WQ|question|written|oral|search|tabled|senedd|record", probe_text, re.I):
+        if self._is_spa_shell(probe):
             logger.warning(
-                f"[Welsh Parliament] Search page loaded but no expected content — snippet: {probe_text[:200]!r}"
+                "[Welsh Parliament] record.senedd.wales/Search is a JS SPA shell "
+                "(no server-side result cards) — skipping HTML scrape. "
+                "Member names require the underlying JSON search API or a headless browser."
             )
-            return records
+            # Try to discover the search API from the shell's JS references before giving up
+            api_records = self._try_search_api(from_date)
+            return api_records
 
-        logger.info("[Welsh Parliament] Search page accessible — probing type filters")
+        logger.info("[Welsh Parliament] Search page returned SSR content — parsing result cards")
 
         # Type-ID variants to try for each question category.
         # We try numeric typeIds first (ASP.NET MVC convention for the Cofnod system)
