@@ -205,6 +205,125 @@ class WelshParliamentScraper(BaseScraper):
                     return members
         return []
 
+    # Known Senedd party names (used for text-scan fallback on profile pages)
+    _SENEDD_PARTIES = [
+        "Labour", "Welsh Labour", "Conservative", "Welsh Conservative",
+        "Plaid Cymru", "Liberal Democrat", "UKIP", "Reform UK",
+        "Welsh Conservatives", "Independent",
+    ]
+
+    def _extract_party_from_profile(self, profile_soup: BeautifulSoup, profile_url: str = "") -> str:
+        """Extract party/political group from a senedd.wales MS profile page.
+
+        Tries multiple strategies in order:
+          1. Taxonomy term links (WordPress category/tag links that match party names)
+          2. CSS class hints: [class*=party], [class*=group], .wp-block-post-terms, etc.
+          3. JSON-LD structured data embedded in <script type="application/ld+json">
+          4. Meta tags with party/group name
+          5. Data attributes: data-party, data-group
+          6. Breadcrumb links that look like party names
+          7. Full-text scan for known party names near "Party:" / "Group:" labels
+        """
+        # 1. WordPress taxonomy term links — filter by known party name
+        for a in profile_soup.select("a[href]"):
+            href = a.get("href", "")
+            text = a.get_text(strip=True)
+            if not text or len(text) > 60:
+                continue
+            if any(p.lower() in text.lower() for p in self._SENEDD_PARTIES):
+                # Make sure this is a category/tag/party link, not a nav link
+                if re.search(r"/(party|group|parties|political|plaid|labour|conservative|"
+                             r"liberal|ukip|reform|independent)/", href, re.I):
+                    return text
+                # Or if the text IS a known party name (exact-ish match)
+                for p in self._SENEDD_PARTIES:
+                    if p.lower() == text.lower() or p.lower() in text.lower():
+                        return p
+
+        # 2. CSS class-based selectors
+        for sel in (
+            "[class*='party-name']", "[class*='partyname']",
+            "[class*='party-label']", "[class*='partylabel']",
+            "[class*='political-party']", "[class*='politicalparty']",
+            "[class*='party-tag']",  "[class*='partytag']",
+            "[class*='party']",
+            "[class*='group-name']", "[class*='groupname']",
+            "[class*='group-label']", "[class*='grouplabel']",
+            "[class*='group']",
+            ".wp-block-post-terms a", ".wp-block-post-terms",
+            ".tag-list a", ".term-list a", ".taxonomy-party a",
+        ):
+            el = profile_soup.select_one(sel)
+            if el:
+                candidate = el.get_text(strip=True)
+                if candidate and 2 < len(candidate) < 80:
+                    return candidate
+
+        # 3. JSON-LD structured data
+        for script in profile_soup.select("script[type='application/ld+json']"):
+            try:
+                import json as _json
+                data = _json.loads(script.string or "")
+                if isinstance(data, dict):
+                    for key in ("partyName", "party", "politicalParty", "group",
+                                "memberOf", "affiliation"):
+                        val = data.get(key)
+                        if isinstance(val, str) and val:
+                            return val
+                        if isinstance(val, dict):
+                            n = val.get("name", "")
+                            if n:
+                                return n
+            except Exception:
+                pass
+
+        # 4. Meta tags
+        for meta in profile_soup.select("meta[name], meta[property]"):
+            attr = meta.get("name", "") or meta.get("property", "")
+            if re.search(r"party|group|political", attr, re.I):
+                content = meta.get("content", "")
+                if content:
+                    return content
+
+        # 5. Data attributes
+        for el in profile_soup.select("[data-party], [data-group], [data-political-party]"):
+            val = el.get("data-party") or el.get("data-group") or el.get("data-political-party") or ""
+            if val:
+                return val
+
+        # 6. Breadcrumb links
+        for a in profile_soup.select(".breadcrumb a, nav[aria-label*='breadcrumb'] a, "
+                                     "[class*='breadcrumb'] a"):
+            text = a.get_text(strip=True)
+            for p in self._SENEDD_PARTIES:
+                if p.lower() in text.lower():
+                    return p
+
+        # 7. Label/value pattern in body text: "Party: Labour" or "Group: Plaid Cymru"
+        body_text = profile_soup.get_text(separator=" ", strip=True)
+        m = re.search(
+            r"(?:Party|Group|Political\s+Party|Gwleidyddol)[:\s]+"
+            r"([A-Z][a-zA-Záéíóú'\-]+(?:\s+[a-zA-Záéíóú'\-]+){0,3})",
+            body_text,
+        )
+        if m:
+            candidate = m.group(1).strip().rstrip(".,;")
+            # Verify it matches a known party, trim to just the party portion
+            # Sort longest first so "Welsh Labour" wins over "Labour"
+            for p in sorted(self._SENEDD_PARTIES, key=len, reverse=True):
+                if p.lower() in candidate.lower():
+                    return p
+            # Accept it as-is if it looks short enough to be a party name
+            if len(candidate.split()) <= 4:
+                return candidate
+
+        # 8. Scan text for any known party name (longest match first to prefer "Welsh Labour" > "Labour")
+        for p in sorted(self._SENEDD_PARTIES, key=len, reverse=True):
+            if p.lower() in body_text.lower():
+                return p
+
+        return ""
+
     def _scrape_members(self) -> List[Dict]:
         soup = self._try_paths(_BASE, _MEMBER_PATHS)
         if not soup:
@@ -242,16 +361,9 @@ class WelshParliamentScraper(BaseScraper):
                 name_el = profile_soup.select_one("h1, .page-title, [class*='member-name']")
                 name = name_el.get_text(strip=True) if name_el else ""
                 if not name or len(name) < 3:
-                    # Fallback: use slug as display name
                     slug_m = re.search(r"/find-a-member-of-the-senedd/([a-z0-9-]+)/?$", profile_url, re.I)
                     name = slug_m.group(1).replace("-", " ").title() if slug_m else ""
-                party_el = (
-                    profile_soup.select_one("[class*='party'], [class*='Party']")
-                    or profile_soup.select_one("[class*='group'], [class*='Group']")
-                    or profile_soup.select_one(".tag, .badge, [class*='tag'], [class*='badge']")
-                    or profile_soup.select_one("span.wp-block-post-terms, .wp-block-post-terms")
-                )
-                party = party_el.get_text(strip=True) if party_el else ""
+                party = self._extract_party_from_profile(profile_soup, profile_url)
                 const_el = profile_soup.select_one(
                     "[class*='constituency'], [class*='region'], [class*='Constituency'], [class*='Region']"
                 )
@@ -260,9 +372,18 @@ class WelshParliamentScraper(BaseScraper):
                 member_id = slug.group(1) if slug else ""
                 if not hasattr(self, "_ms_profile_logged"):
                     self._ms_profile_logged = True
+                    # Log full HTML of first profile for selector diagnosis
+                    import json as _json
+                    body_el = profile_soup.find("body")
+                    classes_found = sorted({
+                        c for el in profile_soup.select("[class]")
+                        for c in el.get("class", [])
+                    })
                     logger.warning(
-                        f"[Welsh Parliament] First MS profile: name={name!r} party={party!r} "
-                        f"const={constituency!r} id={member_id!r}"
+                        f"[Welsh Parliament] First MS profile {profile_url}: "
+                        f"name={name!r} party={party!r} const={constituency!r} "
+                        f"all CSS classes: {classes_found[:40]}\n"
+                        f"Body snippet: {body_el.get_text(separator=' ',strip=True)[:500] if body_el else ''!r}"
                     )
                 members.append({
                     "id": member_id,
@@ -273,7 +394,8 @@ class WelshParliamentScraper(BaseScraper):
                     "status": "current",
                 })
             if members:
-                logger.info(f"[Welsh Parliament] {len(members)} MSs scraped via profile pages")
+                named_party = sum(1 for m in members if m.get("party"))
+                logger.info(f"[Welsh Parliament] {len(members)} MSs scraped via profile pages, {named_party} with party")
                 return members
 
         # Fallback: card-based extraction from the listing page
@@ -303,12 +425,6 @@ class WelshParliamentScraper(BaseScraper):
                 or card.select_one("[class*='name'], [class*='Name']")
                 or card.select_one("strong, b")
             )
-            party_el = (
-                card.select_one("[class*='party'], [class*='Party']")
-                or card.select_one("[class*='group'], [class*='Group']")
-                or card.select_one(".tag, .badge, [class*='tag'], [class*='badge']")
-                or card.select_one("span.wp-block-post-terms, .wp-block-post-terms")
-            )
             const_el = card.select_one(
                 "[class*='constituency'], [class*='region'], [class*='Constituency'], [class*='Region']"
             )
@@ -329,10 +445,13 @@ class WelshParliamentScraper(BaseScraper):
             if not name or len(name) < 3:
                 continue
 
+            # Use comprehensive party extraction on the card element
+            party = self._extract_party_from_profile(card)
+
             members.append({
                 "id": member_id,
                 "name": name,
-                "party": party_el.get_text(strip=True) if party_el else "",
+                "party": party,
                 "constituency": const_el.get_text(strip=True) if const_el else "",
                 "role": "MS",
                 "status": "current",
@@ -820,15 +939,97 @@ class WelshParliamentScraper(BaseScraper):
             current += timedelta(days=1)
         return days
 
+    def _name_from_row(self, anchor_el, soup_row) -> str:
+        """Try to extract a member name from the HTML context surrounding a question link.
+
+        The order-paper listing is SSR.  The MS name is typically in a sibling <td>,
+        a <dt>/<dd> pair, a span with a class hint, or a "Tabled by: Name" text pattern.
+        Returns the best candidate or an empty string.
+        """
+        if not soup_row:
+            return ""
+        href = anchor_el.get("href", "") if anchor_el else ""
+
+        # Table rows: look for a cell that is NOT the WQ-link cell and looks like a name
+        tds = soup_row.select("td")
+        for td in tds:
+            linked = td.find("a", href=href)
+            if linked:
+                continue  # This is the WQ-ID cell
+            candidate = td.get_text(strip=True)
+            words = candidate.split()
+            # A name: 2–6 words, each starting uppercase, nothing numeric
+            if 2 <= len(words) <= 6 and all(
+                w and w[0].isupper() for w in words if w.isalpha()
+            ) and not re.search(r"\d", candidate):
+                return candidate
+
+        # dt/dd pair in any parent container
+        for dt in soup_row.select("dt"):
+            if any(kw in dt.get_text(strip=True).lower() for kw in ("tabled", "asked", "member", "by")):
+                dd = dt.find_next_sibling("dd")
+                if dd:
+                    return dd.get_text(strip=True)
+
+        # CSS-class hints
+        for sel in (
+            "[class*='member-name']", "[class*='membername']",
+            "[class*='tabled-by']", "[class*='asked-by']",
+            "[class*='author']", ".member", ".ms",
+        ):
+            el = soup_row.select_one(sel)
+            if el and el != anchor_el:
+                candidate = el.get_text(strip=True)
+                if candidate and len(candidate) > 2:
+                    return candidate
+
+        # "Tabled by: Name" / "Asked by Name" / "By: Name" in raw row text
+        row_text = soup_row.get_text(separator=" ", strip=True)
+        m = re.search(
+            r"(?:Tabled\s+by|Asked\s+by|By)[:\s]+([A-Z][a-zA-Záéíóú'\-]+(?:\s+[A-Z][a-zA-Záéíóú'\-]+){1,4})",
+            row_text,
+        )
+        if m:
+            return m.group(1).strip()
+
+        return ""
+
+    def _member_from_detail(self, soup) -> str:
+        """Extract member name from an individual question detail page (SSR only)."""
+        for sel in (
+            ".member-name", ".asked-by", ".tabled-by",
+            "[class*='member-name']", "[class*='asked-by']", "[class*='tabled-by']",
+        ):
+            el = soup.select_one(sel)
+            if el:
+                return el.get_text(strip=True)
+        for dt in soup.select("dt"):
+            if any(kw in dt.get_text(strip=True).lower() for kw in ("tabled", "asked", "member")):
+                dd = dt.find_next_sibling("dd")
+                if dd:
+                    return dd.get_text(strip=True)
+        for el in soup.select("p, span, td, li"):
+            txt = el.get_text(strip=True)
+            m = re.match(r"(?:Asked|Tabled)\s+by[:\s]+(.+)", txt, re.I)
+            if m:
+                return m.group(1).strip()
+        for el in soup.select("strong, b"):
+            candidate = el.get_text(strip=True)
+            words = candidate.split()
+            if 2 <= len(words) <= 5 and all(w[0].isupper() for w in words if w):
+                return candidate
+        return ""
+
     def _fetch_questions_order_paper(self, from_date: Optional[str] = None) -> List[Dict]:
         """Fetch written questions from the record.senedd.wales order paper pages.
 
         URL pattern: https://record.senedd.wales/OrderPaper/WrittenQuestions/DD-MM-YYYY/
         This is a confirmed SSR page listing questions submitted for each sitting day.
-        Individual questions: https://record.senedd.wales/WrittenQuestion/WQ-NNNNN
+        Member names are extracted from the listing page row context first; individual
+        question pages (record.senedd.wales/WrittenQuestion/WQ-NNNNN) are only visited
+        if the listing page has no name AND the page is not a SPA shell.
         """
         records = []
-        # Enumerate recent dates — start from 3 months ago for incremental, or 2016 for full
         from_dt = date.fromisoformat(from_date) if from_date else date(2020, 1, 1)
         today = date.today()
         seen_ids: set = set()
@@ -844,22 +1045,54 @@ class WelshParliamentScraper(BaseScraper):
                 consecutive_empty += 1
                 continue
 
-            # Check for actual question content (not just nav shell)
             body_text = soup.get_text(separator=" ", strip=True)
             if len(body_text) < 300 or not re.search(r"WQ-\d+|question|tabled|written", body_text, re.I):
                 consecutive_empty += 1
                 continue
 
             consecutive_empty = 0
-            # Find individual question links
-            q_links = [
-                (a["href"] if a["href"].startswith("http") else f"{_RECORD}{a['href']}")
-                for a in soup.select("a[href]")
-                if re.search(r"/WrittenQuestion/WQ-\d+|/Question/\d+", a.get("href", ""), re.I)
-            ]
-            q_links = list(dict.fromkeys(q_links))
-            if not q_links:
-                # Try parsing directly from the listing page (some dates list question text inline)
+
+            # Build (url, id, member_name) triples from the listing page.
+            # Member name is extracted from the row context around each WQ link so we
+            # don't have to visit SPA-shell individual pages at all.
+            listing_questions: list = []
+            for a in soup.select("a[href]"):
+                href = a.get("href", "")
+                if not re.search(r"/WrittenQuestion/WQ-\d+|/Question/\d+", href, re.I):
+                    continue
+                q_url = href if href.startswith("http") else f"{_RECORD}{href}"
+                q_id_match = re.search(r"WQ-\d+", href, re.I)
+                q_id = q_id_match.group(0).upper() if q_id_match else ""
+                if q_id and q_id in seen_ids:
+                    continue
+                if q_id:
+                    seen_ids.add(q_id)
+
+                parent = (a.find_parent("tr") or a.find_parent("li")
+                          or a.find_parent("article") or a.find_parent("div"))
+                member_name = self._name_from_row(a, parent)
+                listing_questions.append((q_url, q_id, member_name))
+
+            # First run: log the listing page structure so we can refine extraction
+            if listing_questions and not hasattr(self, "_op_html_logged"):
+                self._op_html_logged = True
+                first_a = soup.find("a", href=lambda h: h and re.search(r"/WrittenQuestion/WQ-\d+", h or ""))
+                if first_a:
+                    parent = (first_a.find_parent("tr") or first_a.find_parent("li")
+                              or first_a.find_parent("div"))
+                    logger.warning(
+                        f"[Welsh Parliament] Order-paper listing row HTML (first WQ): "
+                        f"{str(parent)[:800] if parent else 'no parent'!r}"
+                    )
+                headers = [th.get_text(strip=True) for th in soup.select("th")]
+                named_count = sum(1 for _, _, n in listing_questions if n)
+                logger.warning(
+                    f"[Welsh Parliament] Order-paper {day_str}: {len(listing_questions)} questions, "
+                    f"{named_count} with names from listing row. Table headers: {headers[:8]}"
+                )
+
+            if not listing_questions:
+                # Listing page had no WQ links — try inline row parsing
                 for row in soup.select("tr, li, .question-item, article"):
                     text = row.get_text(strip=True)
                     if len(text) < 10:
@@ -883,66 +1116,47 @@ class WelshParliamentScraper(BaseScraper):
                     ))
                 continue
 
-            logger.info(f"[Welsh Parliament] Questions: {len(q_links)} question links for {day_str}")
-            for q_url in q_links[:50]:
-                q_id_match = re.search(r"WQ-(\d+)|/(\d+)$", q_url)
-                q_id = q_id_match.group(0) if q_id_match else ""
-                if q_id and q_id in seen_ids:
-                    continue
-                if q_id:
-                    seen_ids.add(q_id)
-                q_detail = self._html_get(q_url)
-                if not q_detail:
-                    continue
-                # Parse question text, member name, and answer
-                q_text_el = q_detail.select_one(
-                    ".question-text, .question-body, [class*='question'], article p, main p"
-                )
-                q_text = q_text_el.get_text(strip=True) if q_text_el else ""
-                ans_el = q_detail.select_one(".answer-text, .answer-body, [class*='answer']")
-                answer = ans_el.get_text(strip=True) if ans_el else ""
-                combined = f"Question: {q_text}\n\nAnswer: {answer}" if answer else q_text
-                if not combined:
-                    combined = q_detail.get_text(separator=" ", strip=True)[:500]
-                member_name = ""
-                # Try specific Senedd member selectors first
-                for sel in [
-                    ".member-name", ".asked-by", "[class*='member-name']",
-                    "[class*='asked-by']", "[class*='tabled-by']",
-                ]:
-                    el = q_detail.select_one(sel)
-                    if el:
-                        member_name = el.get_text(strip=True)
-                        break
-                # Try label-value patterns: <dt>Tabled by</dt><dd>Name</dd>
+            logger.info(f"[Welsh Parliament] Questions: {len(listing_questions)} question links for {day_str}")
+            for q_url, q_id, listing_member_name in listing_questions[:50]:
+                member_name = listing_member_name
+                q_text = ""
+                answer = ""
+                subject = ""
+                q_date = current.isoformat()
+
+                # Only fetch the detail page when listing didn't give us a name
                 if not member_name:
-                    for dt in q_detail.select("dt"):
-                        dt_text = dt.get_text(strip=True).lower()
-                        if any(kw in dt_text for kw in ("tabled", "asked", "member")):
-                            dd = dt.find_next_sibling("dd")
-                            if dd:
-                                member_name = dd.get_text(strip=True)
-                                break
-                # Try looking for "Asked by:" / "Tabled by:" pattern in paragraph text
-                if not member_name:
-                    for p in q_detail.select("p, span, td"):
-                        text_raw = p.get_text(strip=True)
-                        m = re.match(r"(?:Asked|Tabled)\s+by[:\s]+(.+)", text_raw, re.I)
-                        if m:
-                            member_name = m.group(1).strip()
-                            break
-                # Last resort: first <strong> or <b> that looks like a name (2+ words, title-case)
-                if not member_name:
-                    for el in q_detail.select("strong, b"):
-                        candidate = el.get_text(strip=True)
-                        words = candidate.split()
-                        if 2 <= len(words) <= 5 and all(w[0].isupper() for w in words if w):
-                            member_name = candidate
-                            break
-                date_el = q_detail.select_one("time[datetime], time, .date, [class*='date']")
-                q_date = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else current.isoformat()
-                subject_el = q_detail.select_one("h1, .subject, .title, [class*='subject']")
-                subject = subject_el.get_text(strip=True) if subject_el else ""
+                    q_detail = self._html_get(q_url)
+                    if q_detail and not self._is_spa_shell(q_detail):
+                        member_name = self._member_from_detail(q_detail)
+                        q_text_el = q_detail.select_one(
+                            ".question-text, .question-body, [class*='question'], article p, main p"
+                        )
+                        q_text = q_text_el.get_text(strip=True) if q_text_el else ""
+                        ans_el = q_detail.select_one(".answer-text, .answer-body, [class*='answer']")
+                        answer = ans_el.get_text(strip=True) if ans_el else ""
+                        date_el = q_detail.select_one("time[datetime], time, .date, [class*='date']")
+                        if date_el:
+                            q_date = date_el.get("datetime", date_el.get_text(strip=True))
+                        subject_el = q_detail.select_one("h1, .subject, .title, [class*='subject']")
+                        subject = subject_el.get_text(strip=True) if subject_el else ""
+                    elif not member_name and q_id:
+                        # SPA shell on record.senedd.wales — try the senedd.wales WordPress URL
+                        wp_url = f"{_BASE}/senedd-business/written-questions/{q_id}/"
+                        wp_detail = self._html_get(wp_url)
+                        if wp_detail and not self._is_spa_shell(wp_detail):
+                            member_name = self._member_from_detail(wp_detail)
+                            if not q_text:
+                                main_el = wp_detail.select_one("article, main, .entry-content")
+                                q_text = main_el.get_text(separator=" ", strip=True)[:500] if main_el else ""
+                            if not hasattr(self, "_wp_q_logged"):
+                                self._wp_q_logged = True
+                                logger.warning(
+                                    f"[Welsh Parliament] WP question page {wp_url}: "
+                                    f"member={member_name!r} text={q_text[:100]!r}"
+                                )
+
+                combined = f"Question: {q_text}\n\nAnswer: {answer}" if (q_text and answer) else (q_text or answer or "")
                 records.append(self._make_record(
                     data_type="question",
                     member={"id": "", "name": member_name, "party": "", "constituency": "", "role": "MS"},
@@ -953,7 +1167,8 @@ class WelshParliamentScraper(BaseScraper):
                     source_url=q_url,
                 ))
 
-        logger.info(f"[Welsh Parliament] Order paper questions: {len(records)} records")
+        named = sum(1 for r in records if r.get("member", {}).get("name"))
+        logger.info(f"[Welsh Parliament] Order paper questions: {len(records)} records, {named} with member names")
         return records
 
     def fetch_questions(self, from_date: Optional[str] = None) -> List[Dict]:
@@ -1435,6 +1650,87 @@ class WelshParliamentScraper(BaseScraper):
                     f"[Welsh Parliament] No record.senedd.wales Plenary links found on {plenary_url} "
                     f"(checked {len(pages_to_scan)} pages) — session pages may not link to Record"
                 )
+
+        # Fallback A: order-paper plenary listing pages (same SSR pattern as written questions)
+        # URL: record.senedd.wales/OrderPaper/Plenary/DD-MM-YYYY/
+        logger.info("[Welsh Parliament] Trying order-paper plenary pages for meeting IDs…")
+        from_dt_plenary = date.fromisoformat(from_date) if from_date else date(2024, 1, 1)
+        today = date.today()
+        current = from_dt_plenary
+        consec_empty = 0
+        while current <= today and consec_empty < 60 and len(meetings) < 200:
+            day_str = current.strftime("%d-%m-%Y")
+            op_url = f"{_RECORD}/OrderPaper/Plenary/{day_str}/"
+            op_soup = self._html_get(op_url)
+            current += timedelta(days=1)
+            if not op_soup:
+                consec_empty += 1
+                continue
+            op_text = op_soup.get_text(separator=" ", strip=True)
+            if len(op_text) < 200:
+                consec_empty += 1
+                continue
+            consec_empty = 0
+            for a in op_soup.select("a[href]"):
+                href = a.get("href", "")
+                if not href:
+                    continue
+                _add(href, a.get_text(strip=True) + " " + day_str)
+            if not hasattr(self, "_op_plenary_logged"):
+                self._op_plenary_logged = True
+                logger.warning(
+                    f"[Welsh Parliament] Order-paper plenary {op_url}: {len(op_text)} chars, "
+                    f"links={[a.get('href','') for a in op_soup.select('a[href]')][:8]}"
+                )
+        if meetings:
+            logger.info(f"[Welsh Parliament] {len(meetings)} meeting IDs from order-paper plenary pages")
+            return meetings
+
+        # Fallback B: sequential XML-export probe.
+        # Plenary meeting IDs are small integers that increment with each sitting.
+        # Recent 6th Senedd sessions are expected in the ~7500–7900 range (2021–2026).
+        # We probe a window of IDs; the XML export returns valid XML for real meetings
+        # and an HTML shell for unknown IDs.
+        logger.info("[Welsh Parliament] Probing sequential meeting IDs via XML export…")
+        probe_start = 7400
+        probe_end = 7900
+        consecutive_miss = 0
+        for mid in range(probe_end, probe_start - 1, -1):  # newest first
+            if consecutive_miss > 40:
+                break
+            export_url = f"{_RECORD}/XMLExport/Download"
+            saved_h = dict(self.session.headers)
+            self.session.headers.update({
+                "User-Agent": _BROWSER_UA,
+                "Accept": "application/xml,text/xml,*/*;q=0.8",
+            })
+            resp = self._get(export_url, params={"meetingID": str(mid),
+                                                  "xmlDownloadType": "EnglishTranscript"}, timeout=20)
+            self.session.headers.clear()
+            self.session.headers.update(saved_h)
+            if not resp or not resp.ok:
+                consecutive_miss += 1
+                continue
+            ct = resp.headers.get("Content-Type", "")
+            if "html" in ct or resp.text.strip()[:5].lower().startswith("<!doc"):
+                consecutive_miss += 1
+                continue
+            # Got XML — extract date from content if possible
+            meeting_date = ""
+            dm = re.search(r"<(?:SittingDate|MeetingDate|Date|PlnryDate)>([^<]+)<", resp.text)
+            if dm:
+                meeting_date = dm.group(1).strip()[:10]
+            if str(mid) not in seen:
+                if from_date and meeting_date and meeting_date[:10] < from_date:
+                    consecutive_miss = 0
+                    continue
+                seen.add(str(mid))
+                meetings.append({"id": str(mid), "date": meeting_date})
+                consecutive_miss = 0
+                logger.info(f"[Welsh Parliament] Found meeting ID {mid} date={meeting_date!r} via XML probe")
+        if meetings:
+            logger.info(f"[Welsh Parliament] {len(meetings)} meeting IDs from sequential XML probe")
+            return meetings
 
         logger.warning("[Welsh Parliament] Could not find any meeting IDs — XML export unavailable")
         return meetings
