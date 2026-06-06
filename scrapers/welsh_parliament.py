@@ -1054,41 +1054,86 @@ class WelshParliamentScraper(BaseScraper):
                 continue
 
             body_text = soup.get_text(separator=" ", strip=True)
-            if len(body_text) < 300 or not re.search(r"WQ-\d+|question|tabled|written", body_text, re.I):
+            if len(body_text) < 300 or not re.search(r"WQ-?\d+|question|tabled|written", body_text, re.I):
                 consecutive_empty += 1
                 continue
 
             consecutive_empty = 0
 
-            # One-time raw HTML dump of the first order-paper page that has WQ
-            # content, so we can see the exact table/row structure (names are on
-            # this SSR page but the layout varies — this reveals it).
-            if re.search(r"WQ-?\d+", body_text) and not hasattr(self, "_op_raw_logged"):
-                self._op_raw_logged = True
-                # Find the first element whose text contains a WQ id and dump its HTML
-                wq_el = None
-                for el in soup.select("tr, li, article, div, p"):
-                    if re.search(r"WQ-?\d+", el.get_text(" ", strip=True)) and len(el.get_text(strip=True)) < 400:
-                        wq_el = el
-                        break
-                headers = [th.get_text(strip=True) for th in soup.select("th")]
-                logger.warning(
-                    f"[Welsh Parliament] Order-paper RAW {url}\n"
-                    f"  Table headers: {headers[:10]}\n"
-                    f"  First WQ element HTML: {str(wq_el)[:900] if wq_el else 'none found'!r}"
-                )
+            # ----------------------------------------------------------------
+            # Path 1: confirmed order-paper structure (6th Senedd 2021-present)
+            # <div class="itemContent writtenQuestion"> containing:
+            #   span.name, span.area, a[href*='mgUserInfo'], span.title (WQ id),
+            #   span.date ("Tabled on DD/MM/YYYY"), .itemContent__content (question),
+            #   .itemContent__nested-item-content (answer)
+            # ----------------------------------------------------------------
+            wq_items = soup.select("div.itemContent.writtenQuestion")
+            if wq_items:
+                if not hasattr(self, "_op_item_logged"):
+                    self._op_item_logged = True
+                    logger.warning(
+                        f"[Welsh Parliament] Order-paper itemContent structure ({day_str}): "
+                        f"{len(wq_items)} items. First HTML: {str(wq_items[0])[:700]!r}"
+                    )
+                day_added = 0
+                for item in wq_items:
+                    name_el = item.select_one("span.name")
+                    member_name = name_el.get_text(strip=True) if name_el else ""
+                    area_el = item.select_one("span.area")
+                    constituency = area_el.get_text(strip=True) if area_el else ""
+                    uid_el = item.select_one("a[href*='mgUserInfo']")
+                    member_id = ""
+                    if uid_el:
+                        uid_m = re.search(r"UID=(\d+)", uid_el.get("href", ""), re.I)
+                        if uid_m:
+                            member_id = uid_m.group(1)
+                    title_el = item.select_one("span.title")
+                    raw_id = title_el.get_text(strip=True) if title_el else ""
+                    # Normalize WQ98479 → WQ-98479
+                    if raw_id and re.match(r"WQ\d+$", raw_id, re.I):
+                        q_id = "WQ-" + raw_id[2:]
+                    else:
+                        q_id = raw_id.upper()
+                    if q_id in seen_ids:
+                        continue
+                    if q_id:
+                        seen_ids.add(q_id)
+                    date_el = item.select_one("span.date")
+                    date_text = date_el.get_text(strip=True) if date_el else ""
+                    dm = re.search(r"(\d{2})/(\d{2})/(\d{4})", date_text)
+                    q_date = f"{dm.group(3)}-{dm.group(2)}-{dm.group(1)}" if dm else current.isoformat()
+                    content_el = item.select_one(".itemContent__content")
+                    q_text = content_el.get_text(separator=" ", strip=True) if content_el else ""
+                    nested_el = item.select_one(".itemContent__nested-item-content")
+                    answer = nested_el.get_text(separator=" ", strip=True) if nested_el else ""
+                    combined = (f"Question: {q_text}\n\nAnswer: {answer}"
+                                if (q_text and answer) else (q_text or answer or ""))
+                    records.append(self._make_record(
+                        data_type="question",
+                        member={"id": member_id, "name": member_name,
+                                "party": "", "constituency": constituency, "role": "MS"},
+                        date=q_date,
+                        text=combined,
+                        title=q_id,
+                        metadata={"question_type": "written", "question_id": q_id,
+                                  "answer_text": answer},
+                        source_url=url,
+                    ))
+                    day_added += 1
+                logger.info(f"[Welsh Parliament] Questions: {day_added} from itemContent ({day_str})")
+                continue
 
-            # Build (url, id, member_name) triples from the listing page.
-            # Member name is extracted from the row context around each WQ link so we
-            # don't have to visit SPA-shell individual pages at all.
+            # ----------------------------------------------------------------
+            # Path 2: anchor links to /WrittenQuestion/WQ-NNNNN detail pages
+            # ----------------------------------------------------------------
             listing_questions: list = []
             for a in soup.select("a[href]"):
                 href = a.get("href", "")
-                if not re.search(r"/WrittenQuestion/WQ-\d+|/Question/\d+", href, re.I):
+                if not re.search(r"/WrittenQuestion/WQ-?\d+|/Question/\d+", href, re.I):
                     continue
                 q_url = href if href.startswith("http") else f"{_RECORD}{href}"
-                q_id_match = re.search(r"WQ-\d+", href, re.I)
-                q_id = q_id_match.group(0).upper() if q_id_match else ""
+                q_id_match = re.search(r"WQ-?(\d+)", href, re.I)
+                q_id = f"WQ-{q_id_match.group(1)}" if q_id_match else ""
                 if q_id and q_id in seen_ids:
                     continue
                 if q_id:
@@ -1099,42 +1144,22 @@ class WelshParliamentScraper(BaseScraper):
                 member_name = self._name_from_row(a, parent)
                 listing_questions.append((q_url, q_id, member_name))
 
-            # First run: log the listing page structure so we can refine extraction
-            if listing_questions and not hasattr(self, "_op_html_logged"):
-                self._op_html_logged = True
-                first_a = soup.find("a", href=lambda h: h and re.search(r"/WrittenQuestion/WQ-\d+", h or ""))
-                if first_a:
-                    parent = (first_a.find_parent("tr") or first_a.find_parent("li")
-                              or first_a.find_parent("div"))
-                    logger.warning(
-                        f"[Welsh Parliament] Order-paper listing row HTML (first WQ): "
-                        f"{str(parent)[:800] if parent else 'no parent'!r}"
-                    )
-                headers = [th.get_text(strip=True) for th in soup.select("th")]
-                named_count = sum(1 for _, _, n in listing_questions if n)
-                logger.warning(
-                    f"[Welsh Parliament] Order-paper {day_str}: {len(listing_questions)} questions, "
-                    f"{named_count} with names from listing row. Table headers: {headers[:8]}"
-                )
-
             if not listing_questions:
-                # No /WrittenQuestion/ anchor links — the order paper lists questions
-                # as plain table/list rows.  Process ONLY rows that contain a WQ id
-                # (skips nav <li>/<div> junk) and pull the name from the row context.
+                # ----------------------------------------------------------------
+                # Path 3: plain table/list rows containing a WQ id in text
+                # ----------------------------------------------------------------
                 day_added = 0
                 first_row_logged = hasattr(self, "_op_inline_logged")
                 for row in soup.select("tr, li, .question-item, article"):
                     row_text = row.get_text(" ", strip=True)
                     q_id_match = re.search(r"WQ-?(\d+)", row_text)
                     if not q_id_match:
-                        continue  # only WQ rows — avoids nav chrome junk
+                        continue
                     q_id = f"WQ-{q_id_match.group(1)}"
                     if q_id in seen_ids:
                         continue
                     seen_ids.add(q_id)
-
                     member_name = self._name_from_row(None, row)
-
                     if not first_row_logged:
                         first_row_logged = True
                         self._op_inline_logged = True
@@ -1143,7 +1168,6 @@ class WelshParliamentScraper(BaseScraper):
                             f"name={member_name!r} cells={[td.get_text(strip=True) for td in row.select('td')][:6]} "
                             f"HTML={str(row)[:600]!r}"
                         )
-
                     records.append(self._make_record(
                         data_type="question",
                         member={"id": "", "name": member_name,
@@ -1753,7 +1777,7 @@ class WelshParliamentScraper(BaseScraper):
         if not hasattr(self, "_xml_probe_logged"):
             self._xml_probe_logged = True
             for host in export_hosts:
-                for sample_mid in (7622, 8000, 6500):
+                for sample_mid in (6500, 6600, 6700, 6800, 6999):
                     su, sr = _try_export(host, sample_mid)
                     if sr is not None:
                         logger.warning(
@@ -1767,8 +1791,8 @@ class WelshParliamentScraper(BaseScraper):
         # Bounded descending scan (capped so it can't waste minutes).  Targets the
         # most likely recent-session range; refine the bounds once the DIAG log above
         # shows where real meetings live.
-        probe_start = 7000
-        probe_end = 8200
+        probe_start = 6501
+        probe_end = 6999
         consecutive_miss = 0
         attempts = 0
         for mid in range(probe_end, probe_start - 1, -1):  # newest first

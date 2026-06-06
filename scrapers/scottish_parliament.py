@@ -174,21 +174,61 @@ class ScottishParliamentScraper(BaseScraper):
     def _enrich_msp_parties(self, members: List[Dict]) -> None:
         """Try to look up party membership via adjacent OData entities and fill in party field."""
         id_lookup = {m["id"]: m for m in members if m["id"]}
-        for entity in ["PersonParties", "Parties", "MemberParties", "MSPParties"]:
+
+        # Strategy 1: direct entity rows that carry PersonID (PersonParties, MemberParties, MSPParties)
+        for entity in ["PersonParties", "MemberParties", "MSPParties"]:
             rows = self._odata_get(entity)
             if not rows:
                 continue
             if not hasattr(self, "_party_entity_logged"):
                 self._party_entity_logged = True
                 logger.warning(f"[Scottish Parliament] {entity} fields: {list(rows[0].keys())} | sample={rows[0]!r:.300}")
+            filled = 0
             for row in rows:
                 pid = str(row.get("PersonID") or row.get("PersonId") or row.get("MemberID") or "")
                 party = (row.get("PartyName") or row.get("Party") or row.get("PartyAbbreviation")
                          or row.get("Name") or "")
                 if pid and party and pid in id_lookup and not id_lookup[pid].get("party"):
                     id_lookup[pid]["party"] = party
-            logger.info(f"[Scottish Parliament] Party enrichment via {entity}: done")
-            break
+                    filled += 1
+            logger.info(f"[Scottish Parliament] Party enrichment via {entity}: {filled} members filled")
+            if filled:
+                return
+
+        # Strategy 2: Parties entity gives party ID+name; navigate to each party's
+        # MemberParties sub-collection to find PersonIDs.
+        party_rows = self._odata_get("Parties")
+        if not party_rows:
+            logger.warning("[Scottish Parliament] Parties entity returned no rows — cannot enrich parties")
+            return
+        if not hasattr(self, "_party_entity_logged"):
+            self._party_entity_logged = True
+            logger.warning(f"[Scottish Parliament] Parties fields: {list(party_rows[0].keys())} | sample={party_rows[0]!r:.300}")
+
+        filled = 0
+        for party_row in party_rows:
+            party_id = str(party_row.get("ID") or party_row.get("Id") or party_row.get("PartyID") or "")
+            party_name = (party_row.get("PartyName") or party_row.get("Name")
+                          or party_row.get("PartyAbbreviation") or "")
+            if not party_id or not party_name:
+                continue
+            # Navigate: Parties(ID)/MemberParties
+            nav_rows = self._odata_get(f"Parties({party_id})/MemberParties")
+            if not nav_rows:
+                continue
+            if not hasattr(self, "_party_nav_logged"):
+                self._party_nav_logged = True
+                logger.warning(
+                    f"[Scottish Parliament] Parties({party_id})/MemberParties fields: "
+                    f"{list(nav_rows[0].keys())} | sample={nav_rows[0]!r:.300}"
+                )
+            for nav_row in nav_rows:
+                pid = str(nav_row.get("PersonID") or nav_row.get("PersonId")
+                          or nav_row.get("MemberID") or nav_row.get("MemberId") or "")
+                if pid and pid in id_lookup and not id_lookup[pid].get("party"):
+                    id_lookup[pid]["party"] = party_name
+                    filled += 1
+        logger.info(f"[Scottish Parliament] Party enrichment via Parties navigation: {filled} members filled")
 
     def _member_lookup(self, members: List[Dict]) -> Dict[str, Dict]:
         return {m["id"]: m for m in members}
