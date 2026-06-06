@@ -3,16 +3,14 @@ Welsh Parliament (Senedd) scraper.
 
 Data sources:
   - https://senedd.wales/                    — member profiles, register of interests
-  - https://record.senedd.wales/             — Record of Proceedings SPA (plenary, votes)
-  - https://record.senedd.wales/api/         — Record of Proceedings REST API
-  - https://business.senedd.wales/           — Senedd Business SPA (questions)
-  - https://business.senedd.wales/api/       — Senedd Business REST API
-  - https://senedd.wales/api/                — Senedd public REST API
+  - https://record.assembly.wales/Search     — Record of Proceedings search (SSR, confirmed working)
+  - https://record.senedd.wales/             — Record of Proceedings (same site, modern domain)
+  - https://record.senedd.wales/XMLExport/   — XML transcript export by meetingID
 
-record.senedd.wales and business.senedd.wales are both JavaScript SPAs; the
-server-side rendered HTML is just a navigation shell.  Actual data is fetched
-via their REST APIs, which we probe at /api/ with common path patterns.
-All requests use a browser User-Agent; the Senedd CDN blocks generic bot UAs.
+record.assembly.wales and record.senedd.wales are the same site (assembly.wales
+redirects to senedd.wales after the 2020 rename).  The /en/plenary/* sub-paths
+are all broken (redirect to cofnod.senedd.cymru/Error/NotFound).  The /Search
+endpoint is confirmed SSR and returns question/vote cards with member names.
 """
 import logging
 import re
@@ -30,7 +28,18 @@ logger = logging.getLogger(__name__)
 _CFG = PARLIAMENTS["welsh_parliament"]
 _BASE = _CFG["api_base"]        # https://senedd.wales
 _RECORD = _CFG["record_base"]   # https://record.senedd.wales
+_RECORD_ALT = "https://record.assembly.wales"  # old domain — redirects to _RECORD
 _BUSINESS = "https://business.senedd.wales"
+
+# Search page — SSR, confirmed returning question cards with member names + dates.
+# record.assembly.wales is tried first because the user confirmed this URL; it
+# redirects to record.senedd.wales so either domain works.
+_SEARCH_URLS = [
+    f"{_RECORD_ALT}/Search",
+    f"{_RECORD}/Search",
+    f"{_RECORD}/search",
+    f"{_RECORD_ALT}/search",
+]
 
 _BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -51,46 +60,12 @@ _INTEREST_PATHS = [
     "/en/senedd-members/register-of-members-financial-interests/",
 ]
 
-# record.senedd.wales paths (capitalisation varies by version).
-# /en/plenary/divisions/ is confirmed SSR; try analogous sub-paths first.
-_PLENARY_PATHS = [
-    "/en/plenary/oral-questions/",
-    "/en/plenary/written-questions/",
-    "/en/plenary/statements/",
-    "/en/plenary/debates/",
-    "/en/plenary/contributions/",
-    "/en/plenary/",
-    "/en/plenary/plenary-sessions/",
-    "/en/plenary/plenary-session/",
-    "/en/plenary/sessions/",
-    "/en/Plenary/Plenary-Sessions/",
-    "/en/business/plenary/",
-    "/en/Business/Plenary/",
-    "/en/Business/Plenary",
-    "/en/business/",
-    "/en/Business/",
-]
-_DIVISION_PATHS = [
-    "/en/plenary/divisions/",
-    "/en/business/divisions/",
-    "/en/Business/Divisions",
-    "/en/Plenary/Divisions",
-]
-_QUESTION_PATHS = [
-    # SSR analogues of the working /en/plenary/divisions/ path
-    "/en/plenary/oral-questions/",
-    "/en/plenary/written-questions/",
-    "/en/OralQuestions/",
-    "/en/WrittenQuestions/",
-    "/en/written-questions/",
-    "/en/oral-questions/",
-    "/en/business/written-questions/",
-    "/en/business/oral-questions/",
-    "/en/Business/OralQuestions",
-    "/en/Business/WrittenQuestions",
-    "/en/business/oral-questions",
-    "/en/business/written-questions",
-]
+# NOTE: ALL /en/plenary/* and /en/business/* paths on record.senedd.wales redirect
+# to cofnod.senedd.cymru/Error/NotFound — they are confirmed broken (2026-06).
+# The working paths are on senedd.wales (WordPress) and the /Search endpoint.
+_PLENARY_PATHS: list = []   # No working record.senedd.wales plenary paths
+_DIVISION_PATHS: list = []  # No working record.senedd.wales division paths
+_QUESTION_PATHS: list = []  # Questions fetched via /Search instead
 
 # senedd.wales main site question paths
 _SENEDD_QUESTION_PATHS = [
@@ -458,6 +433,278 @@ class WelshParliamentScraper(BaseScraper):
         "https://senedd.wales/api/oral-questions",
     ]
 
+    def _search_soup(self, params: Dict) -> Optional[BeautifulSoup]:
+        """Fetch record.assembly.wales/Search (or record.senedd.wales/Search) with given params."""
+        for url in _SEARCH_URLS:
+            soup = self._html_get(url, params=params)
+            if soup and len(soup.get_text(strip=True)) > 300:
+                return soup
+        return None
+
+    def _fetch_questions_search(self, from_date: Optional[str] = None) -> List[Dict]:
+        """Fetch questions from record.assembly.wales/Search (confirmed SSR, shows member names).
+
+        The Search page renders result cards server-side including WQ number, tabling date,
+        question text preview, and the member's name.  We page through results for both
+        written and oral questions filtering by date.
+        """
+        records: List[Dict] = []
+        seen_ids: set = set()
+
+        # Verify the search page is reachable and contains question content
+        probe = self._search_soup({})
+        if not probe:
+            logger.warning("[Welsh Parliament] Search page not reachable — all URLs failed")
+            return records
+
+        probe_text = probe.get_text(strip=True)
+        if not re.search(r"WQ|question|written|oral|search|tabled|senedd|record", probe_text, re.I):
+            logger.warning(
+                f"[Welsh Parliament] Search page loaded but no expected content — snippet: {probe_text[:200]!r}"
+            )
+            return records
+
+        logger.info("[Welsh Parliament] Search page accessible — probing type filters")
+
+        # Type-ID variants to try for each question category.
+        # We try numeric typeIds first (ASP.NET MVC convention for the Cofnod system)
+        # then fall back to string-name params.
+        for q_type, type_variants in [
+            ("written", [
+                {"typeIds": "4"}, {"typeIds": "5"}, {"typeIds": "1"}, {"typeIds": "6"},
+                {"type": "WrittenQuestion"}, {"type": "Written"},
+                {"FilterType": "WrittenQuestion"}, {"category": "WrittenQuestion"},
+            ]),
+            ("oral", [
+                {"typeIds": "3"}, {"typeIds": "2"},
+                {"type": "OralQuestion"}, {"type": "Oral"},
+                {"FilterType": "OralQuestion"},
+            ]),
+        ]:
+            found_params: Optional[Dict] = None
+
+            for type_params in type_variants:
+                test_params: Dict = dict(type_params)
+                if from_date:
+                    test_params["dateFrom"] = from_date
+                    test_params["dateTo"] = date.today().isoformat()
+
+                soup = self._search_soup(test_params)
+                if not soup:
+                    continue
+
+                # Look for result cards — Cofnod uses various class names
+                cards = []
+                for sel in [
+                    "article.result", ".search-result", "[class*='result-item']",
+                    "[class*='result-card']", "li[class*='result']",
+                    "article", "div[class*='result']", "li[class*='search']",
+                ]:
+                    cards = soup.select(sel)
+                    if cards:
+                        break
+
+                if not cards:
+                    body = soup.find("body")
+                    snippet = body.get_text(separator=" ", strip=True)[:200] if body else ""
+                    logger.warning(
+                        f"[Welsh Parliament] Search {type_params}: no result cards — snippet: {snippet!r}"
+                    )
+                    continue
+
+                page_text = soup.get_text()
+                if not re.search(
+                    r"WQ[- ]?\d+|AQ[- ]?\d+|Written Question|Oral Question|Tabled|Question",
+                    page_text, re.I,
+                ):
+                    logger.warning(
+                        f"[Welsh Parliament] Search {type_params}: {len(cards)} cards but no question markers"
+                    )
+                    continue
+
+                logger.info(f"[Welsh Parliament] Search {type_params}: {len(cards)} cards (type={q_type})")
+                found_params = test_params
+                break
+
+            if found_params is None:
+                # No type filter worked — fall back to unfiltered search for this q_type
+                logger.warning(
+                    f"[Welsh Parliament] No working type filter for {q_type} questions — "
+                    f"will try unfiltered search"
+                )
+                found_params = {}
+                if from_date:
+                    found_params["dateFrom"] = from_date
+                    found_params["dateTo"] = date.today().isoformat()
+
+            # Page through results
+            page = 1
+            while page <= 200:
+                page_params = {**found_params, "page": page}
+                soup = self._search_soup(page_params)
+                if not soup:
+                    break
+
+                cards = []
+                for sel in [
+                    "article.result", ".search-result", "[class*='result-item']",
+                    "[class*='result-card']", "li[class*='result']",
+                    "article", "div[class*='result']", "li[class*='search']",
+                ]:
+                    cards = soup.select(sel)
+                    if cards:
+                        break
+
+                if not cards:
+                    break
+
+                page_added = 0
+                for card in cards:
+                    card_text = card.get_text(separator=" ", strip=True)
+
+                    # Question ID (WQ98839 / WQ-98839 / AQ12345)
+                    wq_m = re.search(r"(WQ|AQ)[- ]?(\d+)", card_text, re.I)
+                    q_id = f"{wq_m.group(1).upper()}{wq_m.group(2)}" if wq_m else ""
+                    if q_id and q_id in seen_ids:
+                        continue
+                    if q_id:
+                        seen_ids.add(q_id)
+
+                    # Member name — try label patterns first then structural selectors
+                    member_name = ""
+
+                    # <dt>Tabled by</dt><dd>Name</dd>
+                    for dt in card.select("dt"):
+                        dt_text = dt.get_text(strip=True).lower()
+                        if any(kw in dt_text for kw in ("tabled", "asked", "member", "by", "aelod")):
+                            dd = dt.find_next_sibling("dd")
+                            if dd:
+                                member_name = dd.get_text(strip=True)
+                                break
+
+                    # "Tabled by: Name" or "Asked by Name" inline in text
+                    if not member_name:
+                        m = re.search(
+                            r"(?:Tabled|Asked)\s+by[:\s]+([A-Z][a-zA-Záéíóú'\-]+(?:\s+[A-Z][a-zA-Záéíóú'\-]+)+)",
+                            card_text,
+                        )
+                        if m:
+                            member_name = m.group(1).strip()
+
+                    # CSS-class-based selectors
+                    if not member_name:
+                        for sel in (
+                            ".member-name", "[class*='member']", "[class*='tabled']",
+                            "[class*='asked']", "[class*='author']", "[class*='name']",
+                        ):
+                            el = card.select_one(sel)
+                            if el:
+                                cand = el.get_text(strip=True)
+                                if cand and len(cand) > 2 and cand not in ("Member", "Name", "Aelod"):
+                                    member_name = cand
+                                    break
+
+                    # Last resort: first <strong>/<b> that looks like a person name
+                    if not member_name:
+                        for el in card.select("strong, b"):
+                            cand = el.get_text(strip=True)
+                            words = cand.split()
+                            if 2 <= len(words) <= 6 and all(
+                                w and w[0].isupper() for w in words if w.isalpha()
+                            ):
+                                member_name = cand
+                                break
+
+                    # Date — prefer time[datetime] then regex
+                    q_date = ""
+                    date_el = card.select_one("time[datetime]")
+                    if date_el:
+                        q_date = date_el.get("datetime", "")[:10]
+                    if not q_date:
+                        dm = re.search(
+                            r"(\d{2}/\d{2}/\d{4}|\d{4}-\d{2}-\d{2}|\d{1,2}\s+\w+\s+\d{4})",
+                            card_text,
+                        )
+                        if dm:
+                            raw = dm.group(1)
+                            if "/" in raw:
+                                try:
+                                    from datetime import datetime as _dt
+                                    q_date = _dt.strptime(raw, "%d/%m/%Y").strftime("%Y-%m-%d")
+                                except ValueError:
+                                    q_date = raw
+                            elif re.match(r"\d{4}-\d{2}-\d{2}", raw):
+                                q_date = raw
+                            else:
+                                try:
+                                    from datetime import datetime as _dt
+                                    for fmt in ("%d %B %Y", "%d %b %Y"):
+                                        try:
+                                            q_date = _dt.strptime(raw, fmt).strftime("%Y-%m-%d")
+                                            break
+                                        except ValueError:
+                                            continue
+                                except Exception:
+                                    q_date = raw
+
+                    if from_date and q_date and q_date[:10] < from_date:
+                        continue
+
+                    title_el = card.select_one("h2, h3, h4, .title, [class*='title']")
+                    q_title = title_el.get_text(strip=True) if title_el else q_id
+
+                    records.append(self._make_record(
+                        data_type="question",
+                        member={
+                            "id": "", "name": member_name, "party": "",
+                            "constituency": "", "role": "MS",
+                        },
+                        date=q_date,
+                        text=card_text,
+                        title=q_title or q_id,
+                        metadata={"question_type": q_type, "question_id": q_id},
+                        source_url=_SEARCH_URLS[0],
+                    ))
+                    page_added += 1
+
+                # Log sample from first page to diagnose member extraction
+                if page == 1 and records and not hasattr(self, "_search_q_sample_logged"):
+                    self._search_q_sample_logged = True
+                    samp = records[-1]
+                    logger.warning(
+                        f"[Welsh Parliament] Search question sample: "
+                        f"name={samp.get('member', {}).get('name', '')!r} "
+                        f"date={samp.get('date', '')!r} "
+                        f"q_id={samp.get('metadata', {}).get('question_id', '')!r}"
+                    )
+
+                # Check for a "Next" pagination link
+                next_link = None
+                for sel in [
+                    "a[rel='next']", ".pagination__next:not(.disabled)",
+                    "[class*='next']:not([class*='disabled'])", "a[aria-label='Next page']",
+                ]:
+                    el = soup.select_one(sel)
+                    if el:
+                        next_link = el
+                        break
+                if not next_link:
+                    for a in soup.select(".pagination a, [class*='pag'] a"):
+                        if re.search(r"next|»|›", a.get_text(), re.I):
+                            next_link = a
+                            break
+
+                if not next_link or page_added == 0:
+                    break
+                page += 1
+
+        named = sum(1 for r in records if r.get("member", {}).get("name", ""))
+        logger.info(
+            f"[Welsh Parliament] Search questions: {len(records)} records, "
+            f"{named} with member names"
+        )
+        return records
+
     def _date_range_days(self, from_date: Optional[str] = None) -> List[str]:
         """Return ISO date strings from from_date (or 2016-05-11, Senedd start) to today."""
         start = date.fromisoformat(from_date) if from_date else date(2016, 5, 11)
@@ -606,9 +853,13 @@ class WelshParliamentScraper(BaseScraper):
         return records
 
     def fetch_questions(self, from_date: Optional[str] = None) -> List[Dict]:
-        records = []
+        # 1. Search page (confirmed SSR — returns question cards with member names)
+        records = self._fetch_questions_search(from_date)
+        if records:
+            logger.info(f"[Welsh Parliament] {len(records)} question records fetched via Search page")
+            return records
 
-        # 1. Try REST API endpoints first (SPAs load data from APIs, not HTML)
+        # 2. Try REST API endpoints (SPAs — these return HTML shell, but worth trying)
         for api_url in self._QUESTION_API_CANDIDATES:
             params = {}
             if from_date:
@@ -966,70 +1217,122 @@ class WelshParliamentScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def _fetch_meeting_ids_wales(self, from_date: Optional[str] = None) -> List[Dict]:
-        """Fetch meeting IDs for Senedd plenary sessions.
+        """Fetch plenary meeting IDs needed for the XML transcript export.
 
-        The divisions index at record.senedd.wales/en/plenary/divisions/ is SSR and
-        contains links like /en/Plenary/Meeting/?meetingId=NNNN or similar.
-        We parse these to get the meeting IDs needed for the XML export endpoint.
+        All /en/plenary/* paths on record.senedd.wales redirect to an error page.
+        Instead we scan senedd.wales/senedd-business/plenary/ and its sub-pages
+        (the same WordPress pages used by fetch_plenary_business) looking for links
+        to record.senedd.wales/Plenary/{meetingId} or record.assembly.wales/Plenary/{id}.
         """
-        meetings = []
-        seen = set()
-        for path in _DIVISION_PATHS + ["/en/plenary/plenary-sessions/", "/en/plenary/"]:
-            url = f"{_RECORD}{path}"
-            soup = self._html_get(url)
+        meetings: List[Dict] = []
+        seen: set = set()
+
+        # Links to the Record of Proceedings for a specific plenary session look like:
+        #   https://record.senedd.wales/Plenary/7622/
+        #   https://record.assembly.wales/Plenary/7622
+        #   https://record.senedd.wales/en/Plenary/Meeting/?meetingId=7622
+        _MID_RE = re.compile(
+            r"record\.(?:senedd|assembly)\.wales(?:/[a-z]{2})?/[Pp]lenary/(\d+)"
+            r"|[Mm]eeting[Ii][Dd]=(\d+)",
+            re.I,
+        )
+
+        def _parse_date(text: str) -> str:
+            dm = re.search(r"\d{4}-\d{2}-\d{2}", text)
+            if dm:
+                return dm.group(0)
+            dm2 = re.search(r"(\d{1,2})[/ ](\d{1,2})[/ ](\d{4})", text)
+            if dm2:
+                try:
+                    from datetime import datetime as _dt
+                    return _dt.strptime(dm2.group(0), "%d/%m/%Y").strftime("%Y-%m-%d")
+                except Exception:
+                    pass
+            dm3 = re.search(r"(\d{1,2})\s+(January|February|March|April|May|June|July|August|"
+                            r"September|October|November|December)\s+(\d{4})", text, re.I)
+            if dm3:
+                try:
+                    from datetime import datetime as _dt
+                    return _dt.strptime(dm3.group(0), "%d %B %Y").strftime("%Y-%m-%d")
+                except Exception:
+                    pass
+            return ""
+
+        def _add(href: str, context: str) -> None:
+            m = _MID_RE.search(href)
+            if not m:
+                return
+            mid = m.group(1) or m.group(2)
+            if not mid or mid in seen:
+                return
+            m_date = _parse_date(context)
+            if from_date and m_date and m_date[:10] < from_date:
+                return
+            seen.add(mid)
+            meetings.append({"id": mid, "date": m_date})
+
+        # Scan the senedd.wales plenary pages — same approach as fetch_plenary_business
+        for plenary_path in _SENEDD_PLENARY_PATHS:
+            plenary_url = f"{_BASE}{plenary_path}"
+            soup = self._html_get(plenary_url)
             if not soup:
                 continue
-            body_text = soup.get_text(separator=" ", strip=True)
-            if len(body_text) < 200:
-                continue
-            for a in soup.select("a[href]"):
-                href = a.get("href", "")
-                m = re.search(r"[Mm]eeting[Ii][Dd]=(\d+)|/[Mm]eeting/(\d+)|/(\d{4,})", href)
-                if m:
-                    mid = m.group(1) or m.group(2) or m.group(3)
-                    if mid not in seen:
-                        seen.add(mid)
-                        # Try to get date from time element, link text, or parent row
-                        row = a.find_parent("tr") or a.find_parent("li") or a.find_parent("div")
-                        time_el = (row.select_one("time[datetime]") if row else None) or a.select_one("time[datetime]")
-                        if time_el:
-                            m_date = time_el.get("datetime", "")[:10]
-                        else:
-                            row_text = " ".join([
-                                a.get_text(strip=True),
-                                row.get_text(separator=" ", strip=True) if row else "",
-                            ])
-                            dm = re.search(
-                                r"\d{4}-\d{2}-\d{2}"
-                                r"|\d{1,2}/\d{1,2}/\d{4}"
-                                r"|\d{1,2}\s+\w+\s+\d{4}"
-                                r"|\d{1,2}\s+\w{3,}\s+\d{4}",
-                                row_text,
-                            )
-                            m_date = dm.group(0) if dm else ""
-                            # Convert "6 June 2025" to ISO if needed
-                            if m_date and not re.match(r"\d{4}-\d{2}-\d{2}", m_date):
-                                try:
-                                    from datetime import datetime as _dt
-                                    for fmt in ("%d %B %Y", "%d/%m/%Y", "%d %b %Y"):
-                                        try:
-                                            m_date = _dt.strptime(m_date, fmt).strftime("%Y-%m-%d")
-                                            break
-                                        except ValueError:
-                                            continue
-                                except Exception:
-                                    pass
-                        meetings.append({"id": mid, "date": m_date})
+
+            all_hrefs = [a.get("href", "") for a in soup.select("a[href]") if a.get("href")]
+
+            # Collect sub-pages of /senedd-business/plenary/ (exclude nav-only pages)
+            sub_hrefs = [
+                h for h in all_hrefs
+                if "senedd-business/plenary/" in h
+                and h not in (plenary_path, plenary_url, "/senedd-business/plenary/")
+                and not any(x in h for x in ("/what-is-plenary", "/about-plenary", "#"))
+            ]
+
+            pages_to_scan = [(plenary_url, soup)]
+            for sub_href in sub_hrefs[:20]:
+                sub_url = sub_href if sub_href.startswith("http") else f"{_BASE}{sub_href}"
+                sub_soup = self._html_get(sub_url)
+                if sub_soup:
+                    pages_to_scan.append((sub_url, sub_soup))
+                    # Follow one more level: individual session pages linked from sub-pages
+                    for a2 in sub_soup.select("a[href]"):
+                        h2 = a2.get("href", "")
+                        if not h2:
+                            continue
+                        # Session pages: date-based like /senedd-business/plenary/2026-03-15/
+                        if re.search(r"senedd-business/plenary/\d{4}-\d{2}", h2):
+                            sess_url = h2 if h2.startswith("http") else f"{_BASE}{h2}"
+                            sess_soup = self._html_get(sess_url)
+                            if sess_soup:
+                                pages_to_scan.append((sess_url, sess_soup))
+
+            # Scan all collected pages for record.senedd.wales/Plenary/{id} links
+            for page_url, page_soup in pages_to_scan:
+                for a in page_soup.select("a[href]"):
+                    href = a.get("href", "")
+                    if not href:
+                        continue
+                    if not _MID_RE.search(href):
+                        continue
+                    row = (a.find_parent("tr") or a.find_parent("li")
+                           or a.find_parent("article") or a.find_parent("div"))
+                    context = (row.get_text(separator=" ", strip=True)
+                               if row else a.get_text(strip=True))
+                    _add(href, context)
+
             if meetings:
-                logger.info(f"[Welsh Parliament] Found {len(meetings)} meeting IDs from {url}")
-                sample_dated = [x for x in meetings if x["date"]][:3]
-                sample_undated = [x for x in meetings if not x["date"]][:3]
-                logger.warning(f"[Welsh Parliament] Meeting sample dated={sample_dated} undated={sample_undated}")
-                break
+                logger.info(f"[Welsh Parliament] {len(meetings)} meeting IDs from senedd.wales plenary pages")
+                dated = [x for x in meetings if x["date"]][:3]
+                undated = [x for x in meetings if not x["date"]][:3]
+                logger.warning(f"[Welsh Parliament] Meeting IDs sample dated={dated} undated={undated}")
+                return meetings
             else:
-                # Log sample hrefs to diagnose why no meeting IDs were found
-                sample_hrefs = [a.get("href", "") for a in soup.select("a[href]")][:10]
-                logger.warning(f"[Welsh Parliament] No meeting IDs at {url} — sample hrefs: {sample_hrefs}")
+                logger.warning(
+                    f"[Welsh Parliament] No record.senedd.wales Plenary links found on {plenary_url} "
+                    f"(checked {len(pages_to_scan)} pages) — session pages may not link to Record"
+                )
+
+        logger.warning("[Welsh Parliament] Could not find any meeting IDs — XML export unavailable")
         return meetings
 
     def _fetch_votes_xml_export(self, meeting_id: str, meeting_date: str,
@@ -1128,11 +1431,107 @@ class WelshParliamentScraper(BaseScraper):
             )
         return added
 
+    def _fetch_votes_search(self, from_date: Optional[str] = None) -> List[Dict]:
+        """Try to find division/vote content via the record.assembly.wales/Search page.
+
+        Looks for search result types that match divisions (e.g. typeIds for Vote/Division).
+        Returns vote records if found, empty list otherwise.
+        """
+        records: List[Dict] = []
+        seen: set = set()
+
+        # Try common type IDs and names for division content
+        for type_params in [
+            {"typeIds": "7"}, {"typeIds": "8"}, {"typeIds": "9"}, {"typeIds": "10"},
+            {"type": "Division"}, {"type": "Vote"}, {"type": "VoteOnDivision"},
+            {"FilterType": "Division"}, {"FilterType": "Vote"},
+        ]:
+            test_params: Dict = dict(type_params)
+            if from_date:
+                test_params["dateFrom"] = from_date
+
+            soup = self._search_soup(test_params)
+            if not soup:
+                continue
+
+            cards = []
+            for sel in [
+                "article.result", ".search-result", "[class*='result-item']",
+                "article", "div[class*='result']",
+            ]:
+                cards = soup.select(sel)
+                if cards:
+                    break
+
+            if not cards:
+                continue
+
+            page_text = soup.get_text()
+            if not re.search(r"[Dd]ivision|[Vv]ote|[Pp]lenary", page_text):
+                continue
+
+            logger.info(f"[Welsh Parliament] Search votes {type_params}: {len(cards)} cards")
+
+            for card in cards:
+                card_text = card.get_text(separator=" ", strip=True)
+                # Extract division title and member name
+                title_el = card.select_one("h2, h3, h4, .title, [class*='title']")
+                div_title = title_el.get_text(strip=True) if title_el else card_text[:100]
+
+                member_name = ""
+                for dt in card.select("dt"):
+                    if any(kw in dt.get_text(strip=True).lower() for kw in ("voted", "member", "ms ")):
+                        dd = dt.find_next_sibling("dd")
+                        if dd:
+                            member_name = dd.get_text(strip=True)
+                            break
+
+                q_date = ""
+                date_el = card.select_one("time[datetime]")
+                if date_el:
+                    q_date = date_el.get("datetime", "")[:10]
+                if not q_date:
+                    dm = re.search(r"\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}", card_text)
+                    if dm:
+                        raw = dm.group(0)
+                        if "/" in raw:
+                            try:
+                                from datetime import datetime as _dt
+                                q_date = _dt.strptime(raw, "%d/%m/%Y").strftime("%Y-%m-%d")
+                            except ValueError:
+                                q_date = raw
+                        else:
+                            q_date = raw
+
+                if from_date and q_date and q_date[:10] < from_date:
+                    continue
+
+                card_id = card_text[:50]
+                if card_id in seen:
+                    continue
+                seen.add(card_id)
+
+                records.append(self._make_record(
+                    data_type="vote",
+                    member={"id": "", "name": member_name, "party": "", "constituency": "", "role": "MS"},
+                    date=q_date,
+                    text=card_text,
+                    title=div_title,
+                    metadata={"vote_direction": "", "division_result": ""},
+                    source_url=_SEARCH_URLS[0],
+                ))
+
+            if records:
+                break
+
+        logger.info(f"[Welsh Parliament] Search votes: {len(records)} records")
+        return records
+
     def fetch_votes_on_division(self, from_date: Optional[str] = None) -> List[Dict]:
         records: List[Dict] = []
 
         # 1. Try XML Export for each meeting that has divisions.
-        #    First get meeting IDs from the divisions index page.
+        #    Meeting IDs come from scanning senedd.wales plenary session pages.
         meeting_ids = self._fetch_meeting_ids_wales(from_date)
         if meeting_ids:
             logger.info(f"[Welsh Parliament] Fetching votes via XML export for {len(meeting_ids)} meetings...")
@@ -1145,11 +1544,19 @@ class WelshParliamentScraper(BaseScraper):
             if records:
                 logger.info(f"[Welsh Parliament] {len(records)} vote records fetched via XML export")
                 return records
+            logger.warning(f"[Welsh Parliament] {len(meeting_ids)} meetings found but XML export returned 0 votes")
 
-        # 2. Fall back to HTML scraping from the divisions index
-        soup = self._try_paths(_RECORD, _DIVISION_PATHS)
+        # 2. Try the Search page with division-type filter
+        records = self._fetch_votes_search(from_date)
+        if records:
+            logger.info(f"[Welsh Parliament] {len(records)} vote records fetched via Search page")
+            return records
+
+        # 3. Fall back to HTML scraping from the divisions index — all known paths are broken
+        # (all /en/plenary/* redirect to cofnod.senedd.cymru/Error/NotFound) but log for diagnosis
+        soup = self._try_paths(_RECORD, _DIVISION_PATHS) if _DIVISION_PATHS else None
         if not soup:
-            logger.warning("[Welsh Parliament] Could not load divisions index from record.senedd.wales")
+            logger.warning("[Welsh Parliament] Could not load divisions index — all known paths broken")
             return records
 
         row_selectors = ["table tr", ".division-row", "li.division", "article.division", "li"]

@@ -763,6 +763,13 @@ class NIAssemblyScraper(BaseScraper):
                     logger.warning(f"[NI Assembly] Plenary component fields: {list(comp_items[0].keys())} | sample={comp_items[0]!r:.400}")
                 else:
                     logger.warning(f"[NI Assembly] Component fetch for first report_id={report_id!r} returned 0 items (comp_resp={bool(comp_resp)})")
+
+            # Track speaker across components: many components are continuation paragraphs
+            # with no attribution — carry the last known speaker forward so those lines
+            # are attributed rather than left blank.
+            current_name = ""
+            current_id = ""
+
             for item in comp_items:
                 text = item.get("ComponentText", item.get("Text", item.get("Speech", "")))
                 if not text or len(text.strip()) < 10:
@@ -775,10 +782,28 @@ class NIAssemblyScraper(BaseScraper):
                 speaker_from_header = comp_header if (comp_header and not header_is_time and len(comp_header) < 80) else ""
                 name = (item.get("MemberName") or item.get("Speaker")
                         or speaker_from_header or _extract_ni_speaker(text) or "")
+                member_id = str(item.get("PersonId", item.get("MemberId", "")))
+
+                if name:
+                    # New speaker detected — update carry-forward state
+                    current_name = name
+                    current_id = member_id
+                elif current_name:
+                    # Continuation paragraph — use last known speaker
+                    name = current_name
+                    if not member_id:
+                        member_id = current_id
+
+                # Reset carry-forward on procedural items (ComponentType indicates agenda headers)
+                comp_type = item.get("ComponentType", "")
+                if comp_type and re.search(r"Head|Agenda|Procedur|Title|Item", comp_type, re.I):
+                    current_name = ""
+                    current_id = ""
+
                 records.append(self._make_record(
                     data_type="plenary_speech",
                     member={
-                        "id": str(item.get("PersonId", item.get("MemberId", ""))),
+                        "id": member_id,
                         "name": name,
                         "party": item.get("PartyName", item.get("Party", "")),
                         "constituency": item.get("ConstituencyName", ""),

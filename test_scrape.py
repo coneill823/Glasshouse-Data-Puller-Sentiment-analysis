@@ -179,6 +179,8 @@ def _ni_plenary_sample(s: NIAssemblyScraper) -> Tuple[List[Dict], str]:
         )
         if not comp_resp:
             continue
+        current_name = ""
+        current_id = ""
         for item in _ni_list(s._parse_asmx_response(comp_resp, comp_url)):
             text = item.get("ComponentText", item.get("Text", item.get("Speech", "")))
             if not text or len(text.strip()) < 10:
@@ -188,12 +190,27 @@ def _ni_plenary_sample(s: NIAssemblyScraper) -> Tuple[List[Dict], str]:
             # exclude time-of-day strings ("10:30") and very long headers.
             header_is_time = bool(re.match(r"^\d{1,2}:\d{2}", comp_header.strip())) if comp_header else True
             speaker_from_header = comp_header if (comp_header and not header_is_time and len(comp_header) < 80) else ""
+            name = (item.get("MemberName") or item.get("Speaker")
+                    or speaker_from_header or _extract_ni_speaker(text) or "")
+            member_id = str(item.get("PersonId", item.get("MemberId", "")))
+            # Carry forward last known speaker for continuation paragraphs
+            if name:
+                current_name = name
+                current_id = member_id
+            elif current_name:
+                name = current_name
+                if not member_id:
+                    member_id = current_id
+            # Reset on procedural/heading components
+            comp_type = item.get("ComponentType", "")
+            if comp_type and re.search(r"Head|Agenda|Procedur|Title|Item", comp_type, re.I):
+                current_name = ""
+                current_id = ""
             records.append(s._make_record(
                 data_type="plenary_speech",
                 member={
-                    "id": str(item.get("PersonId", item.get("MemberId", ""))),
-                    "name": (item.get("MemberName") or item.get("Speaker")
-                             or speaker_from_header or _extract_ni_speaker(text) or ""),
+                    "id": member_id,
+                    "name": name,
                     "party": item.get("PartyName", ""),
                     "constituency": item.get("ConstituencyName", ""),
                     "role": "MLA",
@@ -485,7 +502,7 @@ def test_scotland(verbose: bool = False, save_dir: Optional[Path] = None) -> Lis
 
 def _wales_votes_sample(s: WelshParliamentScraper) -> Tuple[List[Dict], str]:
     """Prefer the production XML-export path (reliable dates+names); fall back to
-    HTML division-index scraping for the first 20 rows only."""
+    Search-page vote scraping."""
     # 1. Production path: meeting IDs → XML transcript export
     meeting_ids = s._fetch_meeting_ids_wales(RECENT_90)
     if meeting_ids:
@@ -497,11 +514,23 @@ def _wales_votes_sample(s: WelshParliamentScraper) -> Tuple[List[Dict], str]:
                 hits += 1
         if records:
             return records, f"{len(meeting_ids)} meetings found; XML export for first 10 ({hits} had votes)"
+        if meeting_ids:
+            # Meetings found but XML returned 0 — log for diagnosis
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                f"[Wales votes] {len(meeting_ids)} meetings found but XML export returned 0 votes "
+                f"— sample meetings: {meeting_ids[:3]}"
+            )
 
-    # 2. Fallback: HTML division-index scraping
-    soup = s._try_paths(_WALES_RECORD, _WALES_DIV_PATHS)
+    # 2. Try Search page with division-type filter
+    search_records = s._fetch_votes_search(RECENT_90)
+    if search_records:
+        return search_records, f"record.assembly.wales/Search division filter ({len(search_records)} records)"
+
+    # 3. Fallback: HTML division-index scraping (all known paths now broken)
+    soup = s._try_paths(_WALES_RECORD, _WALES_DIV_PATHS) if _WALES_DIV_PATHS else None
     if not soup:
-        return [], "could not load divisions index from record.senedd.wales"
+        return [], "all /en/plenary/* paths broken; Search division filter returned 0"
 
     rows = []
     for sel in ["table tr", ".division-row", "li.division", "article.division", "li"]:
@@ -607,7 +636,7 @@ def test_wales(verbose: bool = False, save_dir: Optional[Path] = None) -> List[R
          "PDF document → HTML parsing skipped (PDF parsing deferred)", True),
         ("questions",
          lambda: s.fetch_questions(from_date=RECENT_30),
-         "all paths return SPA nav shells → 0 expected", True),
+         f"last 30 days ({RECENT_30}→today); record.assembly.wales/Search (SSR)", True),
         ("plenary_business",
          lambda: s.fetch_plenary_business(from_date=RECENT_30),
          f"last 30 days; senedd.wales sub-page following; sessions capped at 50", True),
