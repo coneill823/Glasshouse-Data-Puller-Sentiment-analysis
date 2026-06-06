@@ -530,7 +530,8 @@ def _wales_votes_sample(s: WelshParliamentScraper) -> Tuple[List[Dict], str]:
     # 3. Fallback: HTML division-index scraping (all known paths now broken)
     soup = s._try_paths(_WALES_RECORD, _WALES_DIV_PATHS) if _WALES_DIV_PATHS else None
     if not soup:
-        return [], "all /en/plenary/* paths broken; Search division filter returned 0"
+        return [], ("XMLExport serves only 5th-Senedd committee meetings (no divisions); "
+                    "Search/record pages are JS-rendered → 0 expected")
 
     rows = []
     for sel in ["table tr", ".division-row", "li.division", "article.division", "li"]:
@@ -633,7 +634,7 @@ def test_wales(verbose: bool = False, save_dir: Optional[Path] = None) -> List[R
          "scraped from senedd.wales WordPress member listing", False),
         ("register_of_interests",
          lambda: s.fetch_register_of_interests(members),
-         "PDF document → HTML parsing skipped (PDF parsing deferred)", True),
+         "PDF document → HTML parsing skipped; PDF parsing deferred → 0 expected", True),
         ("questions",
          lambda: s.fetch_questions(from_date=RECENT_30),
          f"last 30 days ({RECENT_30}→today); record.assembly.wales/Search (SSR)", True),

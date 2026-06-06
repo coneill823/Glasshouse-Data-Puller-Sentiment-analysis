@@ -1772,18 +1772,19 @@ class WelshParliamentScraper(BaseScraper):
             self.session.headers.update(saved_h)
             return export_url, r
 
-        # Diagnostics (06-2026) confirmed the XMLExport endpoint only serves up to
-        # ~meetingID 6600 (5th Senedd, Assembly=5).  IDs from 6700 upward redirect to
-        # /Error/Error, so 6th Senedd (2021-present) plenary divisions are NOT exposed
-        # here.  We scan the known-valid band descending for historical runs, using a
-        # single host and fast error detection so the probe can't burn minutes.
-        probe_start = 6300
+        # Diagnostics across several runs (06-2026) confirmed the XMLExport endpoint
+        # only serves up to ~meetingID 6650, and every reachable ID in that band is a
+        # 5th-Senedd COMMITTEE meeting (Assembly=5) with no plenary <Division> elements
+        # — and some now return empty bodies.  6th Senedd (2021-present) plenary
+        # divisions are simply not exposed here.  Keep a tightly-bounded probe so the
+        # path degrades to a fast 0 instead of burning minutes confirming the dead end.
+        probe_start = 6450
         probe_end = 6650
         consecutive_miss = 0
         attempts = 0
         primary_host = _RECORD
         for mid in range(probe_end, probe_start - 1, -1):  # newest first
-            if consecutive_miss > 40 or attempts > 150:
+            if consecutive_miss > 15 or attempts > 50:
                 break
             attempts += 1
             _, resp = _try_export(primary_host, mid)
