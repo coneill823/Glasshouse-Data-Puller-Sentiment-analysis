@@ -654,9 +654,10 @@ class WelshParliamentScraper(BaseScraper):
         shell_markers = ("National Assembly for Wales Help", "Glossary Contact us",
                          "What is Plenary", "Go to Senedd Business")
         has_chrome = sum(1 for m in shell_markers if m in text) >= 2
-        # Real result pages contain WQ/AQ numbers or multiple result/article elements
-        has_results = bool(re.search(r"(WQ|AQ|OQ)[- ]?\d{3,}", text)) or \
-            len(soup.select("article, [class*='result']")) > 2
+        # Real result pages contain WQ/AQ/OQ numbers in the VISIBLE text.
+        # (Don't count <article>/[class*=result] elements — the SPA shell ships
+        #  empty template articles that falsely look like results.)
+        has_results = bool(re.search(r"(WQ|AQ|OQ)[- ]?\d{3,}", text))
         return has_chrome and not has_results
 
     def _fetch_questions_search(self, from_date: Optional[str] = None) -> List[Dict]:
@@ -873,6 +874,13 @@ class WelshParliamentScraper(BaseScraper):
                     if from_date and q_date and q_date[:10] < from_date:
                         continue
 
+                    # Junk guard: a real question card has a WQ/AQ id OR a member name.
+                    # Cards with neither are SPA template/nav chrome — skip them so we
+                    # don't emit thousands of empty records and fall through to the
+                    # order-paper path instead.
+                    if not q_id and not member_name:
+                        continue
+
                     title_el = card.select_one("h2, h3, h4, .title, [class*='title']")
                     q_title = title_el.get_text(strip=True) if title_el else q_id
 
@@ -1052,6 +1060,24 @@ class WelshParliamentScraper(BaseScraper):
 
             consecutive_empty = 0
 
+            # One-time raw HTML dump of the first order-paper page that has WQ
+            # content, so we can see the exact table/row structure (names are on
+            # this SSR page but the layout varies — this reveals it).
+            if re.search(r"WQ-?\d+", body_text) and not hasattr(self, "_op_raw_logged"):
+                self._op_raw_logged = True
+                # Find the first element whose text contains a WQ id and dump its HTML
+                wq_el = None
+                for el in soup.select("tr, li, article, div, p"):
+                    if re.search(r"WQ-?\d+", el.get_text(" ", strip=True)) and len(el.get_text(strip=True)) < 400:
+                        wq_el = el
+                        break
+                headers = [th.get_text(strip=True) for th in soup.select("th")]
+                logger.warning(
+                    f"[Welsh Parliament] Order-paper RAW {url}\n"
+                    f"  Table headers: {headers[:10]}\n"
+                    f"  First WQ element HTML: {str(wq_el)[:900] if wq_el else 'none found'!r}"
+                )
+
             # Build (url, id, member_name) triples from the listing page.
             # Member name is extracted from the row context around each WQ link so we
             # don't have to visit SPA-shell individual pages at all.
@@ -1092,28 +1118,43 @@ class WelshParliamentScraper(BaseScraper):
                 )
 
             if not listing_questions:
-                # Listing page had no WQ links — try inline row parsing
+                # No /WrittenQuestion/ anchor links — the order paper lists questions
+                # as plain table/list rows.  Process ONLY rows that contain a WQ id
+                # (skips nav <li>/<div> junk) and pull the name from the row context.
+                day_added = 0
+                first_row_logged = hasattr(self, "_op_inline_logged")
                 for row in soup.select("tr, li, .question-item, article"):
-                    text = row.get_text(strip=True)
-                    if len(text) < 10:
+                    row_text = row.get_text(" ", strip=True)
+                    q_id_match = re.search(r"WQ-?(\d+)", row_text)
+                    if not q_id_match:
+                        continue  # only WQ rows — avoids nav chrome junk
+                    q_id = f"WQ-{q_id_match.group(1)}"
+                    if q_id in seen_ids:
                         continue
-                    q_id_match = re.search(r"WQ-(\d+)", text)
-                    q_id = q_id_match.group(0) if q_id_match else ""
-                    if q_id and q_id in seen_ids:
-                        continue
-                    if q_id:
-                        seen_ids.add(q_id)
-                    name_el = row.select_one("strong, b, .member-name, td:first-child")
+                    seen_ids.add(q_id)
+
+                    member_name = self._name_from_row(None, row)
+
+                    if not first_row_logged:
+                        first_row_logged = True
+                        self._op_inline_logged = True
+                        logger.warning(
+                            f"[Welsh Parliament] Order-paper INLINE row ({q_id}): "
+                            f"name={member_name!r} cells={[td.get_text(strip=True) for td in row.select('td')][:6]} "
+                            f"HTML={str(row)[:600]!r}"
+                        )
+
                     records.append(self._make_record(
                         data_type="question",
-                        member={"id": "", "name": name_el.get_text(strip=True) if name_el else "",
+                        member={"id": "", "name": member_name,
                                 "party": "", "constituency": "", "role": "MS"},
                         date=current.isoformat(),
-                        text=text,
+                        text=row_text,
                         title=q_id,
                         metadata={"question_type": "written", "question_id": q_id},
                         source_url=url,
                     ))
+                    day_added += 1
                 continue
 
             logger.info(f"[Welsh Parliament] Questions: {len(listing_questions)} question links for {day_str}")
@@ -1687,27 +1728,59 @@ class WelshParliamentScraper(BaseScraper):
             return meetings
 
         # Fallback B: sequential XML-export probe.
-        # Plenary meeting IDs are small integers that increment with each sitting.
-        # Recent 6th Senedd sessions are expected in the ~7500–7900 range (2021–2026).
-        # We probe a window of IDs; the XML export returns valid XML for real meetings
-        # and an HTML shell for unknown IDs.
-        logger.info("[Welsh Parliament] Probing sequential meeting IDs via XML export…")
-        probe_start = 7400
-        probe_end = 7900
-        consecutive_miss = 0
-        for mid in range(probe_end, probe_start - 1, -1):  # newest first
-            if consecutive_miss > 40:
-                break
-            export_url = f"{_RECORD}/XMLExport/Download"
+        # Plenary meeting IDs are integers that increment with each sitting.  We
+        # don't know the current range, so FIRST run a small diagnostic across both
+        # domains + a couple of sample IDs to reveal exactly what XMLExport returns
+        # (status, content-type, redirect target, body).  The next run's log tells us
+        # the real endpoint/range so we can target it precisely.
+        logger.info("[Welsh Parliament] Probing meeting IDs via XML export…")
+        export_hosts = [_RECORD, "https://cofnod.senedd.cymru"]
+
+        def _try_export(host: str, mid: int):
+            export_url = f"{host}/XMLExport/Download"
             saved_h = dict(self.session.headers)
             self.session.headers.update({
                 "User-Agent": _BROWSER_UA,
                 "Accept": "application/xml,text/xml,*/*;q=0.8",
             })
-            resp = self._get(export_url, params={"meetingID": str(mid),
-                                                  "xmlDownloadType": "EnglishTranscript"}, timeout=20)
+            r = self._get(export_url, params={"meetingID": str(mid),
+                                              "xmlDownloadType": "EnglishTranscript"}, timeout=20)
             self.session.headers.clear()
             self.session.headers.update(saved_h)
+            return export_url, r
+
+        # Diagnostic sample — log what the export returns for known-ish sample IDs.
+        if not hasattr(self, "_xml_probe_logged"):
+            self._xml_probe_logged = True
+            for host in export_hosts:
+                for sample_mid in (7622, 8000, 6500):
+                    su, sr = _try_export(host, sample_mid)
+                    if sr is not None:
+                        logger.warning(
+                            f"[Welsh Parliament] XMLExport DIAG {su}?meetingID={sample_mid}: "
+                            f"status={sr.status_code} ct={sr.headers.get('Content-Type','')!r} "
+                            f"final_url={sr.url!r} body[:250]={sr.text[:250]!r}"
+                        )
+                    else:
+                        logger.warning(f"[Welsh Parliament] XMLExport DIAG {su}?meetingID={sample_mid}: no response")
+
+        # Bounded descending scan (capped so it can't waste minutes).  Targets the
+        # most likely recent-session range; refine the bounds once the DIAG log above
+        # shows where real meetings live.
+        probe_start = 7000
+        probe_end = 8200
+        consecutive_miss = 0
+        attempts = 0
+        for mid in range(probe_end, probe_start - 1, -1):  # newest first
+            if consecutive_miss > 60 or attempts > 200:
+                break
+            attempts += 1
+            resp = None
+            for export_host in export_hosts:
+                _, resp = _try_export(export_host, mid)
+                if resp is not None and resp.ok and "html" not in resp.headers.get("Content-Type", "") \
+                        and not resp.text.strip()[:5].lower().startswith("<!doc"):
+                    break  # got real XML from this host
             if not resp or not resp.ok:
                 consecutive_miss += 1
                 continue
