@@ -17,6 +17,7 @@ import re
 import xml.etree.ElementTree as ET
 from datetime import date, timedelta
 from typing import Dict, List, Optional
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
@@ -480,15 +481,13 @@ class WelshParliamentScraper(BaseScraper):
             return records
 
         # The interests page may link to a PDF or list interests inline.
-        # Detect PDF link and warn; otherwise parse inline HTML.
+        # The Senedd publishes the consolidated register as a single PDF — download
+        # and parse it with PyMuPDF when that's what we find.
         pdf_links = soup.select("a[href$='.pdf'], a[href*='/media/']")
         if pdf_links:
             pdf_url = pdf_links[0].get("href", "")
-            logger.warning(
-                f"[Welsh Parliament] Register of interests appears to be a PDF — "
-                f"HTML parsing skipped. PDF: {pdf_url}"
-            )
-            return records
+            logger.info(f"[Welsh Parliament] Register of interests is a PDF — downloading and parsing: {pdf_url}")
+            return self._parse_interests_pdf(pdf_url, members)
 
         # Try to find per-member interest sections
         section_selectors = [
@@ -531,6 +530,109 @@ class WelshParliamentScraper(BaseScraper):
             logger.warning(f"[Welsh Parliament] 0 interest records parsed — page snippet: {snippet}")
 
         logger.info(f"[Welsh Parliament] {len(records)} interest records fetched")
+        return records
+
+    # Matches numbered category headings in the register PDF, e.g.
+    # "1. Remunerated employment, office, profession etc." or "2) Sponsorship".
+    _PDF_CATEGORY_RE = re.compile(r"^\s*(\d{1,2})[.)]\s+(.{3,120})$")
+
+    def _parse_interests_pdf(self, pdf_url: str, members: List[Dict]) -> List[Dict]:
+        """Download the consolidated register-of-interests PDF and parse it with PyMuPDF.
+
+        Layout (per the published Senedd register): each Member's name appears as
+        a heading, followed by numbered category headings ("1. Remunerated
+        employment...", "2. Sponsorship...", etc.), each followed by free-text
+        entries (or "I have no relevant interests to declare"). We walk the
+        extracted text line-by-line, switching the "current member" whenever a
+        line exactly matches a name from the known member roster, and the
+        "current category" whenever a line matches the numbered-heading pattern.
+        """
+        records: List[Dict] = []
+        full_url = pdf_url if pdf_url.startswith("http") else urljoin(_BASE, pdf_url)
+
+        try:
+            import fitz  # PyMuPDF
+        except ImportError:
+            logger.warning(
+                "[Welsh Parliament] PyMuPDF not installed — register-of-interests PDF "
+                "parsing skipped. Install with: pip install pymupdf"
+            )
+            return records
+
+        resp = self._get(full_url, accept="application/pdf,*/*", timeout=90)
+        if not resp:
+            logger.warning(f"[Welsh Parliament] Could not download interests PDF: {full_url}")
+            return records
+
+        try:
+            doc = fitz.open(stream=resp.content, filetype="pdf")
+            text = "\n".join(page.get_text() for page in doc)
+            doc.close()
+        except Exception as e:
+            logger.warning(f"[Welsh Parliament] Could not parse interests PDF {full_url}: {e}")
+            return records
+
+        if not text.strip():
+            logger.warning(f"[Welsh Parliament] Interests PDF {full_url} produced no extractable text")
+            return records
+
+        # Build a lookup of known member names so heading lines can be matched
+        # to a roster entry (the PDF prints "Forename Surname", same as our records).
+        member_by_name = {m["name"].strip().lower(): m for m in members if m.get("name")}
+
+        current_member: Optional[Dict] = None
+        current_category = ""
+        buffer: List[str] = []
+
+        def flush():
+            if current_member is None or not buffer:
+                return
+            entry_text = " ".join(b for b in buffer if b).strip()
+            if len(entry_text) >= 5:
+                records.append(self._make_record(
+                    data_type="register_of_interests",
+                    member=current_member,
+                    date="",
+                    text=entry_text,
+                    title=current_category,
+                    metadata={"source_format": "pdf"},
+                    source_url=full_url,
+                ))
+
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            matched_member = member_by_name.get(line.lower())
+            if matched_member is not None:
+                flush()
+                buffer = []
+                current_member = matched_member
+                current_category = ""
+                continue
+
+            if current_member is None:
+                continue  # skip front matter / TOC before the first member heading
+
+            cat_match = self._PDF_CATEGORY_RE.match(line)
+            if cat_match:
+                flush()
+                buffer = []
+                current_category = cat_match.group(2).strip()
+                continue
+
+            buffer.append(line)
+
+        flush()
+
+        if not records:
+            logger.warning(
+                f"[Welsh Parliament] 0 interest records parsed from PDF {full_url} "
+                f"({len(text)} chars extracted, {len(member_by_name)} known member names) — "
+                f"text sample: {text[:400]!r}"
+            )
+        logger.info(f"[Welsh Parliament] {len(records)} interest records parsed from PDF")
         return records
 
     # ------------------------------------------------------------------

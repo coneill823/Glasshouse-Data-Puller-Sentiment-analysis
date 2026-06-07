@@ -297,58 +297,70 @@ class ScottishParliamentScraper(BaseScraper):
             f"{_WEB}/msps/register-of-interests",
             f"{_WEB}/msps/",
         ]
-        soup = None
-        url = ""
-        for candidate in interest_candidates:
-            resp_soup = self._html_get(candidate)
-            if not resp_soup:
-                logger.warning(f"[Scottish Parliament] Could not load interests page: {candidate}")
-                continue
+
+        def _has_interest_content(s: BeautifulSoup) -> bool:
             # Check the MAIN CONTENT area only — the site nav always contains
             # "About the Register of Interests" which would cause a false-positive match.
-            main_el = (resp_soup.find("main")
-                       or resp_soup.find("div", class_=re.compile(r"\bmain\b|\bcontent\b", re.I))
-                       or resp_soup.find("body"))
+            main_el = (s.find("main")
+                       or s.find("div", class_=re.compile(r"\bmain\b|\bcontent\b", re.I))
+                       or s.find("body"))
             text_lower = main_el.get_text(separator=" ", strip=True).lower() if main_el else ""
             # Strip the nav — parliament.scot puts <nav> inside <main>
             for nav in (main_el.find_all("nav") if main_el else []):
                 nav_text = nav.get_text(separator=" ", strip=True).lower()
                 text_lower = text_lower.replace(nav_text, "")
-            if any(kw in text_lower for kw in ("registered interest", "financial interest", "shareholding", "heritable property", "nature of interest", "category of interest")):
-                soup = resp_soup
-                url = candidate
-                logger.info(f"[Scottish Parliament] Loaded interests page with content: {candidate}")
-                break
-            body = resp_soup.find("body")
-            snippet = body.get_text(separator=" ", strip=True)[:300] if body else ""
-            logger.warning(f"[Scottish Parliament] Loaded {candidate} but no interest keywords — snippet: {snippet}")
-            # Even if it's a general page, follow links whose href OR visible text
-            # mentions interests/register so we reach the actual register page.
-            sub_links = []
-            for a in resp_soup.select("a[href]"):
-                href = a.get("href", "")
-                if not href or not (href.startswith("/") or href.startswith("http")):
+            return any(kw in text_lower for kw in (
+                "registered interest", "financial interest", "shareholding",
+                "heritable property", "nature of interest", "category of interest"))
+
+        def _try_load(fetch_fn, label: str):
+            """Walk interest_candidates (and their sub-links) using `fetch_fn`,
+            returning (soup, url) for the first page with real interest content."""
+            for candidate in interest_candidates:
+                resp_soup = fetch_fn(candidate)
+                if not resp_soup:
+                    if not label:
+                        logger.warning(f"[Scottish Parliament] Could not load interests page: {candidate}")
                     continue
-                link_text = a.get_text(strip=True).lower()
-                if re.search(r"interest|register", href, re.I) or re.search(r"interest|register", link_text):
-                    sub_links.append(href)
-            if sub_links:
-                logger.info(f"[Scottish Parliament] Following interest sub-links from {candidate}: {sub_links[:5]}")
-                for sub_href in sub_links[:5]:
-                    sub_url = sub_href if sub_href.startswith("http") else f"{_WEB}{sub_href}"
-                    if sub_url in interest_candidates:
-                        continue  # already tried
-                    sub_soup = self._html_get(sub_url)
-                    if not sub_soup:
+                if _has_interest_content(resp_soup):
+                    logger.info(f"[Scottish Parliament] Loaded interests page with content{label}: {candidate}")
+                    return resp_soup, candidate
+                if not label:
+                    body = resp_soup.find("body")
+                    snippet = body.get_text(separator=" ", strip=True)[:300] if body else ""
+                    logger.warning(f"[Scottish Parliament] Loaded {candidate} but no interest keywords — snippet: {snippet}")
+                # Even if it's a general page, follow links whose href OR visible text
+                # mentions interests/register so we reach the actual register page.
+                sub_links = []
+                for a in resp_soup.select("a[href]"):
+                    href = a.get("href", "")
+                    if not href or not (href.startswith("/") or href.startswith("http")):
                         continue
-                    sub_text = sub_soup.get_text(separator=" ", strip=True).lower()
-                    if any(kw in sub_text for kw in ("register of interests", "registered interest", "financial interest", "category")):
-                        soup = sub_soup
-                        url = sub_url
-                        logger.info(f"[Scottish Parliament] Found interests content at sub-link: {sub_url}")
-                        break
-                if soup:
-                    break
+                    link_text = a.get_text(strip=True).lower()
+                    if re.search(r"interest|register", href, re.I) or re.search(r"interest|register", link_text):
+                        sub_links.append(href)
+                if sub_links:
+                    logger.info(f"[Scottish Parliament] Following interest sub-links{label} from {candidate}: {sub_links[:5]}")
+                    for sub_href in sub_links[:5]:
+                        sub_url = sub_href if sub_href.startswith("http") else f"{_WEB}{sub_href}"
+                        if sub_url in interest_candidates:
+                            continue  # already tried
+                        sub_soup = fetch_fn(sub_url)
+                        if sub_soup and _has_interest_content(sub_soup):
+                            logger.info(f"[Scottish Parliament] Found interests content{label} at sub-link: {sub_url}")
+                            return sub_soup, sub_url
+            return None, ""
+
+        soup, url = _try_load(self._html_get, "")
+
+        if not soup:
+            # The site is built on a JS framework (React/Angular-style SPA) — plain
+            # HTTP often returns an empty shell with the real content injected
+            # client-side. Re-walk the same candidates through a headless browser.
+            logger.info("[Scottish Parliament] No interest content via plain HTTP — retrying with headless browser render")
+            soup, url = _try_load(
+                lambda u: self._browser_get(u, wait_selector="main, details, .member-interests, article, section"),
+                " (rendered)")
 
         if not soup:
             logger.warning("[Scottish Parliament] All interest page candidates failed")
@@ -391,6 +403,39 @@ class ScottishParliamentScraper(BaseScraper):
     # Questions — scraped from parliament.scot
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _question_links(soup: BeautifulSoup) -> List[str]:
+        return [a["href"] for a in soup.select("a[href]")
+                if a.get("href", "").startswith(("/", "http"))
+                and re.search(r"/question|/answer|\d{4}-\d{2}-\d{2}|/\d+", a.get("href", ""), re.I)]
+
+    @staticmethod
+    def _question_date(soup: BeautifulSoup) -> str:
+        date_el = soup.select_one("time[datetime], time, .date, [class*='date']")
+        return date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
+
+    def _extract_question_items(self, soup: BeautifulSoup, full_url: str, date_str: str,
+                                records: List[Dict]) -> int:
+        added = 0
+        for contrib in soup.select(".question, .answer, .contribution, .item, article, .q-text, .a-text, p"):
+            text = contrib.get_text(strip=True)
+            if len(text) < 10:
+                continue
+            speaker_el = contrib.select_one(".speaker, .msp-name, strong, b, h3")
+            records.append(self._make_record(
+                data_type="question",
+                member={
+                    "id": "", "name": speaker_el.get_text(strip=True) if speaker_el else "",
+                    "party": "", "constituency": "", "role": "MSP",
+                },
+                date=date_str,
+                text=text,
+                title="",
+                source_url=full_url,
+            ))
+            added += 1
+        return added
+
     def fetch_questions(self, from_date: Optional[str] = None) -> List[Dict]:
         records = []
         for path in [
@@ -399,14 +444,20 @@ class ScottishParliamentScraper(BaseScraper):
         ]:
             url = f"{_WEB}{path}"
             soup = self._html_get(url)
+            links = self._question_links(soup) if soup else []
+
+            if not links:
+                # parliament.scot's question search is a JS single-page app — plain
+                # HTTP often returns an empty shell. Re-render it through a browser.
+                rendered = self._browser_get(url, wait_selector="a[href*='question'], a[href*='answer'], main")
+                if rendered:
+                    rendered_links = self._question_links(rendered)
+                    if rendered_links:
+                        soup, links = rendered, rendered_links
+                        logger.info(f"[Scottish Parliament] Found {len(links)} question links at {url} (rendered)")
+
             if not soup:
                 continue
-
-            # Log what we find so we can diagnose selector issues
-            links = [a["href"] for a in soup.select("a[href]")
-                     if a.get("href", "").startswith(("/", "http"))
-                     and re.search(r"/question|/answer|\d{4}-\d{2}-\d{2}|/\d+", a.get("href", ""), re.I)]
-
             if not links:
                 body = soup.find("body")
                 snippet = body.get_text(separator=" ", strip=True)[:500] if body else ""
@@ -418,30 +469,22 @@ class ScottishParliamentScraper(BaseScraper):
             for href in links[:200]:
                 full_url = href if href.startswith("http") else f"{_WEB}{href}"
                 detail = self._html_get(full_url)
-                if not detail:
-                    continue
-                date_el = detail.select_one("time[datetime], time, .date, [class*='date']")
-                date_str = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
+                date_str = self._question_date(detail) if detail else ""
                 if from_date and date_str and date_str[:10] < from_date:
                     continue
-                item_count_before = len(records)
-                for contrib in detail.select(".question, .answer, .contribution, .item, article, .q-text, .a-text, p"):
-                    text = contrib.get_text(strip=True)
-                    if len(text) < 10:
-                        continue
-                    speaker_el = contrib.select_one(".speaker, .msp-name, strong, b, h3")
-                    records.append(self._make_record(
-                        data_type="question",
-                        member={
-                            "id": "", "name": speaker_el.get_text(strip=True) if speaker_el else "",
-                            "party": "", "constituency": "", "role": "MSP",
-                        },
-                        date=date_str,
-                        text=text,
-                        title="",
-                        source_url=full_url,
-                    ))
-                if len(records) == item_count_before:
+                added = self._extract_question_items(detail, full_url, date_str, records) if detail else 0
+                if added == 0:
+                    rendered = self._browser_get(full_url, wait_selector=".question, .answer, .contribution, article, .q-text, .a-text")
+                    if rendered:
+                        r_date_str = self._question_date(rendered) or date_str
+                        if from_date and r_date_str and r_date_str[:10] < from_date:
+                            continue
+                        r_added = self._extract_question_items(rendered, full_url, r_date_str, records)
+                        if r_added:
+                            detail, added = rendered, r_added
+                if not detail:
+                    continue
+                if added == 0:
                     body = detail.find("body")
                     snippet = body.get_text(separator=" ", strip=True)[:300] if body else ""
                     logger.warning(f"[Scottish Parliament] 0 items from question page {full_url} — snippet: {snippet}")
@@ -466,29 +509,16 @@ class ScottishParliamentScraper(BaseScraper):
             d -= timedelta(days=1)
         return days
 
-    def _scrape_or_detail(self, full_url: str, date_str: str,
-                          records: List[Dict], from_date: Optional[str]) -> int:
-        """Scrape a single Official Report page and append any speeches to records.
-        Returns the number of records added."""
-        if from_date and date_str and date_str[:10] < from_date:
-            return 0
-        detail = self._html_get(full_url)
-        if not detail:
-            return 0
-        if not date_str:
-            date_el = detail.select_one("time[datetime], time, .date, h1")
-            date_str = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
-        # Log CSS classes only once (first page) to diagnose selector gaps without flooding the log
-        if not hasattr(self, "_or_css_logged"):
-            all_cls = sorted({c for el in detail.select("[class]") for c in el.get("class", [])})
-            logger.info(f"[Scottish Parliament] OR page CSS classes (first hit): {all_cls[:40]}")
-            self._or_css_logged = True
+    _OR_CONTRIB_SELECTOR = (
+        ".contribution, .speech, [class*='contribution'], [class*='speech'], "
+        ".or-row, .or-report-row, .member-speech, .chamber-row, "
+        ".qna-item, .member-contribution, tr, article, .content-row"
+    )
+
+    def _extract_or_contribs(self, detail: BeautifulSoup, full_url: str, date_str: str,
+                             records: List[Dict]) -> int:
         before = len(records)
-        for contrib in detail.select(
-            ".contribution, .speech, [class*='contribution'], [class*='speech'], "
-            ".or-row, .or-report-row, .member-speech, .chamber-row, "
-            ".qna-item, .member-contribution, tr, article, .content-row"
-        ):
+        for contrib in detail.select(self._OR_CONTRIB_SELECTOR):
             speaker_el = contrib.select_one(
                 ".speaker, .msp-name, strong, b, td:first-child, "
                 "[class*='speaker'], [class*='member-name'], .or-member"
@@ -508,7 +538,39 @@ class ScottishParliamentScraper(BaseScraper):
                 title="",
                 source_url=full_url,
             ))
-        added = len(records) - before
+        return len(records) - before
+
+    def _scrape_or_detail(self, full_url: str, date_str: str,
+                          records: List[Dict], from_date: Optional[str]) -> int:
+        """Scrape a single Official Report page and append any speeches to records.
+        Returns the number of records added."""
+        if from_date and date_str and date_str[:10] < from_date:
+            return 0
+        detail = self._html_get(full_url)
+        if detail and not date_str:
+            date_el = detail.select_one("time[datetime], time, .date, h1")
+            date_str = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
+        # Log CSS classes only once (first page) to diagnose selector gaps without flooding the log
+        if detail and not hasattr(self, "_or_css_logged"):
+            all_cls = sorted({c for el in detail.select("[class]") for c in el.get("class", [])})
+            logger.info(f"[Scottish Parliament] OR page CSS classes (first hit): {all_cls[:40]}")
+            self._or_css_logged = True
+
+        added = self._extract_or_contribs(detail, full_url, date_str, records) if detail else 0
+        if added == 0:
+            # The Official Report viewer renders transcripts client-side via JS —
+            # plain HTTP usually returns an empty shell. Re-render through a browser.
+            rendered = self._browser_get(full_url, wait_selector=self._OR_CONTRIB_SELECTOR)
+            if rendered:
+                if not date_str:
+                    date_el = rendered.select_one("time[datetime], time, .date, h1")
+                    date_str = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
+                r_added = self._extract_or_contribs(rendered, full_url, date_str, records)
+                if r_added:
+                    detail, added = rendered, r_added
+
+        if not detail:
+            return 0
         if added == 0:
             body = detail.find("body")
             snippet = body.get_text(separator=" ", strip=True)[:300] if body else ""
@@ -755,33 +817,18 @@ class ScottishParliamentScraper(BaseScraper):
     # Votes on division
     # ------------------------------------------------------------------
 
-    def _scrape_motion_vote_page(self, motion_ref: str, records: List[Dict],
-                                  from_date: Optional[str]) -> int:
-        """Scrape a single S6M-NNNN votes-and-motions page. Returns records added."""
-        url = f"{_WEB}/chamber-and-committees/votes-and-motions/{motion_ref}"
-        detail = self._html_get(url)
-        if not detail:
-            return 0
-        date_el = detail.select_one("time[datetime], time, .date, [class*='date']")
-        date_str = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
-        if not date_str:
-            # Try parsing date from page text with regex
-            body_text = detail.get_text(separator=" ", strip=True)
-            dm = re.search(r"\d{1,2}\s+\w+\s+\d{4}|\d{4}-\d{2}-\d{2}", body_text)
-            date_str = dm.group(0) if dm else ""
-        if from_date and date_str and len(date_str) >= 10 and date_str[:10] < from_date:
-            return 0
-        title_el = detail.select_one("h1, h2, .title, .motion-title")
-        div_title = title_el.get_text(strip=True) if title_el else motion_ref
+    _MOTION_VOTER_SELECTORS = [
+        ("aye", [".ayes li", ".for li", "[class*='aye'] li", "[class*='for'] li",
+                 "table tr td:nth-child(1)", "ul.ayes li"]),
+        ("no", [".noes li", ".against li", "[class*='no'] li", "[class*='against'] li",
+                "table tr td:nth-child(2)", "ul.noes li"]),
+        ("abstain", [".abstentions li", ".abstain li", "[class*='abstain'] li"]),
+    ]
 
+    def _extract_motion_voters(self, detail: BeautifulSoup, url: str, motion_ref: str,
+                               date_str: str, div_title: str, records: List[Dict]) -> int:
         before = len(records)
-        for direction, sel_list in [
-            ("aye", [".ayes li", ".for li", "[class*='aye'] li", "[class*='for'] li",
-                     "table tr td:nth-child(1)", "ul.ayes li"]),
-            ("no", [".noes li", ".against li", "[class*='no'] li", "[class*='against'] li",
-                    "table tr td:nth-child(2)", "ul.noes li"]),
-            ("abstain", [".abstentions li", ".abstain li", "[class*='abstain'] li"]),
-        ]:
+        for direction, sel_list in self._MOTION_VOTER_SELECTORS:
             voters = []
             for sel in sel_list:
                 voters = detail.select(sel)
@@ -801,7 +848,45 @@ class ScottishParliamentScraper(BaseScraper):
                               "motion_ref": motion_ref},
                     source_url=url,
                 ))
-        added = len(records) - before
+        return len(records) - before
+
+    def _scrape_motion_vote_page(self, motion_ref: str, records: List[Dict],
+                                  from_date: Optional[str]) -> int:
+        """Scrape a single S6M-NNNN votes-and-motions page. Returns records added."""
+        url = f"{_WEB}/chamber-and-committees/votes-and-motions/{motion_ref}"
+
+        def _date_and_title(s):
+            date_el = s.select_one("time[datetime], time, .date, [class*='date']")
+            d = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
+            if not d:
+                body_text = s.get_text(separator=" ", strip=True)
+                dm = re.search(r"\d{1,2}\s+\w+\s+\d{4}|\d{4}-\d{2}-\d{2}", body_text)
+                d = dm.group(0) if dm else ""
+            title_el = s.select_one("h1, h2, .title, .motion-title")
+            t = title_el.get_text(strip=True) if title_el else motion_ref
+            return d, t
+
+        detail = self._html_get(url)
+        if not detail:
+            return 0
+        date_str, div_title = _date_and_title(detail)
+        if from_date and date_str and len(date_str) >= 10 and date_str[:10] < from_date:
+            return 0
+
+        added = self._extract_motion_voters(detail, url, motion_ref, date_str, div_title, records)
+        if added == 0:
+            # Voting lists on these pages are often injected client-side via JS.
+            rendered = self._browser_get(url, wait_selector=".ayes, .noes, [class*='aye'], [class*='division']")
+            if rendered:
+                r_date_str, r_div_title = _date_and_title(rendered)
+                r_date_str = r_date_str or date_str
+                r_div_title = r_div_title or div_title
+                if from_date and r_date_str and len(r_date_str) >= 10 and r_date_str[:10] < from_date:
+                    return 0
+                r_added = self._extract_motion_voters(rendered, url, motion_ref, r_date_str, r_div_title, records)
+                if r_added:
+                    detail, added, date_str = rendered, r_added, r_date_str
+
         if added == 0:
             body = detail.find("body")
             snippet = body.get_text(separator=" ", strip=True)[:200] if body else ""
@@ -816,21 +901,33 @@ class ScottishParliamentScraper(BaseScraper):
         Returns total records added.
         """
         index_url = f"{_WEB}/chamber-and-committees/votes-and-motions/"
+
+        def _motion_refs(s):
+            refs, seen = [], set()
+            for a in s.select("a[href]"):
+                href = a.get("href", "")
+                m = re.search(r"(S\d+M-\d+)", href, re.I)
+                if m and m.group(1) not in seen:
+                    seen.add(m.group(1))
+                    refs.append(m.group(1))
+            return refs
+
         soup = self._html_get(index_url)
+        motion_refs = _motion_refs(soup) if soup else []
+
+        if not motion_refs:
+            # The motions index lists content via a JS-driven search widget —
+            # plain HTTP often returns an empty shell. Re-render through a browser.
+            rendered = self._browser_get(index_url, wait_selector="a[href*='S6M-'], a[href*='S5M-'], main")
+            if rendered:
+                rendered_refs = _motion_refs(rendered)
+                if rendered_refs:
+                    soup, motion_refs = rendered, rendered_refs
+                    logger.info(f"[Scottish Parliament] Found {len(motion_refs)} motion refs on index (rendered)")
+
         if not soup:
             logger.warning(f"[Scottish Parliament] Could not load motions index: {index_url}")
             return 0
-
-        # Collect motion refs from all links on the index page
-        motion_refs = []
-        seen = set()
-        for a in soup.select("a[href]"):
-            href = a.get("href", "")
-            m = re.search(r"(S\d+M-\d+)", href, re.I)
-            if m and m.group(1) not in seen:
-                seen.add(m.group(1))
-                motion_refs.append(m.group(1))
-
         if not motion_refs:
             body = soup.find("body")
             snippet = body.get_text(separator=" ", strip=True)[:300] if body else ""
@@ -891,6 +988,40 @@ class ScottishParliamentScraper(BaseScraper):
             return records
 
         # Last resort: scrape whatever division links we can find
+        def _division_links(s):
+            return [a["href"] for a in s.select("a[href]")
+                    if a.get("href", "").startswith(("/", "http"))
+                    and re.search(r"/division|/vote|\d{4}-\d{2}-\d{2}|/\d+|S\d+M-\d+",
+                                  a.get("href", ""), re.I)]
+
+        def _extract_division_voters(detail, full_url, date_str, div_title):
+            added = 0
+            for direction, sel_list in [
+                ("aye", [".ayes li", ".for li", "[class*='aye'] li", "[class*='for'] li"]),
+                ("no", [".noes li", ".against li", "[class*='no'] li", "[class*='against'] li"]),
+                ("abstain", [".abstentions li", ".abstain li", "[class*='abstain'] li"]),
+            ]:
+                voters = []
+                for sel in sel_list:
+                    voters = detail.select(sel)
+                    if voters:
+                        break
+                for voter_el in voters:
+                    name = voter_el.get_text(strip=True)
+                    if not name:
+                        continue
+                    records.append(self._make_record(
+                        data_type="vote",
+                        member={"id": "", "name": name, "party": "", "constituency": "", "role": "MSP"},
+                        date=date_str,
+                        text=f"Voted {direction} on: {div_title}",
+                        title=div_title,
+                        metadata={"vote_direction": direction, "division_result": ""},
+                        source_url=full_url,
+                    ))
+                    added += 1
+            return added
+
         for path in [
             "/chamber-and-committees/votes-and-divisions/search",
             "/chamber-and-committees/votes-and-divisions",
@@ -903,14 +1034,20 @@ class ScottishParliamentScraper(BaseScraper):
         ]:
             url = f"{_WEB}{path}"
             soup = self._html_get(url)
+            links = _division_links(soup) if soup else []
+
+            if not links:
+                # These index/search pages are JS single-page apps — plain HTTP
+                # often returns an empty shell. Re-render through a browser.
+                rendered = self._browser_get(url, wait_selector="a[href*='division'], a[href*='vote'], a[href*='S6M-'], main")
+                if rendered:
+                    rendered_links = _division_links(rendered)
+                    if rendered_links:
+                        soup, links = rendered, rendered_links
+                        logger.info(f"[Scottish Parliament] Found {len(links)} division links at {url} (rendered)")
+
             if not soup:
                 continue
-
-            links = [a["href"] for a in soup.select("a[href]")
-                     if a.get("href", "").startswith(("/", "http"))
-                     and re.search(r"/division|/vote|\d{4}-\d{2}-\d{2}|/\d+|S\d+M-\d+",
-                                   a.get("href", ""), re.I)]
-
             if not links:
                 body = soup.find("body")
                 snippet = body.get_text(separator=" ", strip=True)[:600] if body else ""
@@ -921,37 +1058,24 @@ class ScottishParliamentScraper(BaseScraper):
             for href in links[:200]:
                 full_url = href if href.startswith("http") else f"{_WEB}{href}"
                 detail = self._html_get(full_url)
-                if not detail:
-                    continue
-                date_el = detail.select_one("time[datetime], time, .date, h1")
+                date_el = detail.select_one("time[datetime], time, .date, h1") if detail else None
                 date_str = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
                 if from_date and date_str and date_str[:10] < from_date:
                     continue
-                title_el = detail.select_one("h1, h2, .title, .motion")
+                title_el = detail.select_one("h1, h2, .title, .motion") if detail else None
                 div_title = title_el.get_text(strip=True) if title_el else ""
-                for direction, sel_list in [
-                    ("aye", [".ayes li", ".for li", "[class*='aye'] li", "[class*='for'] li"]),
-                    ("no", [".noes li", ".against li", "[class*='no'] li", "[class*='against'] li"]),
-                    ("abstain", [".abstentions li", ".abstain li", "[class*='abstain'] li"]),
-                ]:
-                    voters = []
-                    for sel in sel_list:
-                        voters = detail.select(sel)
-                        if voters:
-                            break
-                    for voter_el in voters:
-                        name = voter_el.get_text(strip=True)
-                        if not name:
+                added = self._extract_division_voters(detail, full_url, date_str, div_title) if detail else 0
+                if added == 0:
+                    rendered = self._browser_get(full_url, wait_selector=".ayes, .noes, [class*='aye'], [class*='division']")
+                    if rendered:
+                        r_date_el = rendered.select_one("time[datetime], time, .date, h1")
+                        r_date_str = (r_date_el.get("datetime", r_date_el.get_text(strip=True))
+                                      if r_date_el else "") or date_str
+                        if from_date and r_date_str and r_date_str[:10] < from_date:
                             continue
-                        records.append(self._make_record(
-                            data_type="vote",
-                            member={"id": "", "name": name, "party": "", "constituency": "", "role": "MSP"},
-                            date=date_str,
-                            text=f"Voted {direction} on: {div_title}",
-                            title=div_title,
-                            metadata={"vote_direction": direction, "division_result": ""},
-                            source_url=full_url,
-                        ))
+                        r_title_el = rendered.select_one("h1, h2, .title, .motion")
+                        r_div_title = (r_title_el.get_text(strip=True) if r_title_el else "") or div_title
+                        self._extract_division_voters(rendered, full_url, r_date_str, r_div_title)
             if records:
                 break
 

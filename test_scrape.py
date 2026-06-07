@@ -435,7 +435,7 @@ def _scotland_plenary_sample(s: ScottishParliamentScraper) -> Tuple[List[Dict], 
                f"what-was-said-in-parliament/{slug}")
         s._scrape_or_detail(url, iso_date, records, None)
 
-    return records, "last 10 weekday OR URLs probed; JS-rendered → 0 expected"
+    return records, "last 10 weekday OR URLs probed; falls back to headless-browser render if plain HTTP is empty"
 
 
 def test_scotland(verbose: bool = False, save_dir: Optional[Path] = None) -> List[Result]:
@@ -450,13 +450,13 @@ def test_scotland(verbose: bool = False, save_dir: Optional[Path] = None) -> Lis
          "OData /Members endpoint", False),
         ("register_of_interests",
          lambda: s.fetch_register_of_interests(members[:5]),
-         "OData 404 → HTML fallback; JS-rendered → 0 expected", True),
+         "OData 404 → HTML fallback, now with headless-browser render for JS-rendered pages", True),
         ("questions",
          lambda: s.fetch_questions(from_date=RECENT_30),
-         f"last 30 days; question search page is JS-rendered → 0 expected", True),
+         "last 30 days; question search page is a JS SPA — falls back to headless-browser render", True),
         ("votes_on_division",
          lambda: s.fetch_votes_on_division(from_date=RECENT_30),
-         "all OData vote endpoints 404; web fallback also SPA → 0 expected", True),
+         "OData 404 → motion-page/division scraping, now with headless-browser render for JS-rendered pages", True),
     ]:
         r = Result("Scottish Parliament", dtype, note=note)
         t0 = time.time()
@@ -634,7 +634,7 @@ def test_wales(verbose: bool = False, save_dir: Optional[Path] = None) -> List[R
          "scraped from senedd.wales WordPress member listing", False),
         ("register_of_interests",
          lambda: s.fetch_register_of_interests(members),
-         "PDF document → HTML parsing skipped; PDF parsing deferred → 0 expected", True),
+         "register is published as a PDF — downloaded and parsed with PyMuPDF", True),
         ("questions",
          lambda: s.fetch_questions(from_date=RECENT_30),
          f"last 30 days ({RECENT_30}→today); record.assembly.wales/Search (SSR)", True),
