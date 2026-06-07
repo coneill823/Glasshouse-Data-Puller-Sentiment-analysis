@@ -8,7 +8,7 @@ and votes are scraped from https://www.parliament.scot with a browser User-Agent
 import logging
 import re
 from datetime import date, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from bs4 import BeautifulSoup
 
@@ -396,6 +396,18 @@ class ScottishParliamentScraper(BaseScraper):
             body = soup.find("body")
             snippet = body.get_text(separator=" ", strip=True)[:600] if body else ""
             logger.warning(f"[Scottish Parliament] 0 interest records parsed from {url} — snippet: {snippet}")
+            # The page passed the keyword check (it IS an interests page) but our
+            # section/name selectors found nothing — dump its real structure so
+            # the selectors can be targeted at the actual markup next time.
+            sections = soup.select("details, .member-interests, article, section")
+            all_cls = sorted({c for el in soup.select("[class]") for c in el.get("class", [])})
+            sample_links = [a.get("href", "") for a in soup.select("a[href]")
+                            if re.search(r"msp|member|interest", a.get("href", ""), re.I)][:10]
+            logger.warning(
+                f"[Scottish Parliament] Interests page structure dump {url}: "
+                f"{len(sections)} candidate sections | css_classes(first 40)={all_cls[:40]} | "
+                f"msp/interest-ish links={sample_links}"
+            )
         logger.info(f"[Scottish Parliament] {len(records)} interest records fetched")
         return records
 
@@ -437,7 +449,14 @@ class ScottishParliamentScraper(BaseScraper):
         return added
 
     def fetch_questions(self, from_date: Optional[str] = None) -> List[Dict]:
-        records = []
+        # Try every candidate listing and keep whichever yields the best result —
+        # "best" meaning the most records with a member name attached, falling
+        # back to raw record count. Breaking on the first path to return *any*
+        # records is unsound here: the search SPA can render a small, sparsely
+        # attributed subset while the plainer listing page yields a much larger,
+        # better-attributed set (or vice versa) depending on what's JS-rendered.
+        best_records: List[Dict] = []
+
         for path in [
             "/chamber-and-committees/questions-and-answers/question-search",
             "/chamber-and-committees/questions-and-answers",
@@ -465,21 +484,21 @@ class ScottishParliamentScraper(BaseScraper):
                 continue
 
             logger.info(f"[Scottish Parliament] Found {len(links)} question links at {url}")
-            page_records_before = len(records)
+            path_records: List[Dict] = []
             for href in links[:200]:
                 full_url = href if href.startswith("http") else f"{_WEB}{href}"
                 detail = self._html_get(full_url)
                 date_str = self._question_date(detail) if detail else ""
                 if from_date and date_str and date_str[:10] < from_date:
                     continue
-                added = self._extract_question_items(detail, full_url, date_str, records) if detail else 0
+                added = self._extract_question_items(detail, full_url, date_str, path_records) if detail else 0
                 if added == 0:
                     rendered = self._browser_get(full_url, wait_selector=".question, .answer, .contribution, article, .q-text, .a-text")
                     if rendered:
                         r_date_str = self._question_date(rendered) or date_str
                         if from_date and r_date_str and r_date_str[:10] < from_date:
                             continue
-                        r_added = self._extract_question_items(rendered, full_url, r_date_str, records)
+                        r_added = self._extract_question_items(rendered, full_url, r_date_str, path_records)
                         if r_added:
                             detail, added = rendered, r_added
                 if not detail:
@@ -488,11 +507,18 @@ class ScottishParliamentScraper(BaseScraper):
                     body = detail.find("body")
                     snippet = body.get_text(separator=" ", strip=True)[:300] if body else ""
                     logger.warning(f"[Scottish Parliament] 0 items from question page {full_url} — snippet: {snippet}")
-            if len(records) > page_records_before:
-                break
 
-        logger.info(f"[Scottish Parliament] {len(records)} question records fetched")
-        return records
+            def _score(recs: List[Dict]) -> Tuple[int, int]:
+                named = sum(1 for r in recs if str(r.get("member", {}).get("name", "")).strip())
+                return (named, len(recs))
+
+            logger.info(f"[Scottish Parliament] {url} yielded {len(path_records)} question records "
+                        f"({_score(path_records)[0]} with member names)")
+            if _score(path_records) > _score(best_records):
+                best_records = path_records
+
+        logger.info(f"[Scottish Parliament] {len(best_records)} question records fetched (best of candidates)")
+        return best_records
 
     # ------------------------------------------------------------------
     # Plenary business — Official Report from parliament.scot
@@ -540,6 +566,28 @@ class ScottishParliamentScraper(BaseScraper):
             ))
         return len(records) - before
 
+    def _diagnose_or_structure(self, soup: BeautifulSoup, full_url: str, rendered: bool) -> None:
+        """One-shot structural dump of an Official Report page that matched no
+        contribution selector, so the real markup can be targeted next time
+        instead of guessed at blindly. Logged at WARNING so it survives the
+        test harness's log-level filter."""
+        if hasattr(self, "_or_diag_logged"):
+            return
+        self._or_diag_logged = True
+        all_cls = sorted({c for el in soup.select("[class]") for c in el.get("class", [])})
+        tag_counts: Dict[str, int] = {}
+        for el in soup.find_all(True):
+            tag_counts[el.name] = tag_counts.get(el.name, 0) + 1
+        common_tags = sorted(tag_counts.items(), key=lambda kv: -kv[1])[:15]
+        iframes = [f.get("src", "") for f in soup.find_all("iframe")]
+        main_el = soup.find("main") or soup.find("article") or soup.find("body")
+        main_text_len = len(main_el.get_text(strip=True)) if main_el else 0
+        logger.warning(
+            f"[Scottish Parliament] OR structure dump ({'rendered' if rendered else 'plain HTTP'}) "
+            f"{full_url}: css_classes(first 40)={all_cls[:40]} | tag_counts={common_tags} | "
+            f"iframes={iframes[:5]} | main_text_len={main_text_len}"
+        )
+
     def _scrape_or_detail(self, full_url: str, date_str: str,
                           records: List[Dict], from_date: Optional[str]) -> int:
         """Scrape a single Official Report page and append any speeches to records.
@@ -550,24 +598,20 @@ class ScottishParliamentScraper(BaseScraper):
         if detail and not date_str:
             date_el = detail.select_one("time[datetime], time, .date, h1")
             date_str = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
-        # Log CSS classes only once (first page) to diagnose selector gaps without flooding the log
-        if detail and not hasattr(self, "_or_css_logged"):
-            all_cls = sorted({c for el in detail.select("[class]") for c in el.get("class", [])})
-            logger.info(f"[Scottish Parliament] OR page CSS classes (first hit): {all_cls[:40]}")
-            self._or_css_logged = True
 
         added = self._extract_or_contribs(detail, full_url, date_str, records) if detail else 0
+        rendered_soup = None
         if added == 0:
             # The Official Report viewer renders transcripts client-side via JS —
             # plain HTTP usually returns an empty shell. Re-render through a browser.
-            rendered = self._browser_get(full_url, wait_selector=self._OR_CONTRIB_SELECTOR)
-            if rendered:
+            rendered_soup = self._browser_get(full_url, wait_selector=self._OR_CONTRIB_SELECTOR)
+            if rendered_soup:
                 if not date_str:
-                    date_el = rendered.select_one("time[datetime], time, .date, h1")
+                    date_el = rendered_soup.select_one("time[datetime], time, .date, h1")
                     date_str = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
-                r_added = self._extract_or_contribs(rendered, full_url, date_str, records)
+                r_added = self._extract_or_contribs(rendered_soup, full_url, date_str, records)
                 if r_added:
-                    detail, added = rendered, r_added
+                    detail, added = rendered_soup, r_added
 
         if not detail:
             return 0
@@ -575,6 +619,9 @@ class ScottishParliamentScraper(BaseScraper):
             body = detail.find("body")
             snippet = body.get_text(separator=" ", strip=True)[:300] if body else ""
             logger.warning(f"[Scottish Parliament] 0 contribs at {full_url} — snippet: {snippet[:200]}")
+            # Dump the structure of whichever page we actually have — prefer the
+            # browser-rendered DOM since that's where JS-injected content lands.
+            self._diagnose_or_structure(rendered_soup or detail, full_url, rendered=bool(rendered_soup))
         return added
 
     def _fetch_meeting_ids(self, from_date: Optional[str] = None) -> List[Dict]:
@@ -1064,7 +1111,7 @@ class ScottishParliamentScraper(BaseScraper):
                     continue
                 title_el = detail.select_one("h1, h2, .title, .motion") if detail else None
                 div_title = title_el.get_text(strip=True) if title_el else ""
-                added = self._extract_division_voters(detail, full_url, date_str, div_title) if detail else 0
+                added = _extract_division_voters(detail, full_url, date_str, div_title) if detail else 0
                 if added == 0:
                     rendered = self._browser_get(full_url, wait_selector=".ayes, .noes, [class*='aye'], [class*='division']")
                     if rendered:
@@ -1075,7 +1122,7 @@ class ScottishParliamentScraper(BaseScraper):
                             continue
                         r_title_el = rendered.select_one("h1, h2, .title, .motion")
                         r_div_title = (r_title_el.get_text(strip=True) if r_title_el else "") or div_title
-                        self._extract_division_voters(rendered, full_url, r_date_str, r_div_title)
+                        _extract_division_voters(rendered, full_url, r_date_str, r_div_title)
             if records:
                 break
 

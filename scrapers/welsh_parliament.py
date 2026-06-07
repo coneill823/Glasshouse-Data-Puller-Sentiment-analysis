@@ -584,6 +584,30 @@ class WelshParliamentScraper(BaseScraper):
         current_category = ""
         buffer: List[str] = []
 
+        # Register entries often carry a "Date registered"/"Date received"
+        # annotation inline (e.g. "(Registered 12 May 2024)", "02/06/2024",
+        # "12.05.2024"). Pull the first recognisable date out of the entry text.
+        def _entry_date(entry_text: str) -> str:
+            from datetime import datetime as _dt
+            m = re.search(r"\d{4}-\d{2}-\d{2}", entry_text)
+            if m:
+                return m.group(0)
+            m = re.search(r"\b(\d{1,2})[./](\d{1,2})[./](\d{4})\b", entry_text)
+            if m:
+                try:
+                    return _dt.strptime(f"{m.group(1)}/{m.group(2)}/{m.group(3)}", "%d/%m/%Y").strftime("%Y-%m-%d")
+                except Exception:
+                    pass
+            m = re.search(r"\b(\d{1,2})\s+(January|February|March|April|May|June|July|"
+                          r"August|September|October|November|December)\s+(\d{4})\b",
+                          entry_text, re.I)
+            if m:
+                try:
+                    return _dt.strptime(m.group(0), "%d %B %Y").strftime("%Y-%m-%d")
+                except Exception:
+                    pass
+            return ""
+
         def flush():
             if current_member is None or not buffer:
                 return
@@ -592,7 +616,7 @@ class WelshParliamentScraper(BaseScraper):
                 records.append(self._make_record(
                     data_type="register_of_interests",
                     member=current_member,
-                    date="",
+                    date=_entry_date(entry_text),
                     text=entry_text,
                     title=current_category,
                     metadata={"source_format": "pdf"},
