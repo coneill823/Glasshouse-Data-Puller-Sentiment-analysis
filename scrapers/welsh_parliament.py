@@ -552,10 +552,10 @@ class WelshParliamentScraper(BaseScraper):
 
         try:
             import fitz  # PyMuPDF
-        except ImportError:
+        except Exception as e:
             logger.warning(
-                "[Welsh Parliament] PyMuPDF not installed — register-of-interests PDF "
-                "parsing skipped. Install with: pip install pymupdf"
+                f"[Welsh Parliament] PyMuPDF unavailable ({type(e).__name__}: {e}) — "
+                "register-of-interests PDF parsing skipped. Install with: pip install pymupdf"
             )
             return records
 
@@ -569,7 +569,7 @@ class WelshParliamentScraper(BaseScraper):
             text = "\n".join(page.get_text() for page in doc)
             doc.close()
         except Exception as e:
-            logger.warning(f"[Welsh Parliament] Could not parse interests PDF {full_url}: {e}")
+            logger.warning(f"[Welsh Parliament] Could not parse interests PDF {full_url}: {type(e).__name__}: {e}")
             return records
 
         if not text.strip():

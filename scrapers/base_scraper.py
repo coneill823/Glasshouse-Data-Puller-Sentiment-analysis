@@ -129,10 +129,10 @@ class BaseScraper(ABC):
             return None
         try:
             from playwright.sync_api import sync_playwright
-        except ImportError:
+        except Exception as e:
             logger.warning(
-                f"[{self.parliament_name}] Playwright not installed — JS-rendered pages "
-                "will be skipped. Install with: pip install playwright && playwright install chromium"
+                f"[{self.parliament_name}] Playwright unavailable ({type(e).__name__}: {e}) — "
+                "JS-rendered pages will be skipped. Install with: pip install playwright && playwright install chromium"
             )
             self._browser_unavailable = True
             return None
@@ -146,7 +146,7 @@ class BaseScraper(ABC):
             return self._browser
         except Exception as e:
             logger.warning(
-                f"[{self.parliament_name}] Could not launch headless browser ({e}) — "
+                f"[{self.parliament_name}] Could not launch headless browser ({type(e).__name__}: {e}) — "
                 "JS-rendered pages will be skipped. Run: playwright install chromium"
             )
             self._browser_unavailable = True
@@ -191,7 +191,7 @@ class BaseScraper(ABC):
             html = page.content()
             return BeautifulSoup(html, "lxml")
         except Exception as e:
-            logger.warning(f"[{self.parliament_name}] Browser render failed for {url}: {e}")
+            logger.warning(f"[{self.parliament_name}] Browser render failed for {url}: {type(e).__name__}: {e}")
             return None
         finally:
             if page is not None:
