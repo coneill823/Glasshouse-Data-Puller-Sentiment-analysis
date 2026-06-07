@@ -794,6 +794,24 @@ def main():
     _log_root.setLevel(logging.WARNING)
 
     print(f"Log: {log_path.resolve()}")
+
+    # ── Runtime diagnostics ───────────────────────────────────────────────
+    # The scrapers report Playwright/PyMuPDF as unimportable even though
+    # `python -c "import fitz, playwright"` succeeds from the same shell.
+    # Print exactly which interpreter/site-packages this run is using and
+    # whether it can see the optional deps, so a mismatch (e.g. a different
+    # interpreter than the one `python` resolves to interactively, or a
+    # site-packages dir that isn't on this process's sys.path) is visible
+    # directly in the log instead of being inferred.
+    print(f"Interpreter: {sys.executable}")
+    print(f"Python: {sys.version.split()[0]}")
+    print(f"sys.path[:5]: {sys.path[:5]}")
+    for _mod in ("fitz", "playwright"):
+        try:
+            _m = __import__(_mod)
+            print(f"  import {_mod}: OK — {getattr(_m, '__file__', '?')}")
+        except Exception as _e:
+            print(f"  import {_mod}: FAILED — {type(_e).__name__}: {_e}")
     # ─────────────────────────────────────────────────────────────────────
 
     keys = [args.parliament] if args.parliament else list(_RUNNERS)
