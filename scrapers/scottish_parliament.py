@@ -9,6 +9,7 @@ import logging
 import re
 from datetime import date, timedelta
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
@@ -298,6 +299,29 @@ class ScottishParliamentScraper(BaseScraper):
             f"{_WEB}/msps/",
         ]
 
+        # The current Register of Interests is published as a single consolidated
+        # PDF covering every MSP (the same pattern the Senedd uses for Wales) —
+        # e.g. ".../previous-register-of-interests-pdfs/register-of-interests-
+        # for-the-parliamentary-year-....pdf". Look for a download link on any
+        # candidate page before falling back to scraping individual MSP pages,
+        # since the PDF is far more complete and reliably structured.
+        def _find_interest_pdf_link(s: BeautifulSoup) -> str:
+            for a in s.select("a[href$='.pdf']"):
+                haystack = f"{a.get('href', '')} {a.get_text(strip=True)}".lower()
+                if "interest" in haystack and "register" in haystack:
+                    return a["href"]
+            return ""
+
+        for candidate in interest_candidates:
+            cand_soup = self._html_get(candidate)
+            if not cand_soup:
+                continue
+            pdf_href = _find_interest_pdf_link(cand_soup)
+            if pdf_href:
+                pdf_url = pdf_href if pdf_href.startswith("http") else urljoin(_WEB, pdf_href)
+                logger.info(f"[Scottish Parliament] Register of interests is a PDF — downloading and parsing: {pdf_url}")
+                return self._parse_interests_pdf(pdf_url, members)
+
         def _has_interest_content(s: BeautifulSoup) -> bool:
             # Check the MAIN CONTENT area only — the site nav always contains
             # "About the Register of Interests" which would cause a false-positive match.
@@ -411,6 +435,118 @@ class ScottishParliamentScraper(BaseScraper):
         logger.info(f"[Scottish Parliament] {len(records)} interest records fetched")
         return records
 
+    # Section headings in the consolidated register read e.g. "Category 1:
+    # Remuneration" or "1. Remuneration" — match either, same shape as Welsh's.
+    _PDF_CATEGORY_RE = re.compile(r"^\s*(?:category\s*)?(\d{1,2})[.):]\s+(.{3,120})$", re.I)
+    # Each MSP's section is introduced by a "Member's Name: <name>" heading.
+    _PDF_MEMBER_HEADING_RE = re.compile(r"^member'?s?\s*name\s*:?\s*(.+)$", re.I)
+
+    def _parse_interests_pdf(self, pdf_url: str, members: List[Dict]) -> List[Dict]:
+        """Download the consolidated register-of-interests PDF and parse it with PyMuPDF.
+
+        Layout (per the published register): each MSP's section opens with a
+        "Member's Name: <name>" heading, followed by numbered/categorised
+        headings ("1. Remuneration...", "Category 2: ...", etc.), each followed
+        by free-text entries (or "I have no relevant interests to declare"). We
+        walk the extracted text line-by-line, switching the "current member"
+        whenever a heading line names one (or a line exactly matches a known
+        roster name, as a fallback), and the "current category" whenever a line
+        matches the numbered-heading pattern.
+        """
+        records: List[Dict] = []
+        full_url = pdf_url if pdf_url.startswith("http") else urljoin(_WEB, pdf_url)
+
+        try:
+            import fitz  # PyMuPDF
+        except Exception as e:
+            logger.warning(
+                f"[Scottish Parliament] PyMuPDF unavailable ({type(e).__name__}: {e}) — "
+                "register-of-interests PDF parsing skipped. Install with: pip install pymupdf"
+            )
+            return records
+
+        resp = self._get(full_url, accept="application/pdf,*/*", timeout=90)
+        if not resp:
+            logger.warning(f"[Scottish Parliament] Could not download interests PDF: {full_url}")
+            return records
+
+        try:
+            doc = fitz.open(stream=resp.content, filetype="pdf")
+            text = "\n".join(page.get_text() for page in doc)
+            doc.close()
+        except Exception as e:
+            logger.warning(f"[Scottish Parliament] Could not parse interests PDF {full_url}: {type(e).__name__}: {e}")
+            return records
+
+        if not text.strip():
+            logger.warning(f"[Scottish Parliament] Interests PDF {full_url} produced no extractable text")
+            return records
+
+        member_by_name = {m["name"].strip().lower(): m for m in members if m.get("name")}
+
+        def _resolve_member(name: str) -> Dict:
+            return member_by_name.get(name.strip().lower(), {
+                "id": "", "name": name.strip(), "party": "",
+                "constituency": "", "role": "MSP",
+            })
+
+        current_member: Optional[Dict] = None
+        current_category = ""
+        buffer: List[str] = []
+
+        def flush():
+            if current_member is None or not buffer:
+                return
+            entry_text = " ".join(b for b in buffer if b).strip()
+            if len(entry_text) >= 5:
+                records.append(self._make_record(
+                    data_type="register_of_interests",
+                    member=current_member,
+                    date=self._extract_date_from_text(entry_text),
+                    text=entry_text,
+                    title=current_category,
+                    metadata={"source_format": "pdf"},
+                    source_url=full_url,
+                ))
+
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            heading_match = self._PDF_MEMBER_HEADING_RE.match(line)
+            matched_member = (_resolve_member(heading_match.group(1)) if heading_match
+                              else member_by_name.get(line.lower()))
+            if matched_member is not None:
+                flush()
+                buffer = []
+                current_member = matched_member
+                current_category = ""
+                continue
+
+            if current_member is None:
+                continue  # skip front matter / TOC before the first member heading
+
+            cat_match = self._PDF_CATEGORY_RE.match(line)
+            if cat_match:
+                flush()
+                buffer = []
+                current_category = cat_match.group(2).strip()
+                continue
+
+            buffer.append(line)
+
+        flush()
+
+        if not records:
+            logger.warning(
+                f"[Scottish Parliament] 0 interest records parsed from PDF {full_url} "
+                f"({len(text)} chars extracted, {len(member_by_name)} known member names) — "
+                f"text sample: {text[:400]!r}"
+            )
+        logger.info(f"[Scottish Parliament] {len(records)} interest records parsed from PDF")
+        return records
+
     # ------------------------------------------------------------------
     # Questions — scraped from parliament.scot
     # ------------------------------------------------------------------
@@ -434,10 +570,22 @@ class ScottishParliamentScraper(BaseScraper):
             if len(text) < 10:
                 continue
             speaker_el = contrib.select_one(".speaker, .msp-name, strong, b, h3")
+            name = speaker_el.get_text(strip=True) if speaker_el else ""
+            if not name and not hasattr(self, "_q_name_diag_logged"):
+                # We're matching question/answer items but our speaker selectors
+                # find nothing inside them — dump one's real structure so the
+                # selector can be targeted at the actual markup next time.
+                self._q_name_diag_logged = True
+                child_tags = [c.name for c in contrib.find_all(True, recursive=False)][:10]
+                logger.warning(
+                    f"[Scottish Parliament] Question item with no speaker match at {full_url}: "
+                    f"tag={contrib.name} classes={contrib.get('class', [])} child_tags={child_tags} "
+                    f"html_sample={str(contrib)[:400]!r}"
+                )
             records.append(self._make_record(
                 data_type="question",
                 member={
-                    "id": "", "name": speaker_el.get_text(strip=True) if speaker_el else "",
+                    "id": "", "name": name,
                     "party": "", "constituency": "", "role": "MSP",
                 },
                 date=date_str,

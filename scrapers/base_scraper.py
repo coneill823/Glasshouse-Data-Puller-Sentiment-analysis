@@ -1,3 +1,4 @@
+import re
 import time
 import logging
 from abc import ABC, abstractmethod
@@ -214,6 +215,38 @@ class BaseScraper(ABC):
             except Exception:
                 pass
             self._playwright = None
+
+    # Layered date patterns for pulling a registration/received date out of
+    # free-text register-of-interests entries (e.g. PDF-extracted text like
+    # "(Registered 12 May 2024)", "02/06/2024", "12.05.2024").
+    _DATE_ISO_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+    _DATE_DMY_SLASH_RE = re.compile(r"\b(\d{1,2})[./](\d{1,2})[./](\d{4})\b")
+    _DATE_DMONTHY_RE = re.compile(
+        r"\b(\d{1,2})\s+(January|February|March|April|May|June|July|"
+        r"August|September|October|November|December)\s+(\d{4})\b", re.I)
+
+    def _extract_date_from_text(self, text: str) -> str:
+        """Pull the first recognisable date out of free text, normalised to YYYY-MM-DD.
+
+        Tries ISO (YYYY-MM-DD), then DD/MM/YYYY or DD.MM.YYYY, then "DD Month YYYY".
+        Returns "" if nothing matches.
+        """
+        m = self._DATE_ISO_RE.search(text)
+        if m:
+            return m.group(0)
+        m = self._DATE_DMY_SLASH_RE.search(text)
+        if m:
+            try:
+                return datetime.strptime(f"{m.group(1)}/{m.group(2)}/{m.group(3)}", "%d/%m/%Y").strftime("%Y-%m-%d")
+            except ValueError:
+                pass
+        m = self._DATE_DMONTHY_RE.search(text)
+        if m:
+            try:
+                return datetime.strptime(m.group(0), "%d %B %Y").strftime("%Y-%m-%d")
+            except ValueError:
+                pass
+        return ""
 
     def _make_record(self, data_type: str, member: Dict, date: str,
                      text: str, title: str = "", metadata: Optional[Dict] = None,

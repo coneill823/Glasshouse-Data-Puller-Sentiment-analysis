@@ -415,29 +415,6 @@ def test_uk(verbose: bool = False, save_dir: Optional[Path] = None) -> List[Resu
 
 # ── Scottish Parliament ───────────────────────────────────────────────────────
 
-def _scotland_plenary_sample(s: ScottishParliamentScraper) -> Tuple[List[Dict], str]:
-    """Probe last 10 weekday date-slug URLs; known to be JS-rendered → expect 0."""
-    today = date.today()
-    month_names = ["january","february","march","april","may","june",
-                   "july","august","september","october","november","december"]
-    weekdays = []
-    d = today
-    while len(weekdays) < 10:
-        if d.weekday() < 5:
-            weekdays.append(d.strftime("%Y-%m-%d"))
-        d -= timedelta(days=1)
-
-    records: List[Dict] = []
-    for iso_date in weekdays:
-        y, mo, day = iso_date.split("-")
-        slug = f"official-report-{int(day)}-{month_names[int(mo)-1]}-{y}"
-        url = (f"https://www.parliament.scot/chamber-and-committees/official-report/"
-               f"what-was-said-in-parliament/{slug}")
-        s._scrape_or_detail(url, iso_date, records, None)
-
-    return records, "last 10 weekday OR URLs probed; falls back to headless-browser render if plain HTTP is empty"
-
-
 def test_scotland(verbose: bool = False, save_dir: Optional[Path] = None) -> List[Result]:
     print(f"\n{_BLD}Scottish Parliament{_RST}")
     s = ScottishParliamentScraper()
@@ -457,6 +434,9 @@ def test_scotland(verbose: bool = False, save_dir: Optional[Path] = None) -> Lis
         ("votes_on_division",
          lambda: s.fetch_votes_on_division(from_date=RECENT_30),
          "OData 404 → motion-page/division scraping, now with headless-browser render for JS-rendered pages", True),
+        ("plenary_business",
+         lambda: s.fetch_plenary_business(from_date=RECENT_30),
+         "last 30 days; OData meeting IDs → OR media API, with RSS/index-page/date-guess fallbacks", True),
     ]:
         r = Result("Scottish Parliament", dtype, note=note)
         t0 = time.time()
@@ -477,23 +457,6 @@ def test_scotland(verbose: bool = False, save_dir: Optional[Path] = None) -> Lis
         _emit(r, verbose)
         _maybe_save(r, save_dir)
         results.append(r)
-
-    # Plenary — custom 10-date probe
-    r = Result("Scottish Parliament", "plenary_business")
-    t0 = time.time()
-    try:
-        records, note = _scotland_plenary_sample(s)
-        r.elapsed = time.time() - t0
-        r.note = note
-        r.status, r.issues = _assess(records, soft=True)
-        r.count = len(records)
-        r.sample = records[0] if records else None
-    except Exception as e:
-        r.elapsed = time.time() - t0
-        r.status, r.issues = "FAIL", [str(e)]
-    _emit(r, verbose)
-    _maybe_save(r, save_dir)
-    results.append(r)
 
     return results
 
