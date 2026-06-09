@@ -302,15 +302,22 @@ class ScottishParliamentScraper(BaseScraper):
         # The current Register of Interests is published as a single consolidated
         # PDF covering every MSP (the same pattern the Senedd uses for Wales) —
         # e.g. ".../previous-register-of-interests-pdfs/register-of-interests-
-        # for-the-parliamentary-year-....pdf". Look for a download link on any
-        # candidate page before falling back to scraping individual MSP pages,
-        # since the PDF is far more complete and reliably structured.
+        # for-the-parliamentary-year-13-may-2025-to-8-april-2026.pdf". The landing
+        # page links the *current* register alongside an archive of every previous
+        # year, so pick the link whose year is newest (the archive's oldest entry
+        # is 2016 — taking the first match in DOM order grabbed that by mistake).
         def _find_interest_pdf_link(s: BeautifulSoup) -> str:
-            for a in s.select("a[href$='.pdf']"):
-                haystack = f"{a.get('href', '')} {a.get_text(strip=True)}".lower()
-                if "interest" in haystack and "register" in haystack:
-                    return a["href"]
-            return ""
+            best_href, best_year = "", -1
+            for a in s.select("a[href*='.pdf']"):
+                href = a.get("href", "")
+                haystack = f"{href} {a.get_text(strip=True)}".lower()
+                if "interest" not in haystack or "register" not in haystack:
+                    continue
+                years = [int(y) for y in re.findall(r"20\d{2}", haystack)]
+                year = max(years) if years else 0
+                if year > best_year:
+                    best_href, best_year = href, year
+            return best_href
 
         for candidate in interest_candidates:
             cand_soup = self._html_get(candidate)
@@ -438,8 +445,18 @@ class ScottishParliamentScraper(BaseScraper):
     # Section headings in the consolidated register read e.g. "Category 1:
     # Remuneration" or "1. Remuneration" — match either, same shape as Welsh's.
     _PDF_CATEGORY_RE = re.compile(r"^\s*(?:category\s*)?(\d{1,2})[.):]\s+(.{3,120})$", re.I)
-    # Each MSP's section is introduced by a "Member's Name: <name>" heading.
-    _PDF_MEMBER_HEADING_RE = re.compile(r"^member'?s?\s*name\s*:?\s*(.+)$", re.I)
+    # Each MSP's section is introduced by a "Member's Name: <name>" heading. The
+    # PDF uses a *typographic* apostrophe (U+2019) in "Member's", so the
+    # apostrophe class must cover the curly/modifier variants, not just U+0027 —
+    # matching only the straight quote silently failed to find any member at all.
+    # The name may sit on the same line after the colon, or on the next line.
+    _PDF_MEMBER_HEADING_RE = re.compile(
+        r"^member['‘’ʼ]?s?\s*name\s*:?\s*(.*)$", re.I)
+    # Running page headers/footers (the document title, bare page numbers) get
+    # interleaved into the extracted text — drop them so they don't pollute the
+    # free-text entries we accumulate.
+    _PDF_BOILERPLATE_RE = re.compile(
+        r"^(register of members['‘’ʼ]?\s*interests|page\s*\d+|\d+)$", re.I)
 
     def _parse_interests_pdf(self, pdf_url: str, members: List[Dict]) -> List[Dict]:
         """Download the consolidated register-of-interests PDF and parse it with PyMuPDF.
@@ -509,19 +526,50 @@ class ScottishParliamentScraper(BaseScraper):
                     source_url=full_url,
                 ))
 
+        def _same_member(name: str) -> bool:
+            return bool(current_member) and \
+                current_member.get("name", "").strip().lower() == name.strip().lower()
+
+        # "Member's Name:" repeats as a running page header throughout each MSP's
+        # section, and the name sometimes lands on the line *after* the label —
+        # so track whether we're waiting for a name, and ignore a heading that
+        # just re-announces the member we're already inside.
+        awaiting_name = False
         for raw_line in text.splitlines():
             line = raw_line.strip()
             if not line:
                 continue
 
+            if awaiting_name:
+                awaiting_name = False
+                if not _same_member(line):
+                    flush()
+                    buffer = []
+                    current_member = _resolve_member(line)
+                    current_category = ""
+                continue
+
             heading_match = self._PDF_MEMBER_HEADING_RE.match(line)
-            matched_member = (_resolve_member(heading_match.group(1)) if heading_match
-                              else member_by_name.get(line.lower()))
+            if heading_match:
+                name = heading_match.group(1).strip()
+                if not name:
+                    awaiting_name = True  # name is on the next line
+                elif not _same_member(name):
+                    flush()
+                    buffer = []
+                    current_member = _resolve_member(name)
+                    current_category = ""
+                continue
+
+            # Fallback: a line that exactly matches a known roster name (covers
+            # any section that omits the "Member's Name:" label entirely).
+            matched_member = member_by_name.get(line.lower())
             if matched_member is not None:
-                flush()
-                buffer = []
-                current_member = matched_member
-                current_category = ""
+                if not _same_member(line):
+                    flush()
+                    buffer = []
+                    current_member = matched_member
+                    current_category = ""
                 continue
 
             if current_member is None:
@@ -532,6 +580,9 @@ class ScottishParliamentScraper(BaseScraper):
                 flush()
                 buffer = []
                 current_category = cat_match.group(2).strip()
+                continue
+
+            if self._PDF_BOILERPLATE_RE.match(line):
                 continue
 
             buffer.append(line)
@@ -551,21 +602,44 @@ class ScottishParliamentScraper(BaseScraper):
     # Questions — scraped from parliament.scot
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _question_links(soup: BeautifulSoup) -> List[str]:
-        return [a["href"] for a in soup.select("a[href]")
-                if a.get("href", "").startswith(("/", "http"))
-                and re.search(r"/question|/answer|\d{4}-\d{2}-\d{2}|/\d+", a.get("href", ""), re.I)]
+    # A real question-detail link points at the question viewer or carries a
+    # question reference (S6W-12345 written, S6O- portfolio, S6T- topical, plus
+    # the new session-7 S7* equivalents). The previous "any href with /\d+ or a
+    # date" rule matched generic site navigation, so we ended up following links
+    # into landing pages and harvesting their boilerplate <p> text as "questions".
+    _QUESTION_HREF_RE = re.compile(
+        r"questions?-and-answers/question\b|[?&](?:reference|ref|uri|qref)=|S\d+[WTOFR]-\d+", re.I)
+    _QUESTION_HREF_EXCLUDE_RE = re.compile(
+        r"/about\b|general-questions|guidance|standing-orders|how-parliament-works|/help\b|/glossary\b",
+        re.I)
+
+    def _question_links(self, soup: BeautifulSoup) -> List[str]:
+        out: List[str] = []
+        for a in soup.select("a[href]"):
+            href = a.get("href", "")
+            if not href.startswith(("/", "http")):
+                continue
+            if self._QUESTION_HREF_RE.search(href) and not self._QUESTION_HREF_EXCLUDE_RE.search(href):
+                out.append(href)
+        return out
 
     @staticmethod
     def _question_date(soup: BeautifulSoup) -> str:
         date_el = soup.select_one("time[datetime], time, .date, [class*='date']")
         return date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
 
+    # Real question/answer containers only — NOT bare <p> or <article>, which on
+    # the landing/index pages wrap site boilerplate ("A Bill is a proposed Act of
+    # the Scottish Parliament...") that was being miscounted as question records.
+    _QUESTION_ITEM_SELECTOR = (
+        ".question, .answer, .contribution, .q-text, .a-text, "
+        ".question-text, .answer-text, .qna-item, [class*='question-and-answer']"
+    )
+
     def _extract_question_items(self, soup: BeautifulSoup, full_url: str, date_str: str,
                                 records: List[Dict]) -> int:
         added = 0
-        for contrib in soup.select(".question, .answer, .contribution, .item, article, .q-text, .a-text, p"):
+        for contrib in soup.select(self._QUESTION_ITEM_SELECTOR):
             text = contrib.get_text(strip=True)
             if len(text) < 10:
                 continue
@@ -606,6 +680,8 @@ class ScottishParliamentScraper(BaseScraper):
         best_records: List[Dict] = []
 
         for path in [
+            # The real, working search listing (the "/question-search" path 404s).
+            "/chamber-and-committees/written-questions-and-answers",
             "/chamber-and-committees/questions-and-answers/question-search",
             "/chamber-and-committees/questions-and-answers",
         ]:
@@ -957,17 +1033,28 @@ class ScottishParliamentScraper(BaseScraper):
         ]:
             url = f"{_WEB}{path}"
             soup = self._html_get(url)
-            if not soup:
-                continue
-            all_hrefs = [a["href"] for a in soup.select("a[href]")
+
+            def _or_links(s: BeautifulSoup) -> List[str]:
+                hrefs = [a["href"] for a in s.select("a[href]")
                          if a.get("href", "").startswith(("/", "http"))]
-            links = [h for h in all_hrefs
-                     if re.search(r"\d{4}-\d{2}-\d{2}|/or-\d", h, re.I)
-                     and not any(s in h for s in _SKIP_SUBNAV)]
+                return [h for h in hrefs
+                        if re.search(r"official-report-\d|\d{4}-\d{2}-\d{2}|/or-\d|meetingid=", h, re.I)
+                        and not any(sub in h for sub in _SKIP_SUBNAV)]
+
+            links = _or_links(soup) if soup else []
             if not links:
+                # The OR index is a JS single-page app — plain HTTP returns only
+                # the nav shell. Re-render it so the session list is populated.
+                rendered = self._browser_get(url, wait_selector="a[href*='official-report-'], a[href*='meetingId']")
+                if rendered:
+                    links = _or_links(rendered)
+                    if links:
+                        soup = rendered
+                        logger.info(f"[Scottish Parliament] Found {len(links)} OR links at {url} (rendered)")
+            if not links:
+                all_hrefs = [a["href"] for a in soup.select("a[href]")][:10] if soup else []
                 logger.warning(
-                    f"[Scottish Parliament] No OR links at {url} — "
-                    f"sample hrefs: {all_hrefs[:10]}"
+                    f"[Scottish Parliament] No OR links at {url} — sample hrefs: {all_hrefs}"
                 )
                 continue
             logger.info(f"[Scottish Parliament] Found {len(links)} OR links at {url}")
