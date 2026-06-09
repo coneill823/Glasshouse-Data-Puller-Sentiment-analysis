@@ -435,8 +435,8 @@ def test_scotland(verbose: bool = False, save_dir: Optional[Path] = None) -> Lis
          lambda: s.fetch_votes_on_division(from_date=RECENT_30),
          "OData 404 → motion-page/division scraping, now with headless-browser render for JS-rendered pages", True),
         ("plenary_business",
-         lambda: s.fetch_plenary_business(from_date=RECENT_30),
-         "last 30 days; OData meeting IDs → OR media API, with RSS/index-page/date-guess fallbacks", True),
+         lambda: s.fetch_plenary_business(from_date=RECENT_90),
+         f"last 90 days ({RECENT_90}→today); Scottish Parliament in election recess May–Jun 2026; covers Session 6 sittings in April", True),
     ]:
         r = Result("Scottish Parliament", dtype, note=note)
         t0 = time.time()

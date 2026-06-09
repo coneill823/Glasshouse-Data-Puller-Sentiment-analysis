@@ -1176,7 +1176,7 @@ class ScottishParliamentScraper(BaseScraper):
                        "july", "august", "september", "october", "november", "december"]
         tried = 0
         hit = 0
-        for iso_date in self._recent_sitting_dates(60):
+        for iso_date in self._recent_sitting_dates(90):
             y, mo, d = iso_date.split("-")
             slug = f"official-report-{int(d)}-{month_names[int(mo) - 1]}-{y}"
             url = (f"{_WEB}/chamber-and-committees/official-report/"
