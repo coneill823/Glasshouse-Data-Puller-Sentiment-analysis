@@ -670,6 +670,30 @@ class ScottishParliamentScraper(BaseScraper):
             added += 1
         return added
 
+    def _diagnose_question_structure(self, soup: BeautifulSoup, full_url: str, rendered: bool) -> None:
+        """One-shot structural dump of a question-detail page that matched no item
+        selector, so the real markup can be targeted next time."""
+        if hasattr(self, "_q_diag_logged"):
+            return
+        self._q_diag_logged = True
+        all_cls = sorted({c for el in soup.select("[class]") for c in el.get("class", [])})
+        tag_counts: Dict[str, int] = {}
+        for el in soup.find_all(True):
+            tag_counts[el.name] = tag_counts.get(el.name, 0) + 1
+        common_tags = sorted(tag_counts.items(), key=lambda kv: -kv[1])[:15]
+        iframes = [f.get("src", "") for f in soup.find_all("iframe")]
+        main_el = soup.find("main") or soup.find("article") or soup.find("body")
+        main_text = main_el.get_text(separator=" ", strip=True)[:600] if main_el else ""
+        main_html = str(main_el)[:1000] if main_el else ""
+        logger.warning(
+            f"[Scottish Parliament] Question structure dump ({'rendered' if rendered else 'plain HTTP'}) "
+            f"{full_url}: css_classes(first 50)={all_cls[:50]} | tag_counts={common_tags} | "
+            f"iframes={iframes[:5]} | main_text_sample={main_text!r}"
+        )
+        logger.warning(
+            f"[Scottish Parliament] Question HTML sample {full_url}: {main_html!r}"
+        )
+
     def fetch_questions(self, from_date: Optional[str] = None) -> List[Dict]:
         # Try every candidate listing and keep whichever yields the best result —
         # "best" meaning the most records with a member name attached, falling
@@ -731,6 +755,7 @@ class ScottishParliamentScraper(BaseScraper):
                     body = detail.find("body")
                     snippet = body.get_text(separator=" ", strip=True)[:300] if body else ""
                     logger.warning(f"[Scottish Parliament] 0 items from question page {full_url} — snippet: {snippet}")
+                    self._diagnose_question_structure(rendered or detail, full_url, rendered=bool(rendered))
 
             def _score(recs: List[Dict]) -> Tuple[int, int]:
                 named = sum(1 for r in recs if str(r.get("member", {}).get("name", "")).strip())
