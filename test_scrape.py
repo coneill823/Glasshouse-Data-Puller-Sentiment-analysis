@@ -430,7 +430,7 @@ def test_scotland(verbose: bool = False, save_dir: Optional[Path] = None) -> Lis
          "OData 404 → register published as consolidated PDF, parsed with PyMuPDF", True),
         ("questions",
          lambda: s.fetch_questions(from_date=RECENT_30),
-         "last 30 days; written-questions-and-answers listing (JS SPA, browser-rendered)", True),
+         "last 30 days; SPA question pages browser-rendered, parsed by field labels (Asked by/Date lodged/Question/Answer)", True),
         ("votes_on_division",
          lambda: s.fetch_votes_on_division(from_date=RECENT_30),
          "OData 404 → motion-page/division scraping, now with headless-browser render for JS-rendered pages", True),

@@ -623,48 +623,124 @@ class ScottishParliamentScraper(BaseScraper):
                 out.append(href)
         return out
 
+    # A rendered question-detail page (e.g. ?ref=S7W-00729) carries NO .question /
+    # .answer CSS hooks — just generic "basic-content" blocks. The content is laid
+    # out as labelled fields instead, so we parse by label rather than by selector:
+    #   Question reference: S7W-00729
+    #   Asked by: Alexander Burnett, MSP for Aberdeenshire West, Scottish Conservative...
+    #   Date lodged: 2 June 2026
+    #   Current status: Answered by Angela Constance on 16 June 2026
+    #   Question  <question prose>
+    #   Answer    <answer prose>
+    _Q_REF_RE = re.compile(r"Question reference:\s*(S\d+\w-\d+)", re.I)
+    _Q_ASKED_BY_RE = re.compile(r"Asked by:\s*(.+?)\s+Date lodged:", re.I)
+    _Q_DATE_LODGED_RE = re.compile(r"Date lodged:\s*(\d{1,2}\s+\w+\s+\d{4})", re.I)
+    _Q_ANSWERED_BY_RE = re.compile(
+        r"Answered by\s+(.+?)\s+on\s+(\d{1,2}\s+\w+\s+\d{4})", re.I)
+    # Footer/nav lines that can trail the answer prose once the SPA has rendered.
+    _Q_FOOTER_RE = re.compile(
+        r"^(back to top|share|related|previous|next|search|all questions|"
+        r"current and previous|sign up|©|cookie|this website|contact us|"
+        r"copyright|follow us|accessibility|other questions)", re.I)
+
     @staticmethod
-    def _question_date(soup: BeautifulSoup) -> str:
-        date_el = soup.select_one("time[datetime], time, .date, [class*='date']")
-        return date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
+    def _split_asker(s: str) -> Tuple[str, str, str]:
+        """Split 'Name, MSP for Constituency, Party' into (name, party, constituency)."""
+        parts = [p.strip() for p in s.split(",") if p.strip()]
+        name = parts[0] if parts else ""
+        party, constituency = "", ""
+        for p in parts[1:]:
+            m = re.match(r"msp\s+for\s+(.+)", p, re.I)
+            if m:
+                constituency = m.group(1).strip()
+            elif not re.fullmatch(r"msp", p, re.I):
+                party = p  # the remaining non-MSP fragment is the party
+        return name, party, constituency
 
-    # Real question/answer containers only — NOT bare <p> or <article>, which on
-    # the landing/index pages wrap site boilerplate ("A Bill is a proposed Act of
-    # the Scottish Parliament...") that was being miscounted as question records.
-    _QUESTION_ITEM_SELECTOR = (
-        ".question, .answer, .contribution, .q-text, .a-text, "
-        ".question-text, .answer-text, .qna-item, [class*='question-and-answer']"
-    )
+    def _parse_question_detail(self, soup: BeautifulSoup, full_url: str,
+                               from_date: Optional[str], records: List[Dict]) -> int:
+        """Parse a rendered question-detail page by its field labels.
 
-    def _extract_question_items(self, soup: BeautifulSoup, full_url: str, date_str: str,
-                                records: List[Dict]) -> int:
+        Produces one record for the question (attributed to the asking MSP, with
+        party/constituency lifted straight off the page) and, when present, one
+        for the answer (attributed to the responding minister). Returns the count
+        added, or 0 if the page carried no recognisable question reference.
+        """
+        main = soup.find("main") or soup.find("article") or soup.find("body") or soup
+        # Collapse each text node to a single line so the "Question"/"Answer"
+        # headings stand alone and metadata fields keep their trailing labels.
+        lines = [re.sub(r"\s+", " ", ln).strip()
+                 for ln in main.get_text("\n", strip=True).split("\n")]
+        lines = [ln for ln in lines if ln]
+        flat = " ".join(lines)
+
+        ref_m = self._Q_REF_RE.search(flat)
+        if not ref_m:
+            return 0
+        ref = ref_m.group(1)
+        body = flat[ref_m.end():]
+
+        lodged_m = self._Q_DATE_LODGED_RE.search(body)
+        date_lodged = self._extract_date_from_text(lodged_m.group(1)) if lodged_m else ""
+        if from_date and date_lodged and date_lodged < from_date:
+            return 0
+
+        asker_name, asker_party, asker_constit = "", "", ""
+        asked_m = self._Q_ASKED_BY_RE.search(body)
+        if asked_m:
+            asker_name, asker_party, asker_constit = self._split_asker(asked_m.group(1))
+
+        answered_m = self._Q_ANSWERED_BY_RE.search(body)
+        answerer = answered_m.group(1).strip() if answered_m else ""
+        answer_date = (self._extract_date_from_text(answered_m.group(2))
+                       if answered_m else date_lodged)
+
+        # Locate the standalone "Question" / "Answer" heading lines and take the
+        # prose that follows each, stopping at the answer heading or page footer.
+        def _heading_idx(want: tuple) -> int:
+            return next((i for i, l in enumerate(lines)
+                         if l.lower() in want), -1)
+
+        def _footer_idx(start: int) -> int:
+            for i in range(start, len(lines)):
+                if self._Q_FOOTER_RE.match(lines[i]):
+                    return i
+            return len(lines)
+
+        q_idx = _heading_idx(("question", "question text"))
+        a_idx = _heading_idx(("answer", "answer text"))
+        q_text, a_text = "", ""
+        if q_idx != -1:
+            q_end = a_idx if a_idx > q_idx else _footer_idx(q_idx + 1)
+            q_text = " ".join(lines[q_idx + 1:q_end]).strip()
+        if a_idx != -1:
+            a_end = _footer_idx(a_idx + 1)
+            a_text = " ".join(lines[a_idx + 1:a_end]).strip()
+
         added = 0
-        for contrib in soup.select(self._QUESTION_ITEM_SELECTOR):
-            text = contrib.get_text(strip=True)
-            if len(text) < 10:
-                continue
-            speaker_el = contrib.select_one(".speaker, .msp-name, strong, b, h3")
-            name = speaker_el.get_text(strip=True) if speaker_el else ""
-            if not name and not hasattr(self, "_q_name_diag_logged"):
-                # We're matching question/answer items but our speaker selectors
-                # find nothing inside them — dump one's real structure so the
-                # selector can be targeted at the actual markup next time.
-                self._q_name_diag_logged = True
-                child_tags = [c.name for c in contrib.find_all(True, recursive=False)][:10]
-                logger.warning(
-                    f"[Scottish Parliament] Question item with no speaker match at {full_url}: "
-                    f"tag={contrib.name} classes={contrib.get('class', [])} child_tags={child_tags} "
-                    f"html_sample={str(contrib)[:400]!r}"
-                )
+        if len(q_text) >= 10:
             records.append(self._make_record(
                 data_type="question",
-                member={
-                    "id": "", "name": name,
-                    "party": "", "constituency": "", "role": "MSP",
-                },
-                date=date_str,
-                text=text,
-                title="",
+                member={"id": "", "name": asker_name, "party": asker_party,
+                        "constituency": asker_constit, "role": "MSP"},
+                date=date_lodged,
+                text=q_text,
+                title=ref,
+                metadata={"question_ref": ref, "qa_role": "question",
+                          "answered_by": answerer},
+                source_url=full_url,
+            ))
+            added += 1
+        if len(a_text) >= 10:
+            records.append(self._make_record(
+                data_type="question",
+                member={"id": "", "name": answerer, "party": "",
+                        "constituency": "", "role": "MSP"},
+                date=answer_date,
+                text=a_text,
+                title=ref,
+                metadata={"question_ref": ref, "qa_role": "answer",
+                          "asked_by": asker_name},
                 source_url=full_url,
             ))
             added += 1
@@ -736,26 +812,24 @@ class ScottishParliamentScraper(BaseScraper):
             for href in links[:200]:
                 full_url = href if href.startswith("http") else f"{_WEB}{href}"
                 detail = self._html_get(full_url)
-                date_str = self._question_date(detail) if detail else ""
-                if from_date and date_str and date_str[:10] < from_date:
-                    continue
-                added = self._extract_question_items(detail, full_url, date_str, path_records) if detail else 0
+                added = (self._parse_question_detail(detail, full_url, from_date, path_records)
+                         if detail else 0)
+                rendered = None
                 if added == 0:
-                    rendered = self._browser_get(full_url, wait_selector=".question, .answer, .contribution, article, .q-text, .a-text")
+                    # The question viewer is a JS single-page app — plain HTTP
+                    # returns the nav shell. Re-render so the labelled Q&A loads.
+                    rendered = self._browser_get(
+                        full_url, wait_selector="main p, .basic-content, main h2")
                     if rendered:
-                        r_date_str = self._question_date(rendered) or date_str
-                        if from_date and r_date_str and r_date_str[:10] < from_date:
-                            continue
-                        r_added = self._extract_question_items(rendered, full_url, r_date_str, path_records)
-                        if r_added:
-                            detail, added = rendered, r_added
-                if not detail:
+                        added = self._parse_question_detail(rendered, full_url, from_date, path_records)
+                page = rendered or detail
+                if page is None:
                     continue
                 if added == 0:
-                    body = detail.find("body")
+                    body = page.find("body")
                     snippet = body.get_text(separator=" ", strip=True)[:300] if body else ""
                     logger.warning(f"[Scottish Parliament] 0 items from question page {full_url} — snippet: {snippet}")
-                    self._diagnose_question_structure(rendered or detail, full_url, rendered=bool(rendered))
+                    self._diagnose_question_structure(page, full_url, rendered=bool(rendered))
 
             def _score(recs: List[Dict]) -> Tuple[int, int]:
                 named = sum(1 for r in recs if str(r.get("member", {}).get("name", "")).strip())
