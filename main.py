@@ -115,7 +115,7 @@ def _assess_members(records: List[Dict]) -> List[str]:
 def _assess(records: List[Dict]) -> List[str]:
     """Field-completeness check mirroring test_scrape.py's _assess()."""
     if not records:
-        return ["no records returned"]
+        return ["no records returned — may simply be no data in the pulled date range"]
     n = len(records)
     issues = []
     empty_text = sum(1 for r in records if not str(r.get("text", "")).strip())

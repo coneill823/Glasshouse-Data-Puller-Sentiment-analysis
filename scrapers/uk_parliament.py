@@ -269,6 +269,11 @@ class UKParliamentScraper(BaseScraper):
                 params["endDate"] = to_date
             skip = 0
             batch_found = False
+            # The writtenstatements endpoint ignores startDate/endDate and returns the
+            # full corpus (confirmed: identical counts for 3-month and 1-day windows).
+            # Filter client-side and, since results arrive newest-first, stop paginating
+            # once an entire page predates the window.
+            order_desc = None
             while True:
                 params["skip"] = skip
                 if skip % 1000 == 0 and skip > 0:
@@ -301,7 +306,14 @@ class UKParliamentScraper(BaseScraper):
                         f"member type={type(member_sample).__name__} value={member_sample!r:.200} | "
                         f"memberId={sample.get('memberId')!r} cache_size={len(self._member_cache)}"
                     )
+                page_dates = []
                 for item in items:
+                    item_date = str(item.get("Date", item.get("date", item.get("SittingDate",
+                                    item.get("dateMade", "")))))[:10]
+                    if item_date:
+                        page_dates.append(item_date)
+                    if from_date and item_date and item_date < from_date:
+                        continue
                     text = item.get("Value", item.get("text", item.get("body",
                            item.get("ContributionText", item.get("StatementText", "")))))
                     if not text:
@@ -333,6 +345,12 @@ class UKParliamentScraper(BaseScraper):
                         },
                         source_url=url,
                     ))
+                if order_desc is None and len(page_dates) >= 2:
+                    order_desc = page_dates[0] >= page_dates[-1]
+                if from_date and order_desc and page_dates and max(page_dates) < from_date:
+                    logger.info(f"[UK Parliament] Plenary: page at skip={skip} entirely "
+                                f"predates {from_date} — stopping pagination early")
+                    break
                 if len(items) < 100:
                     break
                 skip += 100

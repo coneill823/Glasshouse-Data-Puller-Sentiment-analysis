@@ -21,6 +21,7 @@ import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, date
 from typing import Dict, Generator, List, Optional, Tuple
+from urllib.parse import urljoin
 
 
 def _extract_ni_speaker(text: str) -> str:
@@ -202,7 +203,9 @@ class NIAssemblyScraper(BaseScraper):
 
     def _aims_html(self, path: str, params: Optional[Dict] = None) -> Optional[BeautifulSoup]:
         """Fetch an AIMS portal HTML page with browser-like headers to avoid 403."""
-        url = f"{_AIMS}{path}" if not path.startswith("http") else path
+        # urljoin resolves relative hrefs scraped from AIMS pages ("../x", "x.aspx")
+        # — naive concatenation produced unparseable hosts like "aims...gov.uk..".
+        url = path if path.startswith("http") else urljoin(f"{_AIMS}/", path)
         # Temporarily override User-Agent — AIMS blocks the default bot UA
         saved = dict(self.session.headers)
         self.session.headers.update({
@@ -519,8 +522,15 @@ class NIAssemblyScraper(BaseScraper):
                         to_date: Optional[str] = None) -> List[Dict]:
         records = self._fetch_questions_asmx(from_date, to_date)
         if not records:
-            logger.info("[NI Assembly] ASMX questions returned 0 — trying AIMS portal")
-            records = self._fetch_questions_aims(from_date)
+            # ASMX is the authoritative source: 0 rows for a bounded window means no
+            # business in that window. Only fall back to AIMS scraping (undated, full
+            # index) when pulling all history, where 0 rows would indicate a real outage.
+            if from_date:
+                logger.info("[NI Assembly] ASMX questions returned 0 for the requested "
+                            "window — no questions tabled in range")
+            else:
+                logger.info("[NI Assembly] ASMX questions returned 0 — trying AIMS portal")
+                records = self._fetch_questions_aims(from_date)
         logger.info(f"[NI Assembly] {len(records)} question records fetched")
         return records
 
@@ -691,8 +701,13 @@ class NIAssemblyScraper(BaseScraper):
                                to_date: Optional[str] = None) -> List[Dict]:
         records = self._fetch_plenary_asmx(from_date, to_date)
         if not records:
-            logger.info("[NI Assembly] ASMX plenary returned 0 — trying AIMS portal")
-            records = self._fetch_plenary_aims(from_date)
+            # See fetch_questions: trust an empty ASMX result for bounded windows.
+            if from_date:
+                logger.info("[NI Assembly] ASMX plenary returned 0 for the requested "
+                            "window — no sittings in range")
+            else:
+                logger.info("[NI Assembly] ASMX plenary returned 0 — trying AIMS portal")
+                records = self._fetch_plenary_aims(from_date)
         logger.info(f"[NI Assembly] {len(records)} plenary records fetched")
         return records
 
@@ -898,8 +913,13 @@ class NIAssemblyScraper(BaseScraper):
                                 to_date: Optional[str] = None) -> List[Dict]:
         records = self._fetch_votes_asmx(from_date, to_date)
         if not records:
-            logger.info("[NI Assembly] ASMX votes returned 0 — trying AIMS portal")
-            records = self._fetch_votes_aims(from_date)
+            # See fetch_questions: trust an empty ASMX result for bounded windows.
+            if from_date:
+                logger.info("[NI Assembly] ASMX votes returned 0 for the requested "
+                            "window — no divisions in range")
+            else:
+                logger.info("[NI Assembly] ASMX votes returned 0 — trying AIMS portal")
+                records = self._fetch_votes_aims(from_date)
         logger.info(f"[NI Assembly] {len(records)} vote records fetched")
         return records
 

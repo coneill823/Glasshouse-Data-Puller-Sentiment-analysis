@@ -80,6 +80,12 @@ class BaseScraper(ABC):
                 wait = RETRY_BACKOFF_BASE ** attempt
                 logger.warning(f"Request error (attempt {attempt + 1}/{MAX_RETRIES}): {e}. Retry in {wait}s.")
                 time.sleep(wait)
+            except Exception as e:
+                # Malformed URLs (e.g. urllib3 LocationParseError from a bad scraped
+                # href) raise outside the requests exception hierarchy. Retrying
+                # won't help and one bad link must never kill a whole pull.
+                logger.error(f"Unfetchable URL {url}: {type(e).__name__}: {e} — skipping.")
+                return None
         logger.error(f"All {MAX_RETRIES} attempts failed for {url}")
         # Use current dict value, not stale `consec` — the sleep above may have reset it to 0
         self._consecutive_host_failures[host] = self._consecutive_host_failures.get(host, 0) + 1
@@ -304,20 +310,32 @@ class BaseScraper(ABC):
                   to_date: Optional[str] = None) -> Dict[str, List[Dict]]:
         range_str = f"{from_date or 'all history'} → {to_date or 'today'}"
         logger.info(f"[{self.parliament_name}] Starting full data pull ({range_str})")
+
+        def _safe(label, fn) -> List[Dict]:
+            # One data type crashing must not lose the others' results.
+            try:
+                return fn()
+            except Exception as e:
+                logger.error(f"[{self.parliament_name}] {label} fetch failed: "
+                             f"{type(e).__name__}: {e}", exc_info=True)
+                return []
+
         try:
-            members = self.fetch_members()
+            members = _safe("members", self.fetch_members)
             logger.info(f"[{self.parliament_name}] {len(members)} members found")
             results = {
                 "members": members,
-                "register_of_interests": self.fetch_register_of_interests(members),
+                "register_of_interests": _safe(
+                    "register_of_interests",
+                    lambda: self.fetch_register_of_interests(members)),
                 # Scrapers bound the fetch server-side where the source supports it;
                 # this post-filter guarantees the to_date bound holds everywhere else.
-                "questions": self._filter_to_date(
-                    self.fetch_questions(from_date, to_date), to_date),
-                "plenary_business": self._filter_to_date(
-                    self.fetch_plenary_business(from_date, to_date), to_date),
-                "votes_on_division": self._filter_to_date(
-                    self.fetch_votes_on_division(from_date, to_date), to_date),
+                "questions": self._filter_to_date(_safe(
+                    "questions", lambda: self.fetch_questions(from_date, to_date)), to_date),
+                "plenary_business": self._filter_to_date(_safe(
+                    "plenary_business", lambda: self.fetch_plenary_business(from_date, to_date)), to_date),
+                "votes_on_division": self._filter_to_date(_safe(
+                    "votes_on_division", lambda: self.fetch_votes_on_division(from_date, to_date)), to_date),
             }
             totals = {k: len(v) for k, v in results.items()}
             logger.info(f"[{self.parliament_name}] Pull complete: {totals}")
