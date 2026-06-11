@@ -14,7 +14,7 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
 from .base_scraper import BaseScraper
-from config import PARLIAMENTS
+from config import PARLIAMENTS, MAX_QUESTION_DETAIL_PAGES
 
 logger = logging.getLogger(__name__)
 
@@ -808,8 +808,13 @@ class ScottishParliamentScraper(BaseScraper):
                 continue
 
             logger.info(f"[Scottish Parliament] Found {len(links)} question links at {url}")
+            if len(links) > MAX_QUESTION_DETAIL_PAGES:
+                logger.warning(
+                    f"[Scottish Parliament] Questions: {len(links)} links found but capped at "
+                    f"{MAX_QUESTION_DETAIL_PAGES} (MAX_QUESTION_DETAIL_PAGES) — raise in config.py for full coverage"
+                )
             path_records: List[Dict] = []
-            for href in links[:200]:
+            for href in links[:MAX_QUESTION_DETAIL_PAGES]:
                 full_url = href if href.startswith("http") else f"{_WEB}{href}"
                 detail = self._html_get(full_url)
                 added = (self._parse_question_detail(detail, full_url, from_date, path_records)

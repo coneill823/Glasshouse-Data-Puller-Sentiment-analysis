@@ -22,7 +22,7 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
 from .base_scraper import BaseScraper
-from config import PARLIAMENTS
+from config import PARLIAMENTS, MAX_QUESTION_DETAIL_PAGES, MAX_PLENARY_SESSION_PAGES
 
 logger = logging.getLogger(__name__)
 
@@ -1294,7 +1294,12 @@ class WelshParliamentScraper(BaseScraper):
                 continue
 
             logger.info(f"[Welsh Parliament] Questions: {len(listing_questions)} question links for {day_str}")
-            for q_url, q_id, listing_member_name in listing_questions[:50]:
+            if len(listing_questions) > MAX_QUESTION_DETAIL_PAGES:
+                logger.warning(
+                    f"[Welsh Parliament] Questions for {day_str}: {len(listing_questions)} links capped at "
+                    f"{MAX_QUESTION_DETAIL_PAGES} (MAX_QUESTION_DETAIL_PAGES)"
+                )
+            for q_url, q_id, listing_member_name in listing_questions[:MAX_QUESTION_DETAIL_PAGES]:
                 member_name = listing_member_name
                 q_text = ""
                 answer = ""
@@ -1437,7 +1442,12 @@ class WelshParliamentScraper(BaseScraper):
                     continue
 
                 logger.info(f"[Welsh Parliament] Questions: found {len(links_found)} item links at {url}")
-                for href in links_found[:100]:
+                if len(links_found) > MAX_QUESTION_DETAIL_PAGES:
+                    logger.warning(
+                        f"[Welsh Parliament] Questions: {len(links_found)} item links capped at "
+                        f"{MAX_QUESTION_DETAIL_PAGES} (MAX_QUESTION_DETAIL_PAGES)"
+                    )
+                for href in links_found[:MAX_QUESTION_DETAIL_PAGES]:
                     full_url = href if href.startswith("http") else f"{base}{href}"
                     detail = self._html_get(full_url)
                     if not detail:
@@ -1650,7 +1660,12 @@ class WelshParliamentScraper(BaseScraper):
             return []
 
         records = []
-        for session_url in session_links[:50]:
+        if len(session_links) > MAX_PLENARY_SESSION_PAGES:
+            logger.warning(
+                f"[Welsh Parliament] Plenary: {len(session_links)} session links capped at "
+                f"{MAX_PLENARY_SESSION_PAGES} (MAX_PLENARY_SESSION_PAGES)"
+            )
+        for session_url in session_links[:MAX_PLENARY_SESSION_PAGES]:
             session_soup = self._html_get(session_url)
             if not session_soup:
                 continue

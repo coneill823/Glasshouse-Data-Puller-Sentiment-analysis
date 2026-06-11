@@ -8,6 +8,13 @@ MAX_RETRIES = 3
 RETRY_BACKOFF_BASE = 2  # seconds
 RATE_LIMIT_DELAY = 0.5  # seconds between requests — be polite to public APIs
 
+# Caps on detail-page fetches for scraped (non-API) sources.
+# Listing pages can surface more links than is practical to fetch in one run;
+# the scrapers log a warning whenever a cap actually truncates results, so a
+# truncated pull is visible in the run log rather than silent.
+MAX_QUESTION_DETAIL_PAGES = 1000  # question detail pages per listing (Scotland / Wales)
+MAX_PLENARY_SESSION_PAGES = 300   # plenary session pages per run (Wales)
+
 PARLIAMENTS = {
     "ni_assembly": {
         "name": "NI Assembly",

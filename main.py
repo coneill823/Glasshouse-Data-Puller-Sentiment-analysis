@@ -10,7 +10,7 @@ for MPs / MLAs / MSPs / MSs from:
   - Welsh Parliament / Senedd
 
 Usage
----h
+-----
   python main.py                        # pull all parliaments, all history
   python main.py --parliament ni        # pull NI Assembly only
   python main.py --from 2024-01-01     # pull from a specific date
@@ -19,14 +19,13 @@ Usage
 """
 import argparse
 import logging
-import os
 import sys
+import time
 from datetime import datetime, timezone  # timezone required — do not remove
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 
 import schedule
-import time
 
 from config import PARLIAMENTS
 from scrapers import (
@@ -72,38 +71,70 @@ SCRAPERS = {
     "wales": ("welsh_parliament", WelshParliamentScraper),
 }
 
-DATA_TYPES = [
-    "register_of_interests",
-    "questions",
-    "plenary_business",
-    "votes_on_division",
-]
+# Data types that are known to return 0 records (or partial fields) for reasons
+# outside the scraper's control. A 0-count for these appears in the run summary
+# as an expected limitation, not a failure needing attention.
+KNOWN_LIMITATIONS = {
+    ("NI Assembly", "register_of_interests"):
+        "register.asmx exposes no method that returns data — 0 records expected",
+    ("Scottish Parliament", "plenary_business"):
+        "parliament.scot rebuilt for Session 7 (Jun 2026); old Official Report date-URLs "
+        "return a nav-only shell for all dates — will resolve when Session 7 OR is published",
+    ("Welsh Parliament (Senedd)", "votes_on_division"):
+        "XMLExport serves only 5th-Senedd committee meetings (no divisions); "
+        "Search/record pages are JS-rendered — 0 records expected",
+    ("Welsh Parliament (Senedd)", "register_of_interests"):
+        "~200 ongoing-role register entries carry no inline date in the source PDF — "
+        "empty date fields expected",
+}
+
+
+def _assess(records: List[Dict]) -> List[str]:
+    """Field-completeness check mirroring test_scrape.py's _assess()."""
+    if not records:
+        return ["no records returned"]
+    n = len(records)
+    issues = []
+    empty_text = sum(1 for r in records if not str(r.get("text", "")).strip())
+    empty_date = sum(1 for r in records if not str(r.get("date", "")).strip())
+    empty_name = sum(1 for r in records if not (r.get("member") or {}).get("name", "").strip())
+    if empty_text == n:
+        issues.append("ALL text fields empty")
+    elif empty_text > n // 2:
+        issues.append(f"{empty_text}/{n} text fields empty")
+    if empty_date > n // 2:
+        issues.append(f"{empty_date}/{n} date fields empty")
+    if empty_name > n // 2:
+        issues.append(f"{empty_name}/{n} member name fields empty")
+    return issues
 
 
 def run_parliament(parliament_key: str, scraper_class, from_date: Optional[str] = None,
-                   dry_run: bool = False):
+                   dry_run: bool = False) -> Optional[Dict[str, List[Dict]]]:
+    """Pull one parliament. Returns the results dict (data_type → records), or None on failure/skip."""
     cfg_key, _ = SCRAPERS[parliament_key]
     cfg = PARLIAMENTS[cfg_key]
     if not cfg.get("enabled", True):
         logger.info(f"Skipping {cfg['name']} (disabled in config)")
-        return
+        return None
 
     logger.info(f"{'[DRY RUN] ' if dry_run else ''}Starting pull for {cfg['name']}")
     scraper = scraper_class()
 
     manifest = load_manifest(cfg["name"])
     effective_from = from_date or manifest.get("last_pulled_from")
+    run_start = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     try:
         results = scraper.fetch_all(from_date=effective_from)
     except Exception as e:
         logger.error(f"Pull failed for {cfg['name']}: {e}", exc_info=True)
-        return
+        return None
 
     if dry_run:
         for dtype, records in results.items():
             logger.info(f"  [DRY RUN] {dtype}: {len(records)} records (not saved)")
-        return
+        return results
 
     run_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     saved_paths = {}
@@ -112,13 +143,63 @@ def run_parliament(parliament_key: str, scraper_class, from_date: Optional[str] 
         saved_paths[dtype] = paths
 
     manifest["last_pulled_at"] = datetime.now(timezone.utc).isoformat()
-    manifest["last_pulled_from"] = effective_from
+    # Next incremental run resumes from the day this pull started, so anything
+    # published mid-run is re-fetched rather than missed. (Previously this stored
+    # the same from-date forever, so every run re-pulled the full range.)
+    manifest["last_pulled_from"] = run_start
     manifest["runs"] = manifest.get("runs", []) + [{
         "date": run_date,
+        "from_date": effective_from,
         "counts": {dtype: len(records) for dtype, records in results.items()},
     }]
     write_manifest(cfg["name"], manifest)
     logger.info(f"Completed pull for {cfg['name']}")
+    return results
+
+
+def _summarise(all_results: Dict[str, Dict[str, List[Dict]]],
+               elapsed_by_parliament: Dict[str, float], total_elapsed: float):
+    """Log a test_scrape-style summary table so the run log ends with a reviewable digest."""
+    lines = ["", "=" * 90,
+             f"RUN SUMMARY  ({total_elapsed / 60:.1f} min total)",
+             "=" * 90,
+             f"{'Parliament':<30} {'Data Type':<25} {'Records':>8}  Issues"]
+    lines.append("-" * 90)
+
+    total_records = 0
+    attention = []
+    expected = []
+    for parl_name, results in all_results.items():
+        for dtype, records in results.items():
+            total_records += len(records)
+            issues = _assess(records)
+            note = KNOWN_LIMITATIONS.get((parl_name, dtype))
+            issue_str = " | ".join(issues) if issues else ""
+            if issues and note:
+                issue_str += "  [expected]"
+                expected.append((parl_name, dtype, note))
+            elif issues:
+                attention.append((parl_name, dtype, issue_str))
+            lines.append(f"{parl_name:<30} {dtype:<25} {len(records):>8}  {issue_str}")
+        lines.append(f"{'':<30} {'(elapsed)':<25} {elapsed_by_parliament.get(parl_name, 0) / 60:>7.1f}m")
+        lines.append("-" * 90)
+
+    lines.append(f"TOTAL: {total_records:,} records")
+
+    if attention:
+        lines.append("")
+        lines.append("Issues that need attention:")
+        for parl_name, dtype, issue_str in attention:
+            lines.append(f"  {parl_name} / {dtype}: {issue_str}")
+
+    if expected:
+        lines.append("")
+        lines.append("Known structural limitations (expected):")
+        for parl_name, dtype, note in expected:
+            lines.append(f"  {parl_name} / {dtype}: {note}")
+
+    lines.append("=" * 90)
+    logger.info("\n".join(lines))
 
 
 def run_all(from_date: Optional[str] = None, parliament_filter: Optional[str] = None,
@@ -128,14 +209,33 @@ def run_all(from_date: Optional[str] = None, parliament_filter: Optional[str] = 
         if key not in SCRAPERS:
             logger.error(f"Unknown parliament key '{key}'. Choose from: {', '.join(SCRAPERS)}")
             sys.exit(1)
+
+    t0 = time.time()
+    all_results: Dict[str, Dict[str, List[Dict]]] = {}
+    elapsed_by_parliament: Dict[str, float] = {}
+    for key in keys:
         cfg_key, cls = SCRAPERS[key]
-        run_parliament(key, cls, from_date=from_date, dry_run=dry_run)
+        parl_name = PARLIAMENTS[cfg_key]["name"]
+        p0 = time.time()
+        results = run_parliament(key, cls, from_date=from_date, dry_run=dry_run)
+        elapsed_by_parliament[parl_name] = time.time() - p0
+        if results is not None:
+            all_results[parl_name] = results
+
+    _summarise(all_results, elapsed_by_parliament, time.time() - t0)
 
 
 def scheduled_job():
     logger.info("=== Scheduled monthly pull starting ===")
     run_all()
     logger.info("=== Scheduled monthly pull complete ===")
+
+
+def _monthly_check():
+    # The schedule library has no native monthly interval — run daily and
+    # fire only on the 1st of the month.
+    if datetime.now(timezone.utc).day == 1:
+        scheduled_job()
 
 
 def main():
@@ -167,7 +267,7 @@ def main():
 
     if args.schedule:
         logger.info("Scheduler mode: will pull on the 1st of each month at 02:00 UTC")
-        schedule.every().month.at("02:00").do(scheduled_job)
+        schedule.every().day.at("02:00").do(_monthly_check)
         # Also run immediately on startup
         scheduled_job()
         while True:
