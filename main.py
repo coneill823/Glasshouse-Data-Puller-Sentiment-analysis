@@ -81,6 +81,10 @@ SCRAPERS = {
     "wales": ("welsh_parliament", WelshParliamentScraper),
 }
 
+# Parliaments don't hold plenary sessions or divisions every day, so 0 records
+# for these types during a narrow incremental pull is completely normal.
+_NORMAL_EMPTY = {"plenary_business", "votes_on_division"}
+
 # Data types that are known to return 0 records (or partial fields) for reasons
 # outside the scraper's control. A 0-count for these appears in the run summary
 # as an expected limitation, not a failure needing attention.
@@ -134,13 +138,18 @@ def _assess(records: List[Dict]) -> List[str]:
 
 def run_parliament(parliament_key: str, scraper_class, from_date: Optional[str] = None,
                    to_date: Optional[str] = None,
-                   dry_run: bool = False) -> Optional[Dict[str, List[Dict]]]:
-    """Pull one parliament. Returns the results dict (data_type → records), or None on failure/skip."""
+                   dry_run: bool = False):
+    """Pull one parliament.
+
+    Returns ``(results, dedup_stats)`` where *results* maps data_type → records
+    and *dedup_stats* maps data_type → {"new": N, "skipped": N}.
+    Returns ``(None, {})`` on failure or when the parliament is disabled.
+    """
     cfg_key, _ = SCRAPERS[parliament_key]
     cfg = PARLIAMENTS[cfg_key]
     if not cfg.get("enabled", True):
         logger.info(f"Skipping {cfg['name']} (disabled in config)")
-        return None
+        return None, {}
 
     logger.info(f"{'[DRY RUN] ' if dry_run else ''}Starting pull for {cfg['name']}")
     scraper = scraper_class()
@@ -153,18 +162,18 @@ def run_parliament(parliament_key: str, scraper_class, from_date: Optional[str] 
         results = scraper.fetch_all(from_date=effective_from, to_date=to_date)
     except Exception as e:
         logger.error(f"Pull failed for {cfg['name']}: {e}", exc_info=True)
-        return None
+        return None, {}
 
     if dry_run:
         for dtype, records in results.items():
             logger.info(f"  [DRY RUN] {dtype}: {len(records)} records (not saved)")
-        return results
+        return results, {}
 
     run_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    saved_paths = {}
+    dedup_stats: Dict[str, Dict[str, int]] = {}
     for dtype, records in results.items():
         paths = save_results(cfg["name"], dtype, records, run_date=run_date)
-        saved_paths[dtype] = paths
+        dedup_stats[dtype] = {"new": paths.get("new", 0), "skipped": paths.get("skipped", 0)}
 
     manifest["last_pulled_at"] = datetime.now(timezone.utc).isoformat()
     # Advance the resume point so the next default run is incremental:
@@ -180,37 +189,57 @@ def run_parliament(parliament_key: str, scraper_class, from_date: Optional[str] 
     }]
     write_manifest(cfg["name"], manifest)
     logger.info(f"Completed pull for {cfg['name']}")
-    return results
+    return results, dedup_stats
 
 
 def _summarise(all_results: Dict[str, Dict[str, List[Dict]]],
-               elapsed_by_parliament: Dict[str, float], total_elapsed: float):
+               elapsed_by_parliament: Dict[str, float], total_elapsed: float,
+               all_dedup_stats: Optional[Dict[str, Dict[str, Dict[str, int]]]] = None):
     """Log a test_scrape-style summary table so the run log ends with a reviewable digest."""
-    lines = ["", "=" * 90,
+    W = 100
+    lines = ["", "=" * W,
              f"RUN SUMMARY  ({total_elapsed / 60:.1f} min total)",
-             "=" * 90,
-             f"{'Parliament':<30} {'Data Type':<25} {'Records':>8}  Issues"]
-    lines.append("-" * 90)
+             "=" * W,
+             f"{'Parliament':<30} {'Data Type':<25} {'Fetched':>8} {'New':>7} {'Skipped':>8}  Issues"]
+    lines.append("-" * W)
 
-    total_records = 0
+    total_fetched = total_new = total_skipped = 0
     attention = []
     expected = []
     for parl_name, results in all_results.items():
+        dedup = (all_dedup_stats or {}).get(parl_name, {})
         for dtype, records in results.items():
-            total_records += len(records)
+            n = len(records)
+            stats = dedup.get(dtype, {})
+            n_new = stats.get("new", 0)
+            n_skipped = stats.get("skipped", 0)
+            total_fetched += n
+            total_new += n_new
+            total_skipped += n_skipped
+
+            # Determine issues
             issues = _assess_members(records) if dtype == "members" else _assess(records)
             note = KNOWN_LIMITATIONS.get((parl_name, dtype))
+
+            # 0 plenary/votes records is normal (no sessions every day) — don't alarm
+            if not records and dtype in _NORMAL_EMPTY and not note:
+                issue_str = "no sessions/divisions in date range"
+                lines.append(f"{parl_name:<30} {dtype:<25} {n:>8} {n_new:>7} {n_skipped:>8}  {issue_str}")
+                continue
+
             issue_str = " | ".join(issues) if issues else ""
             if issues and note:
                 issue_str += "  [expected]"
                 expected.append((parl_name, dtype, note))
             elif issues:
                 attention.append((parl_name, dtype, issue_str))
-            lines.append(f"{parl_name:<30} {dtype:<25} {len(records):>8}  {issue_str}")
-        lines.append(f"{'':<30} {'(elapsed)':<25} {elapsed_by_parliament.get(parl_name, 0) / 60:>7.1f}m")
-        lines.append("-" * 90)
+            lines.append(f"{parl_name:<30} {dtype:<25} {n:>8} {n_new:>7} {n_skipped:>8}  {issue_str}")
+        lines.append(
+            f"{'':<30} {'(elapsed)':<25} {elapsed_by_parliament.get(parl_name, 0) / 60:>7.1f}m"
+        )
+        lines.append("-" * W)
 
-    lines.append(f"TOTAL: {total_records:,} records")
+    lines.append(f"TOTAL: {total_fetched:,} fetched  |  {total_new:,} new  |  {total_skipped:,} skipped")
 
     if attention:
         lines.append("")
@@ -224,7 +253,7 @@ def _summarise(all_results: Dict[str, Dict[str, List[Dict]]],
         for parl_name, dtype, note in expected:
             lines.append(f"  {parl_name} / {dtype}: {note}")
 
-    lines.append("=" * 90)
+    lines.append("=" * W)
     logger.info("\n".join(lines))
 
 
@@ -238,18 +267,20 @@ def run_all(from_date: Optional[str] = None, to_date: Optional[str] = None,
 
     t0 = time.time()
     all_results: Dict[str, Dict[str, List[Dict]]] = {}
+    all_dedup_stats: Dict[str, Dict[str, Dict[str, int]]] = {}
     elapsed_by_parliament: Dict[str, float] = {}
     for key in keys:
         cfg_key, cls = SCRAPERS[key]
         parl_name = PARLIAMENTS[cfg_key]["name"]
         p0 = time.time()
-        results = run_parliament(key, cls, from_date=from_date, to_date=to_date,
-                                 dry_run=dry_run)
+        results, dedup_stats = run_parliament(key, cls, from_date=from_date, to_date=to_date,
+                                              dry_run=dry_run)
         elapsed_by_parliament[parl_name] = time.time() - p0
         if results is not None:
             all_results[parl_name] = results
+            all_dedup_stats[parl_name] = dedup_stats
 
-    _summarise(all_results, elapsed_by_parliament, time.time() - t0)
+    _summarise(all_results, elapsed_by_parliament, time.time() - t0, all_dedup_stats)
 
 
 def scheduled_job():

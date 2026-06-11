@@ -104,15 +104,15 @@ def _append_master_csv(master_path: Path, df: pd.DataFrame):
 
 
 def save_results(parliament_name: str, data_type: str, records: List[Dict],
-                 run_date: Optional[str] = None) -> Dict[str, Path]:
+                 run_date: Optional[str] = None) -> Dict:
     """
     Write records to JSON and CSV files, deduplicated against everything
     previously pulled: only records not saved by an earlier run are written.
-    Returns a dict with paths to the written files.
+    Returns a dict with paths to the written files plus 'new' and 'skipped' counts.
     """
     if not records:
         logger.info(f"No records to save for {parliament_name}/{data_type}")
-        return {}
+        return {"new": 0, "skipped": 0}
 
     run_date = run_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     parliament_slug = _slug(parliament_name)
@@ -171,7 +171,8 @@ def save_results(parliament_name: str, data_type: str, records: List[Dict],
     with open(seen_path, "a", encoding="utf-8") as f:
         f.write("".join(k + "\n" for k in new_keys))
 
-    return {"json": json_path, "csv": csv_path, "master": master_path}
+    return {"json": json_path, "csv": csv_path, "master": master_path,
+            "new": len(new_records), "skipped": skipped}
 
 
 def load_manifest(parliament_name: str) -> Dict:
