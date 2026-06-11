@@ -896,6 +896,20 @@ class ScottishParliamentScraper(BaseScraper):
         test harness's log-level filter."""
         if hasattr(self, "_or_diag_logged"):
             return
+        main_el = soup.find("main") or soup.find("article") or soup.find("body")
+        main_text_len = len(main_el.get_text(strip=True)) if main_el else 0
+        if main_text_len < 500:
+            # Empty SPA shell — a recess date with no report. Don't spend the
+            # one-shot dump here; save it for a page that actually has content
+            # our selectors fail on (that's the markup we need to see).
+            if not hasattr(self, "_or_shell_logged"):
+                self._or_shell_logged = True
+                logger.warning(
+                    f"[Scottish Parliament] OR page is an empty shell "
+                    f"(main_text_len={main_text_len}) at {full_url} — structure "
+                    f"dump deferred until a content-bearing page fails"
+                )
+            return
         self._or_diag_logged = True
         all_cls = sorted({c for el in soup.select("[class]") for c in el.get("class", [])})
         tag_counts: Dict[str, int] = {}
@@ -903,13 +917,80 @@ class ScottishParliamentScraper(BaseScraper):
             tag_counts[el.name] = tag_counts.get(el.name, 0) + 1
         common_tags = sorted(tag_counts.items(), key=lambda kv: -kv[1])[:15]
         iframes = [f.get("src", "") for f in soup.find_all("iframe")]
-        main_el = soup.find("main") or soup.find("article") or soup.find("body")
-        main_text_len = len(main_el.get_text(strip=True)) if main_el else 0
         logger.warning(
             f"[Scottish Parliament] OR structure dump ({'rendered' if rendered else 'plain HTTP'}) "
             f"{full_url}: css_classes(first 40)={all_cls[:40]} | tag_counts={common_tags} | "
             f"iframes={iframes[:5]} | main_text_len={main_text_len}"
         )
+        # The breadcrumb nav dominates the head of <main>, so a raw prefix dump
+        # is mostly noise — instead show the first few *content* paragraphs with
+        # their parent chains (that's what selector-writing actually needs).
+        paras = [p for p in (main_el.find_all("p") if main_el else [])
+                 if not p.find_parent("nav") and len(p.get_text(strip=True)) > 20][:3]
+        para_info = []
+        for p in paras:
+            parents = [
+                f"{el.name}.{'.'.join(el.get('class', []))}" if el.get("class") else el.name
+                for el in p.parents
+                if el.name not in ("html", "body", "[document]")
+            ][:4]
+            para_info.append(f"parents={parents} html={str(p)[:300]!r}")
+        logger.warning(
+            f"[Scottish Parliament] OR content paragraphs {full_url}: "
+            + (" || ".join(para_info) if para_info else f"none found — main head: {str(main_el)[:600]!r}")
+        )
+
+    def _extract_or_paragraphs(self, soup: BeautifulSoup, full_url: str, date_str: str,
+                               records: List[Dict]) -> int:
+        """Fallback for OR pages whose rendered DOM carries no semantic
+        contribution classes — the same SPA pattern as the question pages,
+        where content sits in generic basic-content blocks. Walk the
+        main-content paragraphs, treating a bold/strong prefix (or a short
+        "Name:" prefix) as the speaker and carrying the speaker forward
+        across continuation paragraphs.
+
+        Guarded by a minimum main-text length so recess-date shell pages
+        (~155 chars of nav) can never be harvested as junk records."""
+        main = soup.find("main") or soup.find("article")
+        if main is None:
+            return 0
+        for nav in main.find_all("nav"):
+            nav.decompose()
+        if len(main.get_text(strip=True)) < 2000:
+            return 0
+        before = len(records)
+        current_name = ""
+        for p in main.find_all("p"):
+            text = p.get_text(" ", strip=True)
+            if len(text) < 20:
+                continue
+            bold = p.find(["strong", "b"])
+            name = bold.get_text(strip=True) if bold else ""
+            if not name and ":" in text[:80]:
+                prefix = text.split(":", 1)[0].strip()
+                if 0 < len(prefix) <= 60 and not prefix[0].isdigit():
+                    name = prefix
+            if name:
+                current_name = name.rstrip(":").strip()
+            records.append(self._make_record(
+                data_type="plenary_speech",
+                member={"id": "", "name": current_name, "party": "",
+                        "constituency": "", "role": "MSP"},
+                date=date_str,
+                text=text,
+                title="",
+                metadata={"extraction": "paragraph-fallback"},
+                source_url=full_url,
+            ))
+        added = len(records) - before
+        if added and not hasattr(self, "_or_para_fallback_logged"):
+            self._or_para_fallback_logged = True
+            first_name = records[before]["member"]["name"]
+            logger.warning(
+                f"[Scottish Parliament] OR paragraph-fallback engaged at {full_url}: "
+                f"{added} paragraphs, first speaker={first_name!r}"
+            )
+        return added
 
     def _scrape_or_detail(self, full_url: str, date_str: str,
                           records: List[Dict], from_date: Optional[str]) -> int:
@@ -935,6 +1016,16 @@ class ScottishParliamentScraper(BaseScraper):
                 r_added = self._extract_or_contribs(rendered_soup, full_url, date_str, records)
                 if r_added:
                     detail, added = rendered_soup, r_added
+        if added == 0:
+            # Neither selector set matched — try the label-free paragraph walk
+            # on whichever DOM has the most content (prefer the rendered one).
+            for candidate in (rendered_soup, detail):
+                if candidate is None:
+                    continue
+                p_added = self._extract_or_paragraphs(candidate, full_url, date_str, records)
+                if p_added:
+                    detail, added = candidate, p_added
+                    break
 
         if not detail:
             return 0
@@ -956,7 +1047,11 @@ class ScottishParliamentScraper(BaseScraper):
         if from_date:
             params["$filter"] = f"EventDate ge datetime'{from_date}T00:00:00'"
         meetings = []
-        for entity in ["Events", "Meetings", "PlenaryMeetings", "ChamberMeetings", "SittingDays"]:
+        # NOTE: the OData "Events" entity is deliberately excluded — it exists
+        # (fields ID/Date/Title/Sponsor) but holds cross-party-group events going
+        # back to 2015, not chamber sittings. Feeding its IDs to the OR media
+        # API would issue hundreds of bogus requests.
+        for entity in ["Meetings", "PlenaryMeetings", "ChamberMeetings", "SittingDays"]:
             url = f"{_API}/{entity}"
             resp = self._get(url, params=params)
             if not resp or not resp.ok:

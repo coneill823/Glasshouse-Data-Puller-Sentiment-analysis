@@ -597,7 +597,7 @@ def test_wales(verbose: bool = False, save_dir: Optional[Path] = None) -> List[R
          "scraped from senedd.wales WordPress member listing", False),
         ("register_of_interests",
          lambda: s.fetch_register_of_interests(members),
-         "register is published as a PDF — downloaded and parsed with PyMuPDF", True),
+         "register PDF parsed with PyMuPDF; ~200 ongoing-role entries carry no inline date → date WARN expected", True),
         ("questions",
          lambda: s.fetch_questions(from_date=RECENT_30),
          f"last 30 days ({RECENT_30}→today); record.assembly.wales/Search (SSR)", True),
