@@ -1030,11 +1030,14 @@ class ScottishParliamentScraper(BaseScraper):
         if not detail:
             return 0
         if added == 0:
-            body = detail.find("body")
-            snippet = body.get_text(separator=" ", strip=True)[:300] if body else ""
-            logger.warning(f"[Scottish Parliament] 0 contribs at {full_url} — snippet: {snippet[:200]}")
-            # Dump the structure of whichever page we actually have — prefer the
-            # browser-rendered DOM since that's where JS-injected content lands.
+            # Suppress per-page noise — only log the first 3 empty-shell dates
+            # so the run log isn't flooded with 60+ identical warnings. After
+            # that, count silently; a summary is logged at the caller level.
+            self._or_empty_count = getattr(self, "_or_empty_count", 0) + 1
+            if self._or_empty_count <= 3:
+                body = detail.find("body")
+                snippet = body.get_text(separator=" ", strip=True)[:200] if body else ""
+                logger.warning(f"[Scottish Parliament] 0 contribs at {full_url} — snippet: {snippet}")
             self._diagnose_or_structure(rendered_soup or detail, full_url, rendered=bool(rendered_soup))
         return added
 
@@ -1280,11 +1283,22 @@ class ScottishParliamentScraper(BaseScraper):
             tried += 1
             if added > 0:
                 hit += 1
+        empty = getattr(self, "_or_empty_count", 0)
         if tried:
-            logger.info(
-                f"[Scottish Parliament] Date-URL probe: {tried} dates tried, "
-                f"{hit} had content, {len(records)} total records"
-            )
+            if hit == 0 and empty > 3:
+                logger.warning(
+                    f"[Scottish Parliament] Date-URL probe: {tried} dates tried, 0 had content "
+                    f"({empty} empty-shell pages, first 3 logged above) — "
+                    f"parliament.scot appears to have rebuilt its OR infrastructure for Session 7; "
+                    f"the /what-was-said-in-parliament/{'{date}'} URL pattern returns a nav-only "
+                    f"SPA shell for all probed dates including pre-election Session 6 sittings. "
+                    f"OR will become available once the new session's transcripts are published."
+                )
+            else:
+                logger.info(
+                    f"[Scottish Parliament] Date-URL probe: {tried} dates tried, "
+                    f"{hit} had content, {len(records)} total records"
+                )
 
         logger.info(f"[Scottish Parliament] {len(records)} plenary records fetched")
         return records
