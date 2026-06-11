@@ -85,8 +85,6 @@ SCRAPERS = {
 # outside the scraper's control. A 0-count for these appears in the run summary
 # as an expected limitation, not a failure needing attention.
 KNOWN_LIMITATIONS = {
-    ("NI Assembly", "register_of_interests"):
-        "register.asmx exposes no method that returns data — 0 records expected",
     ("Scottish Parliament", "plenary_business"):
         "parliament.scot rebuilt for Session 7 (Jun 2026); old Official Report date-URLs "
         "return a nav-only shell for all dates — will resolve when Session 7 OR is published",
@@ -97,6 +95,21 @@ KNOWN_LIMITATIONS = {
         "~200 ongoing-role register entries carry no inline date in the source PDF — "
         "empty date fields expected",
 }
+
+
+def _assess_members(records: List[Dict]) -> List[str]:
+    """Check completeness of raw member dicts (name/party/id fields, not _make_record shape)."""
+    if not records:
+        return ["no members returned"]
+    n = len(records)
+    issues = []
+    empty_name  = sum(1 for r in records if not str(r.get("name", "")).strip())
+    empty_party = sum(1 for r in records if not str(r.get("party", "")).strip())
+    empty_id    = sum(1 for r in records if not str(r.get("id", "")).strip())
+    if empty_name  > n // 2: issues.append(f"{empty_name}/{n} name fields empty")
+    if empty_party == n:     issues.append("ALL party fields empty")
+    if empty_id    == n:     issues.append("ALL id fields empty")
+    return issues
 
 
 def _assess(records: List[Dict]) -> List[str]:
@@ -185,7 +198,7 @@ def _summarise(all_results: Dict[str, Dict[str, List[Dict]]],
     for parl_name, results in all_results.items():
         for dtype, records in results.items():
             total_records += len(records)
-            issues = _assess(records)
+            issues = _assess_members(records) if dtype == "members" else _assess(records)
             note = KNOWN_LIMITATIONS.get((parl_name, dtype))
             issue_str = " | ".join(issues) if issues else ""
             if issues and note:
