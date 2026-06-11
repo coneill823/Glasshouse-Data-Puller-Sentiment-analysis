@@ -14,8 +14,18 @@ Usage
   python main.py                        # pull all parliaments, all history
   python main.py --parliament ni        # pull NI Assembly only
   python main.py --from 2024-01-01     # pull from a specific date
+  python main.py --from 2024-01-01 --to 2024-06-30   # pull a specific date range
   python main.py --schedule            # run monthly on the 1st of each month
   python main.py --dry-run             # show what would be pulled, don't save
+
+Incremental pulls
+-----------------
+Every record saved is hashed into data/{parliament}/{data_type}/.seen_keys.
+Re-running over an already-covered range skips records pulled before and only
+appends new ones (per-run files + a cumulative {data_type}_master.csv).
+Without --from, each run automatically resumes from where the last successful
+run started (tracked in data/{parliament}/manifest.json), so routine re-runs
+stay fast.
 """
 import argparse
 import logging
@@ -110,6 +120,7 @@ def _assess(records: List[Dict]) -> List[str]:
 
 
 def run_parliament(parliament_key: str, scraper_class, from_date: Optional[str] = None,
+                   to_date: Optional[str] = None,
                    dry_run: bool = False) -> Optional[Dict[str, List[Dict]]]:
     """Pull one parliament. Returns the results dict (data_type → records), or None on failure/skip."""
     cfg_key, _ = SCRAPERS[parliament_key]
@@ -126,7 +137,7 @@ def run_parliament(parliament_key: str, scraper_class, from_date: Optional[str] 
     run_start = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     try:
-        results = scraper.fetch_all(from_date=effective_from)
+        results = scraper.fetch_all(from_date=effective_from, to_date=to_date)
     except Exception as e:
         logger.error(f"Pull failed for {cfg['name']}: {e}", exc_info=True)
         return None
@@ -143,13 +154,15 @@ def run_parliament(parliament_key: str, scraper_class, from_date: Optional[str] 
         saved_paths[dtype] = paths
 
     manifest["last_pulled_at"] = datetime.now(timezone.utc).isoformat()
-    # Next incremental run resumes from the day this pull started, so anything
-    # published mid-run is re-fetched rather than missed. (Previously this stored
-    # the same from-date forever, so every run re-pulled the full range.)
-    manifest["last_pulled_from"] = run_start
+    # Advance the resume point so the next default run is incremental:
+    # an open-ended pull resumes from the day this one started; a bounded
+    # (--to) pull only advances to its end date, so the gap between the
+    # range end and today isn't silently skipped next time.
+    manifest["last_pulled_from"] = min(to_date, run_start) if to_date else run_start
     manifest["runs"] = manifest.get("runs", []) + [{
         "date": run_date,
         "from_date": effective_from,
+        "to_date": to_date,
         "counts": {dtype: len(records) for dtype, records in results.items()},
     }]
     write_manifest(cfg["name"], manifest)
@@ -202,8 +215,8 @@ def _summarise(all_results: Dict[str, Dict[str, List[Dict]]],
     logger.info("\n".join(lines))
 
 
-def run_all(from_date: Optional[str] = None, parliament_filter: Optional[str] = None,
-            dry_run: bool = False):
+def run_all(from_date: Optional[str] = None, to_date: Optional[str] = None,
+            parliament_filter: Optional[str] = None, dry_run: bool = False):
     keys = [parliament_filter] if parliament_filter else list(SCRAPERS.keys())
     for key in keys:
         if key not in SCRAPERS:
@@ -217,7 +230,8 @@ def run_all(from_date: Optional[str] = None, parliament_filter: Optional[str] = 
         cfg_key, cls = SCRAPERS[key]
         parl_name = PARLIAMENTS[cfg_key]["name"]
         p0 = time.time()
-        results = run_parliament(key, cls, from_date=from_date, dry_run=dry_run)
+        results = run_parliament(key, cls, from_date=from_date, to_date=to_date,
+                                 dry_run=dry_run)
         elapsed_by_parliament[parl_name] = time.time() - p0
         if results is not None:
             all_results[parl_name] = results
@@ -252,6 +266,10 @@ def main():
         help="Fetch data from this date onwards (default: all history / since last pull)",
     )
     parser.add_argument(
+        "--to", dest="to_date", metavar="YYYY-MM-DD",
+        help="Fetch data up to and including this date (default: today)",
+    )
+    parser.add_argument(
         "--schedule", action="store_true",
         help="Run in scheduler mode: pull on the 1st of every month",
     )
@@ -260,6 +278,15 @@ def main():
         help="Show what would be pulled without saving any files",
     )
     args = parser.parse_args()
+
+    for arg_name, value in [("--from", args.from_date), ("--to", args.to_date)]:
+        if value:
+            try:
+                datetime.strptime(value, "%Y-%m-%d")
+            except ValueError:
+                parser.error(f"{arg_name} must be in YYYY-MM-DD format (got {value!r})")
+    if args.from_date and args.to_date and args.to_date < args.from_date:
+        parser.error(f"--to ({args.to_date}) is before --from ({args.from_date})")
 
     run_label = "scheduled" if args.schedule else (args.parliament or "all")
     log_path = _setup_logging(run_label)
@@ -276,6 +303,7 @@ def main():
     else:
         run_all(
             from_date=args.from_date,
+            to_date=args.to_date,
             parliament_filter=args.parliament,
             dry_run=args.dry_run,
         )

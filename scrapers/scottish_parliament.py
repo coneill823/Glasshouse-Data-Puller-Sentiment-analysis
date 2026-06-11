@@ -770,7 +770,10 @@ class ScottishParliamentScraper(BaseScraper):
             f"[Scottish Parliament] Question HTML sample {full_url}: {main_html!r}"
         )
 
-    def fetch_questions(self, from_date: Optional[str] = None) -> List[Dict]:
+    def fetch_questions(self, from_date: Optional[str] = None,
+                        to_date: Optional[str] = None) -> List[Dict]:
+        # to_date is enforced by fetch_all's post-filter; the question listing
+        # has no date-range parameter to bound the fetch server-side.
         # Try every candidate listing and keep whichever yields the best result —
         # "best" meaning the most records with a member name attached, falling
         # back to raw record count. Breaking on the first path to return *any*
@@ -1046,14 +1049,20 @@ class ScottishParliamentScraper(BaseScraper):
             self._diagnose_or_structure(rendered_soup or detail, full_url, rendered=bool(rendered_soup))
         return added
 
-    def _fetch_meeting_ids(self, from_date: Optional[str] = None) -> List[Dict]:
+    def _fetch_meeting_ids(self, from_date: Optional[str] = None,
+                           to_date: Optional[str] = None) -> List[Dict]:
         """Fetch meeting IDs from the Scottish Parliament OData events endpoint.
 
         Returns list of dicts with keys: id, date, title.
         """
         params: Dict = {"$format": "json", "$orderby": "EventDate desc", "$top": 200}
+        filter_parts = []
         if from_date:
-            params["$filter"] = f"EventDate ge datetime'{from_date}T00:00:00'"
+            filter_parts.append(f"EventDate ge datetime'{from_date}T00:00:00'")
+        if to_date:
+            filter_parts.append(f"EventDate le datetime'{to_date}T23:59:59'")
+        if filter_parts:
+            params["$filter"] = " and ".join(filter_parts)
         meetings = []
         # NOTE: the OData "Events" entity is deliberately excluded — it exists
         # (fields ID/Date/Title/Sponsor) but holds cross-party-group events going
@@ -1159,7 +1168,8 @@ class ScottishParliamentScraper(BaseScraper):
             logger.warning(f"[Scottish Parliament] OR API meeting {meeting_id}: 0 contribs — snippet: {snippet}")
         return added
 
-    def fetch_plenary_business(self, from_date: Optional[str] = None) -> List[Dict]:
+    def fetch_plenary_business(self, from_date: Optional[str] = None,
+                               to_date: Optional[str] = None) -> List[Dict]:
         records: List[Dict] = []
 
         # ----------------------------------------------------------------
@@ -1167,7 +1177,7 @@ class ScottishParliamentScraper(BaseScraper):
         #    GET /api/sitecore/CustomMedia/OfficialReport?meetingId=NNNN
         #    Meeting IDs come from the data.parliament.scot OData Events entity.
         # ----------------------------------------------------------------
-        meetings = self._fetch_meeting_ids(from_date)
+        meetings = self._fetch_meeting_ids(from_date, to_date)
         if meetings:
             logger.info(f"[Scottish Parliament] Fetching OR for {len(meetings)} meetings via API...")
             hits = 0
@@ -1435,10 +1445,14 @@ class ScottishParliamentScraper(BaseScraper):
             added_total += self._scrape_motion_vote_page(ref, records, from_date)
         return added_total
 
-    def fetch_votes_on_division(self, from_date: Optional[str] = None) -> List[Dict]:
-        filters = None
+    def fetch_votes_on_division(self, from_date: Optional[str] = None,
+                                to_date: Optional[str] = None) -> List[Dict]:
+        filter_parts = []
         if from_date:
-            filters = f"DivisionDate ge datetime'{from_date}'"
+            filter_parts.append(f"DivisionDate ge datetime'{from_date}'")
+        if to_date:
+            filter_parts.append(f"DivisionDate le datetime'{to_date}T23:59:59'")
+        filters = " and ".join(filter_parts) if filter_parts else None
         rows, _ = self._odata_try([
             "Votes", "VoteResults", "DivisionVotes", "MemberVotes",
             "Divisions", "VotedFor", "VotingData", "VoteRecords",

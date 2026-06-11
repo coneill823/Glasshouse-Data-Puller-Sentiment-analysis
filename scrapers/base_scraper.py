@@ -273,28 +273,51 @@ class BaseScraper(ABC):
         pass
 
     @abstractmethod
-    def fetch_questions(self, from_date: Optional[str] = None) -> List[Dict]:
+    def fetch_questions(self, from_date: Optional[str] = None,
+                        to_date: Optional[str] = None) -> List[Dict]:
         pass
 
     @abstractmethod
-    def fetch_plenary_business(self, from_date: Optional[str] = None) -> List[Dict]:
+    def fetch_plenary_business(self, from_date: Optional[str] = None,
+                               to_date: Optional[str] = None) -> List[Dict]:
         pass
 
     @abstractmethod
-    def fetch_votes_on_division(self, from_date: Optional[str] = None) -> List[Dict]:
+    def fetch_votes_on_division(self, from_date: Optional[str] = None,
+                                to_date: Optional[str] = None) -> List[Dict]:
         pass
 
-    def fetch_all(self, from_date: Optional[str] = None) -> Dict[str, List[Dict]]:
-        logger.info(f"[{self.parliament_name}] Starting full data pull")
+    @staticmethod
+    def _filter_to_date(records: List[Dict], to_date: Optional[str]) -> List[Dict]:
+        """Drop records dated after to_date. Undated records are kept — we can't
+        tell when they're from, and dropping them would silently lose data."""
+        if not to_date:
+            return records
+        kept = [r for r in records
+                if not str(r.get("date", ""))[:10] or str(r.get("date", ""))[:10] <= to_date]
+        dropped = len(records) - len(kept)
+        if dropped:
+            logger.info(f"Filtered out {dropped} records dated after {to_date}")
+        return kept
+
+    def fetch_all(self, from_date: Optional[str] = None,
+                  to_date: Optional[str] = None) -> Dict[str, List[Dict]]:
+        range_str = f"{from_date or 'all history'} → {to_date or 'today'}"
+        logger.info(f"[{self.parliament_name}] Starting full data pull ({range_str})")
         try:
             members = self.fetch_members()
             logger.info(f"[{self.parliament_name}] {len(members)} members found")
             results = {
                 "members": members,
                 "register_of_interests": self.fetch_register_of_interests(members),
-                "questions": self.fetch_questions(from_date),
-                "plenary_business": self.fetch_plenary_business(from_date),
-                "votes_on_division": self.fetch_votes_on_division(from_date),
+                # Scrapers bound the fetch server-side where the source supports it;
+                # this post-filter guarantees the to_date bound holds everywhere else.
+                "questions": self._filter_to_date(
+                    self.fetch_questions(from_date, to_date), to_date),
+                "plenary_business": self._filter_to_date(
+                    self.fetch_plenary_business(from_date, to_date), to_date),
+                "votes_on_division": self._filter_to_date(
+                    self.fetch_votes_on_division(from_date, to_date), to_date),
             }
             totals = {k: len(v) for k, v in results.items()}
             logger.info(f"[{self.parliament_name}] Pull complete: {totals}")

@@ -1140,7 +1140,8 @@ class WelshParliamentScraper(BaseScraper):
                 return candidate
         return ""
 
-    def _fetch_questions_order_paper(self, from_date: Optional[str] = None) -> List[Dict]:
+    def _fetch_questions_order_paper(self, from_date: Optional[str] = None,
+                                     to_date: Optional[str] = None) -> List[Dict]:
         """Fetch written questions from the record.senedd.wales order paper pages.
 
         URL pattern: https://record.senedd.wales/OrderPaper/WrittenQuestions/DD-MM-YYYY/
@@ -1151,7 +1152,7 @@ class WelshParliamentScraper(BaseScraper):
         """
         records = []
         from_dt = date.fromisoformat(from_date) if from_date else date(2020, 1, 1)
-        today = date.today()
+        today = date.fromisoformat(to_date) if to_date else date.today()
         seen_ids: set = set()
 
         current = from_dt
@@ -1353,7 +1354,8 @@ class WelshParliamentScraper(BaseScraper):
         logger.info(f"[Welsh Parliament] Order paper questions: {len(records)} records, {named} with member names")
         return records
 
-    def fetch_questions(self, from_date: Optional[str] = None) -> List[Dict]:
+    def fetch_questions(self, from_date: Optional[str] = None,
+                        to_date: Optional[str] = None) -> List[Dict]:
         # 1. Search page (confirmed SSR — returns question cards with member names)
         records = self._fetch_questions_search(from_date)
         if records:
@@ -1399,7 +1401,7 @@ class WelshParliamentScraper(BaseScraper):
                 return records
 
         # 2. Order Paper date-enumeration approach (confirmed SSR endpoint)
-        records = self._fetch_questions_order_paper(from_date)
+        records = self._fetch_questions_order_paper(from_date, to_date)
         if records:
             logger.info(f"[Welsh Parliament] {len(records)} question records fetched via order paper")
             return records
@@ -1522,12 +1524,15 @@ class WelshParliamentScraper(BaseScraper):
         r"[Pp]lenary/\d|[Ss]ession/\d|[Ss]itting/\d|[Mm]eeting/\d",
     )
 
-    def fetch_plenary_business(self, from_date: Optional[str] = None) -> List[Dict]:
+    def fetch_plenary_business(self, from_date: Optional[str] = None,
+                               to_date: Optional[str] = None) -> List[Dict]:
         # 1. Try REST API endpoints (SPAs load data from APIs, not HTML)
         for api_url in self._PLENARY_API_CANDIDATES:
             params = {}
             if from_date:
                 params["startDate"] = from_date
+            if to_date:
+                params["endDate"] = to_date
             data = self._api_get(api_url, params=params if params else None)
             if not data:
                 continue
@@ -1727,7 +1732,8 @@ class WelshParliamentScraper(BaseScraper):
     # Votes on division — Record of Proceedings
     # ------------------------------------------------------------------
 
-    def _fetch_meeting_ids_wales(self, from_date: Optional[str] = None) -> List[Dict]:
+    def _fetch_meeting_ids_wales(self, from_date: Optional[str] = None,
+                                 to_date: Optional[str] = None) -> List[Dict]:
         """Fetch plenary meeting IDs needed for the XML transcript export.
 
         All /en/plenary/* paths on record.senedd.wales redirect to an error page.
@@ -1847,7 +1853,7 @@ class WelshParliamentScraper(BaseScraper):
         # URL: record.senedd.wales/OrderPaper/Plenary/DD-MM-YYYY/
         logger.info("[Welsh Parliament] Trying order-paper plenary pages for meeting IDs…")
         from_dt_plenary = date.fromisoformat(from_date) if from_date else date(2024, 1, 1)
-        today = date.today()
+        today = date.fromisoformat(to_date) if to_date else date.today()
         current = from_dt_plenary
         consec_empty = 0
         while current <= today and consec_empty < 60 and len(meetings) < 200:
@@ -2140,12 +2146,13 @@ class WelshParliamentScraper(BaseScraper):
         logger.info(f"[Welsh Parliament] Search votes: {len(records)} records")
         return records
 
-    def fetch_votes_on_division(self, from_date: Optional[str] = None) -> List[Dict]:
+    def fetch_votes_on_division(self, from_date: Optional[str] = None,
+                                to_date: Optional[str] = None) -> List[Dict]:
         records: List[Dict] = []
 
         # 1. Try XML Export for each meeting that has divisions.
         #    Meeting IDs come from scanning senedd.wales plenary session pages.
-        meeting_ids = self._fetch_meeting_ids_wales(from_date)
+        meeting_ids = self._fetch_meeting_ids_wales(from_date, to_date)
         if meeting_ids:
             logger.info(f"[Welsh Parliament] Fetching votes via XML export for {len(meeting_ids)} meetings...")
             hits = 0

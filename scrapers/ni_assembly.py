@@ -63,11 +63,11 @@ _AIMS = "https://aims.niassembly.gov.uk"
 _HISTORY_START = date(2007, 1, 1)  # AIMS data begins ~2007
 
 
-def _date_chunks(from_date: Optional[str] = None,
+def _date_chunks(from_date: Optional[str] = None, to_date: Optional[str] = None,
                  chunk_months: int = 6) -> Generator[Tuple[str, str], None, None]:
-    """Yield (start, end) pairs in ISO YYYY-MM-DD format covering from_date to today."""
+    """Yield (start, end) pairs in ISO YYYY-MM-DD format covering from_date to to_date (or today)."""
     start = datetime.strptime(from_date, "%Y-%m-%d").date() if from_date else _HISTORY_START
-    end = date.today()
+    end = datetime.strptime(to_date, "%Y-%m-%d").date() if to_date else date.today()
     current = start
     delta = timedelta(days=chunk_months * 30)
     while current < end:
@@ -515,15 +515,17 @@ class NIAssemblyScraper(BaseScraper):
     # Questions (oral + written)
     # ------------------------------------------------------------------
 
-    def fetch_questions(self, from_date: Optional[str] = None) -> List[Dict]:
-        records = self._fetch_questions_asmx(from_date)
+    def fetch_questions(self, from_date: Optional[str] = None,
+                        to_date: Optional[str] = None) -> List[Dict]:
+        records = self._fetch_questions_asmx(from_date, to_date)
         if not records:
             logger.info("[NI Assembly] ASMX questions returned 0 — trying AIMS portal")
             records = self._fetch_questions_aims(from_date)
         logger.info(f"[NI Assembly] {len(records)} question records fetched")
         return records
 
-    def _fetch_questions_asmx(self, from_date: Optional[str] = None) -> List[Dict]:
+    def _fetch_questions_asmx(self, from_date: Optional[str] = None,
+                              to_date: Optional[str] = None) -> List[Dict]:
         # Skip SOAP (consistently 500 for date params) — use HTTP GET directly.
         records = []
         endpoints = {
@@ -531,7 +533,7 @@ class NIAssemblyScraper(BaseScraper):
             "written": "GetQuestionsForWrittenAnswer_TabledInRange_JSON",
         }
         for q_type, method in endpoints.items():
-            chunks = list(_date_chunks(from_date))
+            chunks = list(_date_chunks(from_date, to_date))
             for chunk_idx, (start, end) in enumerate(chunks):
                 if chunk_idx % 5 == 0:
                     logger.info(f"[NI Assembly] Questions ({q_type}): chunk {chunk_idx + 1}/{len(chunks)} ({start} → {end}), {len(records)} records so far")
@@ -685,15 +687,17 @@ class NIAssemblyScraper(BaseScraper):
     # Plenary business (Official Report / Hansard)
     # ------------------------------------------------------------------
 
-    def fetch_plenary_business(self, from_date: Optional[str] = None) -> List[Dict]:
-        records = self._fetch_plenary_asmx(from_date)
+    def fetch_plenary_business(self, from_date: Optional[str] = None,
+                               to_date: Optional[str] = None) -> List[Dict]:
+        records = self._fetch_plenary_asmx(from_date, to_date)
         if not records:
             logger.info("[NI Assembly] ASMX plenary returned 0 — trying AIMS portal")
             records = self._fetch_plenary_aims(from_date)
         logger.info(f"[NI Assembly] {len(records)} plenary records fetched")
         return records
 
-    def _fetch_plenary_asmx(self, from_date: Optional[str] = None) -> List[Dict]:
+    def _fetch_plenary_asmx(self, from_date: Optional[str] = None,
+                            to_date: Optional[str] = None) -> List[Dict]:
         # Discover actual method names from the ASMX service listing page,
         # then try known candidates and any "report" methods we find.
         known = ["GetAllHansardReports_JSON", "GetHansardReports_JSON",
@@ -714,13 +718,15 @@ class NIAssemblyScraper(BaseScraper):
         if not reports:
             return []
 
-        if from_date:
-            cutoff = datetime.strptime(from_date, "%Y-%m-%d").date()
+        if from_date or to_date:
+            cutoff = datetime.strptime(from_date, "%Y-%m-%d").date() if from_date else None
+            upper = datetime.strptime(to_date, "%Y-%m-%d").date() if to_date else None
             filtered = []
             for r in reports:
                 r_date_str = r.get("PlenaryDate", r.get("Date", ""))
                 try:
-                    if datetime.strptime(r_date_str[:10], "%Y-%m-%d").date() >= cutoff:
+                    r_date = datetime.strptime(r_date_str[:10], "%Y-%m-%d").date()
+                    if (cutoff is None or r_date >= cutoff) and (upper is None or r_date <= upper):
                         filtered.append(r)
                 except ValueError:
                     filtered.append(r)
@@ -888,8 +894,9 @@ class NIAssemblyScraper(BaseScraper):
     # Votes on division
     # ------------------------------------------------------------------
 
-    def fetch_votes_on_division(self, from_date: Optional[str] = None) -> List[Dict]:
-        records = self._fetch_votes_asmx(from_date)
+    def fetch_votes_on_division(self, from_date: Optional[str] = None,
+                                to_date: Optional[str] = None) -> List[Dict]:
+        records = self._fetch_votes_asmx(from_date, to_date)
         if not records:
             logger.info("[NI Assembly] ASMX votes returned 0 — trying AIMS portal")
             records = self._fetch_votes_aims(from_date)
@@ -934,7 +941,8 @@ class NIAssemblyScraper(BaseScraper):
             ))
         return records
 
-    def _fetch_votes_asmx(self, from_date: Optional[str] = None) -> List[Dict]:
+    def _fetch_votes_asmx(self, from_date: Optional[str] = None,
+                          to_date: Optional[str] = None) -> List[Dict]:
         # Skip SOAP (consistently 500 for date params) — use HTTP GET directly.
         # Discover available plenary methods so we can try per-division endpoints
         # when the bulk GetVotesOnDivision_JSON returns empty MemberVoting lists.
@@ -958,7 +966,7 @@ class NIAssemblyScraper(BaseScraper):
              and m not in ("GetVotesOnDivision_JSON", "GetDivisionMemberVoting_JSON")]
 
         records = []
-        for start, end in _date_chunks(from_date):
+        for start, end in _date_chunks(from_date, to_date):
             url = f"{_BASE}/plenary.asmx/GetVotesOnDivision_JSON"
             resp = self._get(url, params={
                 "startDate": f"{start}T00:00:00",

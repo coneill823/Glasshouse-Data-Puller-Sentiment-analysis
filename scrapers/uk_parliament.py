@@ -137,24 +137,25 @@ class UKParliamentScraper(BaseScraper):
     # Questions (written) — new API domain
     # ------------------------------------------------------------------
 
-    def fetch_questions(self, from_date: Optional[str] = None) -> List[Dict]:
+    def fetch_questions(self, from_date: Optional[str] = None,
+                        to_date: Optional[str] = None) -> List[Dict]:
         if not self._member_cache:
             self.fetch_members()
         # questions-statements-api hard-caps at page 200 (offset 20,000) with HTTP 500.
         # Chunk by year so each chunk's offset pagination stays well below that limit.
         url = f"{_QUESTIONS}/writtenquestions/questions"
-        today = _date.today().isoformat()
+        today = to_date or _date.today().isoformat()
 
         if from_date:
             # Incremental pull — single range, unlikely to exceed the per-chunk cap
             chunks = [(from_date, today)]
         else:
-            # Full pull — quarterly from 2015 to present.
+            # Full pull — quarterly from 2015 to the range end ("today" above).
             # Year-level chunks exceeded the 20K/page-200 hard cap for high-volume years
             # (2017, 2018, 2019, 2021, 2024 each had 25K–32K questions per year).
             # Quarterly chunks keep each chunk under ~10K, safely below the cap.
             start_year = 2015
-            current_year = _date.today().year
+            current_year = int(today[:4])
             chunks = []
             quarter_starts = ["01-01", "04-01", "07-01", "10-01"]
             quarter_ends   = ["03-31", "06-30", "09-30", "12-31"]
@@ -246,7 +247,8 @@ class UKParliamentScraper(BaseScraper):
     # Plenary business (Written Statements via Hansard API)
     # ------------------------------------------------------------------
 
-    def fetch_plenary_business(self, from_date: Optional[str] = None) -> List[Dict]:
+    def fetch_plenary_business(self, from_date: Optional[str] = None,
+                               to_date: Optional[str] = None) -> List[Dict]:
         if not self._member_cache:
             self.fetch_members()
         records = []
@@ -263,6 +265,8 @@ class UKParliamentScraper(BaseScraper):
             params: Dict = {"take": 100, "skip": 0}
             if from_date:
                 params["startDate"] = from_date
+            if to_date:
+                params["endDate"] = to_date
             skip = 0
             batch_found = False
             while True:
@@ -342,12 +346,15 @@ class UKParliamentScraper(BaseScraper):
     # Votes on division
     # ------------------------------------------------------------------
 
-    def fetch_votes_on_division(self, from_date: Optional[str] = None) -> List[Dict]:
+    def fetch_votes_on_division(self, from_date: Optional[str] = None,
+                                to_date: Optional[str] = None) -> List[Dict]:
         # Step 1: get the list of divisions
         div_url = f"{_VOTES}/divisions.json/search"
         params: Dict = {"take": 25, "skip": 0}
         if from_date:
             params["startDate"] = from_date
+        if to_date:
+            params["endDate"] = to_date
 
         divisions = []
         skip = 0
