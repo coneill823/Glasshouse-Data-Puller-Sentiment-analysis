@@ -22,7 +22,8 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
 from .base_scraper import BaseScraper
-from config import PARLIAMENTS, MAX_QUESTION_DETAIL_PAGES, MAX_PLENARY_SESSION_PAGES
+from config import (PARLIAMENTS, MAX_QUESTION_DETAIL_PAGES,
+                    MAX_PLENARY_SESSION_PAGES, REQUEST_TIMEOUT)
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,19 @@ _SENEDD_PLENARY_PATHS = [
     "/senedd-business/chamber/",
     "/en/senedd-business/chamber/",
 ]
+
+# Committee filter IDs on the record.senedd.wales/XMLExport form (confirmed 2026-06):
+#   0 = All, 908 = Plenary, 909 = Business Committee.
+# Filtering to 908 enumerates exactly the plenary meetings whose votes we want.
+_PLENARY_COMMITTEE_ID = "908"
+
+# Per-member result token in the Senedd Votes export -> our normalised direction.
+_WALES_VOTE_DIR = {
+    "For": "aye",
+    "Against": "no",
+    "Abstain": "abstain",
+    "DidNotVote": "no_vote",
+}
 
 
 class WelshParliamentScraper(BaseScraper):
@@ -1734,244 +1748,107 @@ class WelshParliamentScraper(BaseScraper):
 
     def _fetch_meeting_ids_wales(self, from_date: Optional[str] = None,
                                  to_date: Optional[str] = None) -> List[Dict]:
-        """Fetch plenary meeting IDs needed for the XML transcript export.
+        """Discover plenary meeting IDs from the record.senedd.wales XMLExport form.
 
-        All /en/plenary/* paths on record.senedd.wales redirect to an error page.
-        Instead we scan senedd.wales/senedd-business/plenary/ and its sub-pages
-        (the same WordPress pages used by fetch_plenary_business) looking for links
-        to record.senedd.wales/Plenary/{meetingId} or record.assembly.wales/Plenary/{id}.
+        The export UI (record.senedd.wales/XMLExport) filters meetings by committee
+        and date range and lists each matching meeting with an
+        XMLExport/Download?meetingID=N link.  SelectedCommitteeID=908 is Plenary, so
+        one filtered request enumerates exactly the plenary meetings whose divisions
+        we need — far cheaper and more reliable than scanning the (sparse, irregular)
+        meeting-ID space.  Returns [{"id": str, "date": str}] newest-first.
         """
-        meetings: List[Dict] = []
-        seen: set = set()
+        start = from_date or "2021-05-06"   # start of the 6th Senedd
+        end = to_date or date.today().isoformat()
 
-        # Links to the Record of Proceedings for a specific plenary session look like:
-        #   https://record.senedd.wales/Plenary/7622/
-        #   https://record.assembly.wales/Plenary/7622
-        #   https://record.senedd.wales/en/Plenary/Meeting/?meetingId=7622
-        _MID_RE = re.compile(
-            r"record\.(?:senedd|assembly)\.wales(?:/[a-z]{2})?/[Pp]lenary/(\d+)"
-            r"|[Mm]eeting[Ii][Dd]=(\d+)",
-            re.I,
-        )
+        def _ddmmyyyy(iso: str) -> str:
+            return f"{iso[8:10]}/{iso[5:7]}/{iso[0:4]}"
 
-        def _parse_date(text: str) -> str:
-            dm = re.search(r"\d{4}-\d{2}-\d{2}", text)
-            if dm:
-                return dm.group(0)
-            dm2 = re.search(r"(\d{1,2})[/ ](\d{1,2})[/ ](\d{4})", text)
-            if dm2:
-                try:
-                    from datetime import datetime as _dt
-                    return _dt.strptime(dm2.group(0), "%d/%m/%Y").strftime("%Y-%m-%d")
-                except Exception:
-                    pass
-            dm3 = re.search(r"(\d{1,2})\s+(January|February|March|April|May|June|July|August|"
-                            r"September|October|November|December)\s+(\d{4})", text, re.I)
-            if dm3:
-                try:
-                    from datetime import datetime as _dt
-                    return _dt.strptime(dm3.group(0), "%d %B %Y").strftime("%Y-%m-%d")
-                except Exception:
-                    pass
-            return ""
+        params = {
+            "SelectedCommitteeID": _PLENARY_COMMITTEE_ID,
+            "Start": _ddmmyyyy(start),
+            "End": _ddmmyyyy(end),
+            "submittingButton": "",
+        }
+        url = f"{_RECORD}/XMLExport"
 
-        def _add(href: str, context: str) -> None:
-            m = _MID_RE.search(href)
-            if not m:
-                return
-            mid = m.group(1) or m.group(2)
-            if not mid or mid in seen:
-                return
-            m_date = _parse_date(context)
-            if from_date and m_date and m_date[:10] < from_date:
-                return
-            seen.add(mid)
-            meetings.append({"id": mid, "date": m_date})
+        # The filter form is GET-able (shareable URL); fall back to POST if GET
+        # returns only the empty form with no meeting links.
+        soup = self._html_get(url, params=params)
+        ids = self._extract_meeting_ids(soup)
+        if not ids:
+            soup = self._form_post(url, params)
+            ids = self._extract_meeting_ids(soup)
 
-        # Scan the senedd.wales plenary pages — same approach as fetch_plenary_business
-        for plenary_path in _SENEDD_PLENARY_PATHS:
-            plenary_url = f"{_BASE}{plenary_path}"
-            soup = self._html_get(plenary_url)
-            if not soup:
-                continue
-
-            all_hrefs = [a.get("href", "") for a in soup.select("a[href]") if a.get("href")]
-
-            # Collect sub-pages of /senedd-business/plenary/ (exclude nav-only pages)
-            sub_hrefs = [
-                h for h in all_hrefs
-                if "senedd-business/plenary/" in h
-                and h not in (plenary_path, plenary_url, "/senedd-business/plenary/")
-                and not any(x in h for x in ("/what-is-plenary", "/about-plenary", "#"))
-            ]
-
-            pages_to_scan = [(plenary_url, soup)]
-            for sub_href in sub_hrefs[:20]:
-                sub_url = sub_href if sub_href.startswith("http") else f"{_BASE}{sub_href}"
-                sub_soup = self._html_get(sub_url)
-                if sub_soup:
-                    pages_to_scan.append((sub_url, sub_soup))
-                    # Follow one more level: individual session pages linked from sub-pages
-                    for a2 in sub_soup.select("a[href]"):
-                        h2 = a2.get("href", "")
-                        if not h2:
-                            continue
-                        # Session pages: date-based like /senedd-business/plenary/2026-03-15/
-                        if re.search(r"senedd-business/plenary/\d{4}-\d{2}", h2):
-                            sess_url = h2 if h2.startswith("http") else f"{_BASE}{h2}"
-                            sess_soup = self._html_get(sess_url)
-                            if sess_soup:
-                                pages_to_scan.append((sess_url, sess_soup))
-
-            # Scan all collected pages for record.senedd.wales/Plenary/{id} links
-            for page_url, page_soup in pages_to_scan:
-                for a in page_soup.select("a[href]"):
-                    href = a.get("href", "")
-                    if not href:
-                        continue
-                    if not _MID_RE.search(href):
-                        continue
-                    row = (a.find_parent("tr") or a.find_parent("li")
-                           or a.find_parent("article") or a.find_parent("div"))
-                    context = (row.get_text(separator=" ", strip=True)
-                               if row else a.get_text(strip=True))
-                    _add(href, context)
-
-            if meetings:
-                logger.info(f"[Welsh Parliament] {len(meetings)} meeting IDs from senedd.wales plenary pages")
-                dated = [x for x in meetings if x["date"]][:3]
-                undated = [x for x in meetings if not x["date"]][:3]
-                logger.warning(f"[Welsh Parliament] Meeting IDs sample dated={dated} undated={undated}")
-                return meetings
-            else:
-                logger.warning(
-                    f"[Welsh Parliament] No record.senedd.wales Plenary links found on {plenary_url} "
-                    f"(checked {len(pages_to_scan)} pages) — session pages may not link to Record"
-                )
-
-        # Fallback A: order-paper plenary listing pages (same SSR pattern as written questions)
-        # URL: record.senedd.wales/OrderPaper/Plenary/DD-MM-YYYY/
-        logger.info("[Welsh Parliament] Trying order-paper plenary pages for meeting IDs…")
-        from_dt_plenary = date.fromisoformat(from_date) if from_date else date(2024, 1, 1)
-        today = date.fromisoformat(to_date) if to_date else date.today()
-        current = from_dt_plenary
-        consec_empty = 0
-        while current <= today and consec_empty < 60 and len(meetings) < 200:
-            day_str = current.strftime("%d-%m-%Y")
-            op_url = f"{_RECORD}/OrderPaper/Plenary/{day_str}/"
-            op_soup = self._html_get(op_url)
-            current += timedelta(days=1)
-            if not op_soup:
-                consec_empty += 1
-                continue
-            op_text = op_soup.get_text(separator=" ", strip=True)
-            if len(op_text) < 200:
-                consec_empty += 1
-                continue
-            consec_empty = 0
-            for a in op_soup.select("a[href]"):
-                href = a.get("href", "")
-                if not href:
-                    continue
-                _add(href, a.get_text(strip=True) + " " + day_str)
-            if not hasattr(self, "_op_plenary_logged"):
-                self._op_plenary_logged = True
-                logger.warning(
-                    f"[Welsh Parliament] Order-paper plenary {op_url}: {len(op_text)} chars, "
-                    f"links={[a.get('href','') for a in op_soup.select('a[href]')][:8]}"
-                )
+        meetings = [{"id": mid, "date": ""} for mid in ids]
         if meetings:
-            logger.info(f"[Welsh Parliament] {len(meetings)} meeting IDs from order-paper plenary pages")
-            return meetings
-
-        # Fallback B: sequential XML-export probe.
-        # Plenary meeting IDs are integers that increment with each sitting.  We
-        # don't know the current range, so FIRST run a small diagnostic across both
-        # domains + a couple of sample IDs to reveal exactly what XMLExport returns
-        # (status, content-type, redirect target, body).  The next run's log tells us
-        # the real endpoint/range so we can target it precisely.
-        logger.info("[Welsh Parliament] Probing meeting IDs via XML export…")
-
-        def _try_export(host: str, mid: int):
-            export_url = f"{host}/XMLExport/Download"
-            saved_h = dict(self.session.headers)
-            self.session.headers.update({
-                "User-Agent": _BROWSER_UA,
-                "Accept": "application/xml,text/xml,*/*;q=0.8",
-            })
-            r = self._get(export_url, params={"meetingID": str(mid),
-                                              "xmlDownloadType": "EnglishTranscript"}, timeout=20)
-            self.session.headers.clear()
-            self.session.headers.update(saved_h)
-            return export_url, r
-
-        # Diagnostics across several runs (06-2026) confirmed the XMLExport endpoint
-        # only serves up to ~meetingID 6650, and every reachable ID in that band is a
-        # 5th-Senedd COMMITTEE meeting (Assembly=5) with no plenary <Division> elements
-        # — and some now return empty bodies.  6th Senedd (2021-present) plenary
-        # divisions are simply not exposed here.  Keep a tightly-bounded probe so the
-        # path degrades to a fast 0 instead of burning minutes confirming the dead end.
-        probe_start = 6450
-        probe_end = 6650
-        consecutive_miss = 0
-        attempts = 0
-        primary_host = _RECORD
-        for mid in range(probe_end, probe_start - 1, -1):  # newest first
-            if consecutive_miss > 15 or attempts > 50:
-                break
-            attempts += 1
-            _, resp = _try_export(primary_host, mid)
-            # Fast miss: redirect to an error page or HTML shell instead of XML.
-            if resp is not None and ("/Error" in resp.url
-                                     or "html" in resp.headers.get("Content-Type", "")
-                                     or resp.text.strip()[:5].lower().startswith("<!doc")):
-                consecutive_miss += 1
-                continue
-            if not resp or not resp.ok:
-                consecutive_miss += 1
-                continue
-            ct = resp.headers.get("Content-Type", "")
-            if "html" in ct or resp.text.strip()[:5].lower().startswith("<!doc"):
-                consecutive_miss += 1
-                continue
-            # Got XML — extract date from content if possible
-            meeting_date = ""
-            dm = re.search(r"<(?:SittingDate|MeetingDate|Date|PlnryDate)>([^<]+)<", resp.text)
-            if dm:
-                meeting_date = dm.group(1).strip()[:10]
-            if str(mid) not in seen:
-                if from_date and meeting_date and meeting_date[:10] < from_date:
-                    consecutive_miss = 0
-                    continue
-                seen.add(str(mid))
-                meetings.append({"id": str(mid), "date": meeting_date})
-                consecutive_miss = 0
-                logger.info(f"[Welsh Parliament] Found meeting ID {mid} date={meeting_date!r} via XML probe")
-        if meetings:
-            logger.info(f"[Welsh Parliament] {len(meetings)} meeting IDs from sequential XML probe")
-            return meetings
-
-        logger.warning("[Welsh Parliament] Could not find any meeting IDs — XML export unavailable")
+            logger.info(f"[Welsh Parliament] {len(meetings)} plenary meeting IDs from "
+                        f"XMLExport filter ({start} -> {end})")
+        else:
+            logger.warning(f"[Welsh Parliament] XMLExport filter returned no plenary "
+                           f"meeting IDs for {start} -> {end} (the 6th Senedd wound down "
+                           f"before the May 2026 election, so recent windows can be empty)")
         return meetings
 
-    def _fetch_votes_xml_export(self, meeting_id: str, meeting_date: str,
-                                 from_date: Optional[str], records: List[Dict]) -> int:
-        """Fetch votes from the XML transcript export for a given meeting.
+    @staticmethod
+    def _extract_meeting_ids(soup) -> List[Dict]:
+        """Pull meeting IDs out of an XMLExport listing (newest-first, deduped)."""
+        if not soup:
+            return []
+        html = str(soup)
+        ids: List[str] = []
+        seen: set = set()
+        # Listing rows link to XMLExport/Download?meetingID=N (and sometimes /Plenary/N)
+        for pat in (r"meetingID=(\d+)", r"/[Pp]lenary/(\d+)"):
+            for m in re.finditer(pat, html, re.I):
+                mid = m.group(1)
+                if mid not in seen:
+                    seen.add(mid)
+                    ids.append(mid)
+        return sorted(ids, key=lambda x: -int(x))
 
-        URL: https://record.senedd.wales/XMLExport/Download?meetingID=NNNN&xmlDownloadType=EnglishTranscript
-        The XML contains <Division> elements with <MotionText> and member vote lists.
-        Returns number of records added.
+    def _form_post(self, url: str, data: Dict):
+        """POST a form with browser headers; return BeautifulSoup or None."""
+        saved = dict(self.session.headers)
+        self.session.headers.update({
+            "User-Agent": _BROWSER_UA,
+            "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+            "Accept-Language": "en-GB,en;q=0.9",
+            "Content-Type": "application/x-www-form-urlencoded",
+        })
+        resp = None
+        try:
+            resp = self.session.post(url, data=data, timeout=REQUEST_TIMEOUT)
+        except Exception as e:
+            logger.warning(f"[Welsh Parliament] XMLExport POST failed: {type(e).__name__}: {e}")
+        finally:
+            self.session.headers.clear()
+            self.session.headers.update(saved)
+        if not resp or not resp.ok:
+            return None
+        return BeautifulSoup(resp.text, "lxml")
+
+    def _fetch_votes_xml_export(self, meeting_id: str, meeting_date: str,
+                                 from_date: Optional[str], records: List[Dict],
+                                 to_date: Optional[str] = None) -> int:
+        """Fetch and parse a meeting's division votes from the Senedd Votes export.
+
+        URL: record.senedd.wales/XMLExport/Download?meetingID=N&xmlDownloadType=Votes
+        The XML is a flat <dataroot> of <XML_Plenary-SixthSenedd_Vote> rows, one per
+        member per division, each carrying the motion text (Vote_Name_English), the
+        member's result (Results_Result: For/Against/Abstain/DidNotVote), the running
+        totals, and the overall outcome (Vote_Result_English).  Returns the number of
+        vote records added.
+
+        (The older EnglishTranscript export carries the spoken proceedings, not the
+        divisions — votes are exposed only via xmlDownloadType=Votes.)
         """
-        if from_date and meeting_date and len(meeting_date) >= 10 and meeting_date[:10] < from_date:
-            return 0
         url = f"{_RECORD}/XMLExport/Download"
         saved = dict(self.session.headers)
         self.session.headers.update({
             "User-Agent": _BROWSER_UA,
             "Accept": "application/xml,text/xml,*/*;q=0.8",
-            "Referer": f"{_RECORD}/en/plenary/divisions/",
         })
-        resp = self._get(url, params={"meetingID": meeting_id, "xmlDownloadType": "EnglishTranscript"},
+        resp = self._get(url, params={"meetingID": meeting_id, "xmlDownloadType": "Votes"},
                          timeout=60)
         self.session.headers.clear()
         self.session.headers.update(saved)
@@ -1979,75 +1856,60 @@ class WelshParliamentScraper(BaseScraper):
             return 0
 
         ct = resp.headers.get("Content-Type", "")
-        if "html" in ct and "<html" in resp.text.lower()[:200]:
-            logger.warning(f"[Welsh Parliament] XML export meeting {meeting_id}: got HTML shell, not XML")
+        body = resp.text
+        if "xml" not in ct and not body.lstrip()[:20].lower().startswith("<?xml"):
+            # Error page or empty body -> this meeting has no votes export
             return 0
-
         try:
             root = ET.fromstring(resp.content)
         except ET.ParseError as e:
-            logger.warning(f"[Welsh Parliament] XML parse error for meeting {meeting_id}: {e}")
+            logger.warning(f"[Welsh Parliament] Votes XML parse error for meeting {meeting_id}: {e}")
             return 0
 
-        # Strip namespace prefixes to simplify element access
+        # Strip namespace prefixes so element lookups are simple
         for el in root.iter():
             if "}" in el.tag:
                 el.tag = el.tag.split("}", 1)[1]
 
-        # Extract date from XML — try multiple element names
-        if not meeting_date:
-            for date_tag in ("SittingDate", "MeetingDate", "Date", "PlnryDate",
-                             "PlenaryDate", "SessionDate", "DateOfSitting"):
-                date_el = root.find(f".//{date_tag}")
-                if date_el is not None and date_el.text:
-                    meeting_date = date_el.text.strip()[:10]
-                    break
-        if not meeting_date and not hasattr(self, "_xml_date_logged"):
-            self._xml_date_logged = True
-            all_tags = list({el.tag for el in root.iter()})
-            logger.warning(f"[Welsh Parliament] XML meeting {meeting_id}: could not find date. Tags present: {all_tags[:20]}")
+        def _txt(parent, tag: str) -> str:
+            e = parent.find(tag)
+            return e.text.strip() if e is not None and e.text else ""
 
         before = len(records)
-        for div_el in root.iter("Division"):
-            div_title_el = div_el.find("MotionText") or div_el.find("DivisionSubject") or div_el.find("Title")
-            div_title = div_title_el.text.strip() if div_title_el is not None and div_title_el.text else ""
-            div_date_el = div_el.find("DivisionDate") or div_el.find("Date")
-            div_date = (div_date_el.text[:10] if div_date_el is not None and div_date_el.text else meeting_date)
-
-            for vote_group, direction in [
-                ("AyeVoters", "aye"), ("ForVoters", "aye"),
-                ("NoeVoters", "no"), ("AgainstVoters", "no"), ("NoVoters", "no"),
-                ("AbstainVoters", "abstain"), ("AbstentionVoters", "abstain"),
-            ]:
-                group_el = div_el.find(vote_group)
-                if group_el is None:
-                    continue
-                for member_el in group_el.iter("Member"):
-                    name_el = member_el.find("Name") or member_el.find("MemberName")
-                    name = name_el.text.strip() if name_el is not None and name_el.text else member_el.text or ""
-                    name = name.strip()
-                    if not name:
-                        continue
-                    mid_el = member_el.find("MemberId") or member_el.find("PersonId")
-                    member_id = mid_el.text.strip() if mid_el is not None and mid_el.text else ""
-                    records.append(self._make_record(
-                        data_type="vote",
-                        member={"id": member_id, "name": name, "party": "", "constituency": "", "role": "MS"},
-                        date=div_date,
-                        text=f"Voted {direction} on: {div_title}",
-                        title=div_title,
-                        metadata={"vote_direction": direction, "division_result": "",
-                                  "meeting_id": meeting_id},
-                        source_url=f"{url}?meetingID={meeting_id}",
-                    ))
-
+        for row in root.iter("XML_Plenary-SixthSenedd_Vote"):
+            name = _txt(row, "Member_name_English")
+            if not name:
+                continue
+            v_date = (_txt(row, "MeetingDate") or meeting_date or "")[:10]
+            if from_date and v_date and v_date < from_date:
+                continue
+            if to_date and v_date and v_date > to_date:
+                continue
+            raw_dir = _txt(row, "Results_Result")
+            direction = _WALES_VOTE_DIR.get(raw_dir, (raw_dir or "").lower())
+            motion = _txt(row, "Vote_Name_English") or _txt(row, "Vote_Name")
+            records.append(self._make_record(
+                data_type="vote",
+                member={"id": _txt(row, "Member_Id"), "name": name, "party": "",
+                        "constituency": "", "role": "MS"},
+                date=v_date,
+                text=f"Voted {direction} on: {motion}",
+                title=motion,
+                metadata={
+                    "vote_direction": direction,
+                    "division_result": _txt(row, "Vote_Result_English"),
+                    "meeting_id": meeting_id,
+                    "division_id": _txt(row, "Contribution_ID"),
+                    "ayes": _txt(row, "VotesTotalFor"),
+                    "noes": _txt(row, "VotesTotalAgainst"),
+                    "abstentions": _txt(row, "VotesTotalAbstain"),
+                    "agenda_item": _txt(row, "Agenda_item_english"),
+                },
+                source_url=f"{url}?meetingID={meeting_id}&xmlDownloadType=Votes",
+            ))
         added = len(records) - before
-        if added == 0 and not hasattr(self, "_xml_vote_empty_logged"):
-            self._xml_vote_empty_logged = True
-            logger.warning(
-                f"[Welsh Parliament] XML export meeting {meeting_id}: 0 division records. "
-                f"Root tag={root.tag}, children={[c.tag for c in root][:10]}"
-            )
+        if added:
+            logger.info(f"[Welsh Parliament] Meeting {meeting_id}: {added} vote records")
         return added
 
     def _fetch_votes_search(self, from_date: Optional[str] = None) -> List[Dict]:
@@ -2150,106 +2012,31 @@ class WelshParliamentScraper(BaseScraper):
                                 to_date: Optional[str] = None) -> List[Dict]:
         records: List[Dict] = []
 
-        # 1. Try XML Export for each meeting that has divisions.
-        #    Meeting IDs come from scanning senedd.wales plenary session pages.
+        # Primary path: enumerate plenary meetings via the XMLExport filter, then
+        # parse each meeting's Votes export.
         meeting_ids = self._fetch_meeting_ids_wales(from_date, to_date)
         if meeting_ids:
-            logger.info(f"[Welsh Parliament] Fetching votes via XML export for {len(meeting_ids)} meetings...")
+            logger.info(f"[Welsh Parliament] Fetching votes for {len(meeting_ids)} plenary meetings...")
             hits = 0
             for i, m in enumerate(meeting_ids):
-                added = self._fetch_votes_xml_export(m["id"], m.get("date", ""), from_date, records)
-                if added > 0:
+                if i and i % 25 == 0:
+                    logger.info(f"[Welsh Parliament] Votes: {i}/{len(meeting_ids)} meetings "
+                                f"processed ({len(records)} records so far)")
+                added = self._fetch_votes_xml_export(m["id"], m.get("date", ""),
+                                                     from_date, records, to_date)
+                if added:
                     hits += 1
-            logger.info(f"[Welsh Parliament] XML export: {hits}/{len(meeting_ids)} meetings had votes, {len(records)} total")
+            logger.info(f"[Welsh Parliament] {hits}/{len(meeting_ids)} meetings had votes; "
+                        f"{len(records)} vote records fetched")
             if records:
-                logger.info(f"[Welsh Parliament] {len(records)} vote records fetched via XML export")
                 return records
-            logger.warning(f"[Welsh Parliament] {len(meeting_ids)} meetings found but XML export returned 0 votes")
 
-        # 2. Try the Search page with division-type filter
-        records = self._fetch_votes_search(from_date)
-        if records:
-            logger.info(f"[Welsh Parliament] {len(records)} vote records fetched via Search page")
-            return records
+        # Fallback: the record.assembly.wales/Search division filter (kept for
+        # resilience; the SPA usually returns nothing).
+        search_records = self._fetch_votes_search(from_date)
+        if search_records:
+            logger.info(f"[Welsh Parliament] {len(search_records)} vote records via Search page")
+            return search_records
 
-        # 3. Fall back to HTML scraping from the divisions index — all known paths are broken
-        # (all /en/plenary/* redirect to cofnod.senedd.cymru/Error/NotFound) but log for diagnosis
-        soup = self._try_paths(_RECORD, _DIVISION_PATHS) if _DIVISION_PATHS else None
-        if not soup:
-            logger.warning("[Welsh Parliament] Could not load divisions index — all known paths broken")
-            return records
-
-        row_selectors = ["table tr", ".division-row", "li.division", "article.division", "li"]
-        rows = []
-        for sel in row_selectors:
-            rows = soup.select(sel)
-            if rows:
-                break
-
-        if not rows:
-            body = soup.find("body")
-            snippet = body.get_text(separator=" ", strip=True)[:500] if body else ""
-            logger.warning(f"[Welsh Parliament] No division rows found — page snippet: {snippet}")
-            logger.info(f"[Welsh Parliament] {len(records)} vote records fetched")
-            return records
-
-        logger.info(f"[Welsh Parliament] Divisions: found {len(rows)} rows to check")
-        sample_div_hrefs = [r.select_one("a[href]")["href"] for r in rows[:5] if r.select_one("a[href]")]
-        logger.info(f"[Welsh Parliament] Sample division hrefs: {sample_div_hrefs}")
-        for row in rows:
-            link_el = row.select_one("a[href]")
-            if not link_el:
-                continue
-            title_el = row.select_one("td:first-child, .title, h2, h3") or link_el
-            date_el = row.select_one("td:nth-child(2), time, .date, [class*='date'], li:nth-child(2), span[class*='date'], p[class*='date']")
-            title = title_el.get_text(strip=True)
-            div_date = date_el.get_text(strip=True) if date_el else ""
-            if not div_date:
-                row_text = row.get_text(separator=" ", strip=True)
-                dm = re.search(r"\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{1,2}\s+\w+\s+\d{4}", row_text)
-                div_date = dm.group(0) if dm else ""
-            if from_date and div_date and div_date[:10] < from_date:
-                continue
-
-            # Check if this is a meeting-ID link — if so, try XML export directly
-            detail_href = link_el["href"]
-            if not detail_href or not (detail_href.startswith("/") or detail_href.startswith("http")):
-                continue
-            mid_match = re.search(r"[Mm]eeting[Ii][Dd]=(\d+)|/[Mm]eeting/(\d+)", detail_href)
-            if mid_match:
-                mid = mid_match.group(1) or mid_match.group(2)
-                self._fetch_votes_xml_export(mid, div_date, from_date, records)
-                continue
-
-            detail_url = detail_href if detail_href.startswith("http") else f"{_RECORD}{detail_href}"
-            detail_soup = self._html_get(detail_url)
-            if not detail_soup:
-                continue
-
-            vote_sections = {
-                "aye": [".ayes li", ".for li", "[class*='aye'] li", "[class*='For'] li"],
-                "no": [".noes li", ".against li", "[class*='no'] li", "[class*='Against'] li"],
-                "abstain": [".abstentions li", ".abstain li", "[class*='abstain'] li"],
-            }
-            for direction, selectors in vote_sections.items():
-                voters = []
-                for sel in selectors:
-                    voters = detail_soup.select(sel)
-                    if voters:
-                        break
-                for voter_el in voters:
-                    name = voter_el.get_text(strip=True)
-                    if not name:
-                        continue
-                    records.append(self._make_record(
-                        data_type="vote",
-                        member={"id": "", "name": name, "party": "", "constituency": "", "role": "MS"},
-                        date=div_date,
-                        text=f"Voted {direction} on: {title}",
-                        title=title,
-                        metadata={"vote_direction": direction, "division_result": ""},
-                        source_url=detail_url,
-                    ))
-
-        logger.info(f"[Welsh Parliament] {len(records)} vote records fetched")
+        logger.warning("[Welsh Parliament] No vote records found")
         return records
