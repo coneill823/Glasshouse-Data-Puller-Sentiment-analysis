@@ -1471,293 +1471,147 @@ class ScottishParliamentScraper(BaseScraper):
     # Votes on division
     # ------------------------------------------------------------------
 
-    # Vote-list selectors. The generic `table tr td:nth-child(N)` patterns were
-    # removed: on the Session-7 SPA shell they match nav/breadcrumb tables and
-    # emit junk "voters" like "Home" / "Chamber and committees".
-    _MOTION_VOTER_SELECTORS = [
-        ("aye", [".ayes li", ".for li", "[class*='aye'] li", "[class*='for'] li", "ul.ayes li"]),
-        ("no", [".noes li", ".against li", "[class*='no'] li", "[class*='against'] li", "ul.noes li"]),
-        ("abstain", [".abstentions li", ".abstain li", "[class*='abstain'] li"]),
-    ]
-
-    # Nav/breadcrumb words that appear on the rebuilt site — a real MSP voter name
-    # never contains these, so their presence marks scraped chrome, not a vote.
-    _NAV_WORDS = {"and", "the", "of", "to", "or", "committees", "business", "home",
-                  "search", "menu", "skip", "content", "glossary", "help", "contact",
-                  "chamber", "official", "report", "parliament"}
+    # The votes-and-motions section is server-rendered. SearchVotes lists the
+    # divisions (newest-first) and each motion page carries the per-member
+    # roll-call grouped by party then For/Against/Abstained/Did-not-vote, with
+    # member links to /msps/current-and-previous-msps/<slug>.
+    _VOTES_SEARCH_API = f"{_WEB}/api/sitecore/VotesMotionsSearch/SearchVotes"
+    _VOTES_REFERER = f"{_WEB}/chamber-and-committees/votes-and-motions"
+    _VOTE_DIRECTION = {"For": "aye", "Against": "no",
+                       "Abstained": "abstain", "Did not vote": "no_vote"}
+    _MONTHS_RE = ("January|February|March|April|May|June|July|August|"
+                  "September|October|November|December")
 
     @classmethod
-    def _is_voter_name(cls, name: str) -> bool:
-        """Heuristic guard so nav text isn't recorded as a voter."""
-        n = (name or "").strip()
-        if not n or len(n) > 60:
-            return False
-        if any(w in cls._NAV_WORDS for w in n.lower().split()):
-            return False
-        # "Surname, Forename (Constituency) (Party)" roll-call style
-        if re.match(r"^[A-Z][\w'’-]+,\s*[A-Z]", n):
-            return True
-        # otherwise require two+ capitalised name words
-        words = n.split()
-        return len(words) >= 2 and sum(1 for w in words if w[:1].isupper()) >= 2
-
-    def _extract_motion_voters(self, detail: BeautifulSoup, url: str, motion_ref: str,
-                               date_str: str, div_title: str, records: List[Dict]) -> int:
-        before = len(records)
-        for direction, sel_list in self._MOTION_VOTER_SELECTORS:
-            voters = []
-            for sel in sel_list:
-                voters = detail.select(sel)
-                if voters:
-                    break
-            for voter_el in voters:
-                name = voter_el.get_text(strip=True)
-                if not self._is_voter_name(name):
+    def _parse_vote_date(cls, text: str) -> str:
+        """Pull the division date (preferring the date it was taken) -> YYYY-MM-DD."""
+        from datetime import datetime as _dt
+        for pat in (r"Taken in the Chamber on[^0-9]*(\d{1,2}\s+(?:%s)\s+\d{4})" % cls._MONTHS_RE,
+                    r"Date lodged:[^0-9]*(\d{1,2}\s+(?:%s)\s+\d{4})" % cls._MONTHS_RE,
+                    r"(\d{1,2}\s+(?:%s)\s+\d{4})" % cls._MONTHS_RE):
+            m = re.search(pat, text)
+            if m:
+                try:
+                    return _dt.strptime(m.group(1).strip(), "%d %B %Y").strftime("%Y-%m-%d")
+                except ValueError:
                     continue
+        return ""
+
+    def _search_vote_divisions(self, from_date: Optional[str], to_date: Optional[str],
+                               max_pages: int = 80) -> List[Dict]:
+        """List divisions from the SearchVotes API (newest-first).
+
+        Returns [{ref, title, date, result}] within the date range, stopping once
+        a whole page predates from_date.
+        """
+        saved = dict(self.session.headers)
+        self.session.headers.update({
+            "User-Agent": _BROWSER_UA,
+            "X-Requested-With": "XMLHttpRequest",
+            "Referer": self._VOTES_REFERER,
+        })
+        divisions: List[Dict] = []
+        seen: set = set()
+        try:
+            for page in range(1, max_pages + 1):
+                resp = self._get(self._VOTES_SEARCH_API, params={"pageNumber": page}, timeout=45)
+                if not resp or not resp.ok:
+                    break
+                cards = BeautifulSoup(resp.text, "lxml").select("div.vm-list")
+                if not cards:
+                    break
+                newest_on_page = None
+                for card in cards:
+                    ref_el = card.select_one("h2 a[href*='votes-and-motions/']")
+                    if not ref_el:
+                        continue
+                    m = re.search(r"(S\d+M-[\w-]+)", ref_el.get("href", ""))
+                    if not m or m.group(1) in seen:
+                        continue
+                    ref = m.group(1)
+                    iso = self._parse_vote_date(card.get_text(" ", strip=True))
+                    if iso and (newest_on_page is None or iso > newest_on_page):
+                        newest_on_page = iso
+                    if from_date and iso and iso < from_date:
+                        continue
+                    if to_date and iso and iso > to_date:
+                        continue
+                    seen.add(ref)
+                    res_el = card.select_one(".vote_result--text")
+                    divisions.append({
+                        "ref": ref,
+                        "title": ref_el.get_text(" ", strip=True),
+                        "date": iso,
+                        "result": res_el.get_text(" ", strip=True) if res_el else "",
+                    })
+                # newest-first: once an entire page predates the window, we're done
+                if from_date and newest_on_page and newest_on_page < from_date:
+                    break
+        finally:
+            self.session.headers.clear()
+            self.session.headers.update(saved)
+        return divisions
+
+    def _fetch_division_rollcall(self, division: Dict, records: List[Dict]) -> int:
+        """Fetch a division's motion page and emit one record per member vote."""
+        ref = division["ref"]
+        url = f"{_WEB}/chamber-and-committees/votes-and-motions/{ref}"
+        saved = dict(self.session.headers)
+        self.session.headers.update({"User-Agent": _BROWSER_UA})
+        resp = self._get(url, timeout=45)
+        self.session.headers.clear()
+        self.session.headers.update(saved)
+        if not resp or not resp.ok:
+            return 0
+        soup = BeautifulSoup(resp.text, "lxml")
+        title = division.get("title") or ref
+        v_date = division.get("date", "")
+        result = division.get("result", "")
+        before = len(records)
+        # Each party panel: <h5 class="h5">For</h5><ul><li><a>member</a>…</ul>,
+        # then Against/Abstained/Did-not-vote (just "0" text when none, so the
+        # member <ul> is only present as the heading's immediate next tag sibling).
+        for h5 in soup.select("h5.h5"):
+            direction = self._VOTE_DIRECTION.get(h5.get_text(strip=True))
+            if not direction:
+                continue
+            ul = h5.find_next_sibling()
+            if ul is None or ul.name != "ul":
+                continue
+            for a in ul.select("a[href*='/msps/current-and-previous-msps/']"):
+                name = a.get_text(" ", strip=True)
+                if not name:
+                    continue
+                slug = re.search(r"/msps/current-and-previous-msps/([\w-]+)", a.get("href", ""))
                 records.append(self._make_record(
                     data_type="vote",
-                    member={"id": "", "name": name, "party": "", "constituency": "", "role": "MSP"},
-                    date=date_str,
-                    text=f"Voted {direction} on: {div_title}",
-                    title=div_title,
-                    metadata={"vote_direction": direction, "division_result": "",
-                              "motion_ref": motion_ref},
+                    member={"id": slug.group(1) if slug else "", "name": name,
+                            "party": "", "constituency": "", "role": "MSP"},
+                    date=v_date,
+                    text=f"Voted {direction} on: {title}",
+                    title=title,
+                    metadata={"vote_direction": direction, "division_result": result,
+                              "motion_ref": ref},
                     source_url=url,
                 ))
         return len(records) - before
 
-    def _scrape_motion_vote_page(self, motion_ref: str, records: List[Dict],
-                                  from_date: Optional[str]) -> int:
-        """Scrape a single S6M-NNNN votes-and-motions page. Returns records added."""
-        url = f"{_WEB}/chamber-and-committees/votes-and-motions/{motion_ref}"
-
-        def _date_and_title(s):
-            date_el = s.select_one("time[datetime], time, .date, [class*='date']")
-            d = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
-            if not d:
-                body_text = s.get_text(separator=" ", strip=True)
-                dm = re.search(r"\d{1,2}\s+\w+\s+\d{4}|\d{4}-\d{2}-\d{2}", body_text)
-                d = dm.group(0) if dm else ""
-            title_el = s.select_one("h1, h2, .title, .motion-title")
-            t = title_el.get_text(strip=True) if title_el else motion_ref
-            return d, t
-
-        detail = self._html_get(url)
-        if not detail:
-            return 0
-        date_str, div_title = _date_and_title(detail)
-        if from_date and date_str and len(date_str) >= 10 and date_str[:10] < from_date:
-            return 0
-
-        added = self._extract_motion_voters(detail, url, motion_ref, date_str, div_title, records)
-        if added == 0:
-            # Voting lists on these pages are often injected client-side via JS.
-            rendered = self._browser_get(url, wait_selector=".ayes, .noes, [class*='aye'], [class*='division']")
-            if rendered:
-                r_date_str, r_div_title = _date_and_title(rendered)
-                r_date_str = r_date_str or date_str
-                r_div_title = r_div_title or div_title
-                if from_date and r_date_str and len(r_date_str) >= 10 and r_date_str[:10] < from_date:
-                    return 0
-                r_added = self._extract_motion_voters(rendered, url, motion_ref, r_date_str, r_div_title, records)
-                if r_added:
-                    detail, added, date_str = rendered, r_added, r_date_str
-
-        if added == 0:
-            body = detail.find("body")
-            snippet = body.get_text(separator=" ", strip=True)[:200] if body else ""
-            logger.warning(f"[Scottish Parliament] No voters at {url} — snippet: {snippet}")
-        return added
-
-    def _enumerate_motion_pages(self, from_date: Optional[str], records: List[Dict]) -> int:
-        """Enumerate S6M-NNNN motion pages from the votes-and-motions index.
-
-        The index page at /chamber-and-committees/votes-and-motions/ lists motions
-        as links matching /S[0-9]+M-[0-9]+/.  We follow those and parse voter lists.
-        Returns total records added.
-        """
-        index_url = f"{_WEB}/chamber-and-committees/votes-and-motions/"
-
-        def _motion_refs(s):
-            refs, seen = [], set()
-            for a in s.select("a[href]"):
-                href = a.get("href", "")
-                m = re.search(r"(S\d+M-\d+)", href, re.I)
-                if m and m.group(1) not in seen:
-                    seen.add(m.group(1))
-                    refs.append(m.group(1))
-            return refs
-
-        soup = self._html_get(index_url)
-        motion_refs = _motion_refs(soup) if soup else []
-
-        if not motion_refs:
-            # The motions index lists content via a JS-driven search widget —
-            # plain HTTP often returns an empty shell. Re-render through a browser.
-            rendered = self._browser_get(index_url, wait_selector="a[href*='S6M-'], a[href*='S5M-'], main")
-            if rendered:
-                rendered_refs = _motion_refs(rendered)
-                if rendered_refs:
-                    soup, motion_refs = rendered, rendered_refs
-                    logger.info(f"[Scottish Parliament] Found {len(motion_refs)} motion refs on index (rendered)")
-
-        if not soup:
-            logger.warning(f"[Scottish Parliament] Could not load motions index: {index_url}")
-            return 0
-        if not motion_refs:
-            body = soup.find("body")
-            snippet = body.get_text(separator=" ", strip=True)[:300] if body else ""
-            logger.warning(f"[Scottish Parliament] No motion refs on index — snippet: {snippet}")
-            return 0
-
-        logger.info(f"[Scottish Parliament] Found {len(motion_refs)} motion refs on index")
-        added_total = 0
-        for ref in motion_refs[:200]:
-            added_total += self._scrape_motion_vote_page(ref, records, from_date)
-        return added_total
-
     def fetch_votes_on_division(self, from_date: Optional[str] = None,
                                 to_date: Optional[str] = None) -> List[Dict]:
-        filter_parts = []
-        if from_date:
-            filter_parts.append(f"DivisionDate ge datetime'{from_date}'")
-        if to_date:
-            filter_parts.append(f"DivisionDate le datetime'{to_date}T23:59:59'")
-        filters = " and ".join(filter_parts) if filter_parts else None
-        rows, _ = self._odata_try([
-            "Votes", "VoteResults", "DivisionVotes", "MemberVotes",
-            "Divisions", "VotedFor", "VotingData", "VoteRecords",
-            "MSPVotes", "DivisionResults", "DivisionVote", "MemberVoting",
-        ], filters=filters)
-
-        if rows:
-            # OData data found — use it
-            records = []
-            for vote in rows:
-                direction_map = {1: "aye", 2: "no", 3: "abstain"}
-                direction_raw = vote.get("VoteType", vote.get("Vote", 0))
-                direction = direction_map.get(direction_raw, str(direction_raw).lower())
-                div_title = vote.get("DivisionName", vote.get("MotionText", vote.get("Title", "")))
-                records.append(self._make_record(
-                    data_type="vote",
-                    member={
-                        "id": str(vote.get("PersonId", vote.get("MemberID", ""))),
-                        "name": vote.get("MemberName", vote.get("Name", "")),
-                        "party": vote.get("PartyName", vote.get("Party", "")),
-                        "constituency": vote.get("ConstituencyName", vote.get("RegionName", "")),
-                        "role": "MSP",
-                    },
-                    date=vote.get("DivisionDate", vote.get("Date", "")),
-                    text=f"Voted {direction} on: {div_title}",
-                    title=div_title,
-                    metadata={
-                        "division_id": str(vote.get("DivisionID", vote.get("VoteID", ""))),
-                        "vote_direction": direction,
-                        "division_result": vote.get("DivisionResult", vote.get("Result", "")),
-                    },
-                    source_url=f"{_API}/Votes",
-                ))
-            logger.info(f"[Scottish Parliament] {len(records)} vote records fetched")
-            return records
-
-        # Fallback: enumerate S6M-NNNN motion pages from the votes-and-motions index
         records: List[Dict] = []
-        added = self._enumerate_motion_pages(from_date, records)
-        if records:
-            logger.info(f"[Scottish Parliament] {len(records)} vote records fetched (via motion pages)")
+        divisions = self._search_vote_divisions(from_date, to_date)
+        if not divisions:
+            logger.warning("[Scottish Parliament] SearchVotes returned no divisions in range")
             return records
-
-        # Last resort: scrape whatever division links we can find
-        def _division_links(s):
-            return [a["href"] for a in s.select("a[href]")
-                    if a.get("href", "").startswith(("/", "http"))
-                    and re.search(r"/division|/vote|\d{4}-\d{2}-\d{2}|/\d+|S\d+M-\d+",
-                                  a.get("href", ""), re.I)]
-
-        def _extract_division_voters(detail, full_url, date_str, div_title):
-            added = 0
-            for direction, sel_list in [
-                ("aye", [".ayes li", ".for li", "[class*='aye'] li", "[class*='for'] li"]),
-                ("no", [".noes li", ".against li", "[class*='no'] li", "[class*='against'] li"]),
-                ("abstain", [".abstentions li", ".abstain li", "[class*='abstain'] li"]),
-            ]:
-                voters = []
-                for sel in sel_list:
-                    voters = detail.select(sel)
-                    if voters:
-                        break
-                for voter_el in voters:
-                    name = voter_el.get_text(strip=True)
-                    if not name:
-                        continue
-                    records.append(self._make_record(
-                        data_type="vote",
-                        member={"id": "", "name": name, "party": "", "constituency": "", "role": "MSP"},
-                        date=date_str,
-                        text=f"Voted {direction} on: {div_title}",
-                        title=div_title,
-                        metadata={"vote_direction": direction, "division_result": ""},
-                        source_url=full_url,
-                    ))
-                    added += 1
-            return added
-
-        for path in [
-            "/chamber-and-committees/votes-and-divisions/search",
-            "/chamber-and-committees/votes-and-divisions",
-            "/chamber-and-committees/votes-and-divisions/",
-            "/chamber-and-committees/votes/",
-            "/chamber-and-committees/divisions/",
-            "/parliamentarybusiness/voting/",
-            "/msps/voting-behaviour",
-            "/msps/votes/",
-        ]:
-            url = f"{_WEB}{path}"
-            soup = self._html_get(url)
-            links = _division_links(soup) if soup else []
-
-            if not links:
-                # These index/search pages are JS single-page apps — plain HTTP
-                # often returns an empty shell. Re-render through a browser.
-                rendered = self._browser_get(url, wait_selector="a[href*='division'], a[href*='vote'], a[href*='S6M-'], main")
-                if rendered:
-                    rendered_links = _division_links(rendered)
-                    if rendered_links:
-                        soup, links = rendered, rendered_links
-                        logger.info(f"[Scottish Parliament] Found {len(links)} division links at {url} (rendered)")
-
-            if not soup:
-                continue
-            if not links:
-                body = soup.find("body")
-                snippet = body.get_text(separator=" ", strip=True)[:600] if body else ""
-                logger.warning(f"[Scottish Parliament] No division links at {url} — snippet: {snippet}")
-                continue
-
-            logger.info(f"[Scottish Parliament] Found {len(links)} division links")
-            for href in links[:200]:
-                full_url = href if href.startswith("http") else f"{_WEB}{href}"
-                detail = self._html_get(full_url)
-                date_el = detail.select_one("time[datetime], time, .date, h1") if detail else None
-                date_str = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
-                if from_date and date_str and date_str[:10] < from_date:
-                    continue
-                title_el = detail.select_one("h1, h2, .title, .motion") if detail else None
-                div_title = title_el.get_text(strip=True) if title_el else ""
-                added = _extract_division_voters(detail, full_url, date_str, div_title) if detail else 0
-                if added == 0:
-                    rendered = self._browser_get(full_url, wait_selector=".ayes, .noes, [class*='aye'], [class*='division']")
-                    if rendered:
-                        r_date_el = rendered.select_one("time[datetime], time, .date, h1")
-                        r_date_str = (r_date_el.get("datetime", r_date_el.get_text(strip=True))
-                                      if r_date_el else "") or date_str
-                        if from_date and r_date_str and r_date_str[:10] < from_date:
-                            continue
-                        r_title_el = rendered.select_one("h1, h2, .title, .motion")
-                        r_div_title = (r_title_el.get_text(strip=True) if r_title_el else "") or div_title
-                        _extract_division_voters(rendered, full_url, r_date_str, r_div_title)
-            if records:
-                break
-
-        logger.info(f"[Scottish Parliament] {len(records)} vote records fetched")
+        logger.info(f"[Scottish Parliament] {len(divisions)} divisions from SearchVotes — "
+                    f"fetching per-member roll-calls...")
+        hits = 0
+        for i, d in enumerate(divisions):
+            if i and i % 20 == 0:
+                logger.info(f"[Scottish Parliament] Votes: {i}/{len(divisions)} divisions "
+                            f"processed ({len(records)} records so far)")
+            if self._fetch_division_rollcall(d, records):
+                hits += 1
+        logger.info(f"[Scottish Parliament] {hits}/{len(divisions)} divisions had roll-calls; "
+                    f"{len(records)} vote records fetched")
         return records
