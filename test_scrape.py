@@ -436,7 +436,7 @@ def test_scotland(verbose: bool = False, save_dir: Optional[Path] = None) -> Lis
          "OData 404 → motion-page/division scraping, now with headless-browser render for JS-rendered pages", True),
         ("plenary_business",
          lambda: s.fetch_plenary_business(from_date=RECENT_90),
-         f"0 records expected (external limitation, confirmed 2026-06) — Session 7 rebuild moved the Official Report behind a search interface: OData meeting entities 404 and the date-URL pattern serves an identical nav-only shell for every date incl. historical Session 6; not machine-accessible until parliament.scot republishes a structured OR source", True),
+         f"Official Report via browser-driven search (meeting-of-parliament IDs) → media-API PDF → PyMuPDF; recent windows can be sparse around the May 2026 election but historical sittings parse fully", True),
     ]:
         r = Result("Scottish Parliament", dtype, note=note)
         t0 = time.time()
