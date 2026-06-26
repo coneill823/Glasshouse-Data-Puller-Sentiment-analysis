@@ -603,7 +603,7 @@ def test_wales(verbose: bool = False, save_dir: Optional[Path] = None) -> List[R
          f"last 30 days ({RECENT_30}→today); record.assembly.wales/Search (SSR)", True),
         ("plenary_business",
          lambda: s.fetch_plenary_business(from_date=RECENT_30),
-         f"last 30 days; senedd.wales sub-page following; sessions capped at 50", True),
+         f"last 30 days; XMLExport EnglishTranscript per plenary meeting → per-speaker contributions (Member_name_English / Contribution_English)", True),
     ]:
         r = Result("Welsh Parliament", dtype, note=note)
         t0 = time.time()

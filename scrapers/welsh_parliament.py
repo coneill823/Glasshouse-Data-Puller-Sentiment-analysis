@@ -1579,236 +1579,105 @@ class WelshParliamentScraper(BaseScraper):
     # Plenary business — Record of Proceedings
     # ------------------------------------------------------------------
 
-    # Known REST API endpoint patterns for plenary proceedings
-    _PLENARY_API_CANDIDATES = [
-        f"{_RECORD}/api/plenary/sessions",
-        f"{_RECORD}/api/plenary",
-        f"{_RECORD}/api/proceedings",
-        f"{_RECORD}/api/agenda",
-        f"{_RECORD}/api/contributions",
-        f"{_RECORD}/api/meetings",
-        "https://senedd.wales/api/plenary",
-        "https://senedd.wales/api/proceedings",
-    ]
+    def _fetch_transcript_xml(self, meeting_id: str, meeting_date: str,
+                              from_date: Optional[str], to_date: Optional[str],
+                              records: List[Dict]) -> int:
+        """Fetch a plenary meeting's English transcript export and parse contributions.
 
-    # Links that indicate an individual plenary session (date-based or ID-based).
-    # Matches 4+ digit IDs, date-based paths, or standard plenary URL patterns.
-    _SESSION_LINK_RE = re.compile(
-        r"\d{4}-\d{2}-\d{2}|/\d{4}/\d{2}|/\d{4,}|"
-        r"[Pp]lenary/\d|[Ss]ession/\d|[Ss]itting/\d|[Mm]eeting/\d",
-    )
+        record.senedd.wales/XMLExport/Download?meetingID=N&xmlDownloadType=EnglishTranscript
+        returns a flat <dataroot> of <XML_Plenary-*_English> rows (one per spoken
+        contribution) carrying Member_name_English, Contribution_English, MeetingDate
+        and Agenda_item_english. Rows are matched by structure so the parser stays
+        agnostic across Seneddau. Returns the number of records added.
+        """
+        url = f"{_RECORD}/XMLExport/Download"
+        saved = dict(self.session.headers)
+        self.session.headers.update({
+            "User-Agent": _BROWSER_UA,
+            "Accept": "application/xml,text/xml,*/*;q=0.8",
+        })
+        resp = self._get(url, params={"meetingID": meeting_id,
+                                      "xmlDownloadType": "EnglishTranscript"}, timeout=90)
+        self.session.headers.clear()
+        self.session.headers.update(saved)
+        if not resp or not resp.ok:
+            return 0
+        ct = resp.headers.get("Content-Type", "")
+        if "xml" not in ct and not resp.text.lstrip()[:20].lower().startswith("<?xml"):
+            return 0
+        try:
+            root = ET.fromstring(resp.content)
+        except ET.ParseError as e:
+            logger.warning(f"[Welsh Parliament] Transcript XML parse error meeting {meeting_id}: {e}")
+            return 0
+        for el in root.iter():
+            if "}" in el.tag:
+                el.tag = el.tag.split("}", 1)[1]
+
+        def _txt(parent, tag: str) -> str:
+            e = parent.find(tag)
+            return (e.text or "").strip() if e is not None and e.text else ""
+
+        before = len(records)
+        for row in root:
+            # A contribution row carries Contribution_English (the element name
+            # encodes the Senedd number: ...SixthSenedd_English / ...SeventhSenedd_English).
+            text = self._strip_html(_txt(row, "Contribution_English"))
+            if not text or len(text) < 3:
+                continue
+            v_date = (_txt(row, "MeetingDate") or meeting_date or "")[:10]
+            if from_date and v_date and v_date < from_date:
+                continue
+            if to_date and v_date and v_date > to_date:
+                continue
+            records.append(self._make_record(
+                data_type="plenary_speech",
+                member={"id": _txt(row, "Member_Id"), "name": _txt(row, "Member_name_English"),
+                        "party": "", "constituency": "", "role": "MS"},
+                date=v_date,
+                text=text,
+                title=_txt(row, "Agenda_item_english"),
+                metadata={"meeting_id": meeting_id,
+                          "contribution_type": _txt(row, "contribution_type"),
+                          "source_format": "xml"},
+                source_url=f"{url}?meetingID={meeting_id}&xmlDownloadType=EnglishTranscript",
+            ))
+        added = len(records) - before
+        if added:
+            logger.info(f"[Welsh Parliament] Meeting {meeting_id}: {added} plenary contributions")
+        return added
 
     def fetch_plenary_business(self, from_date: Optional[str] = None,
                                to_date: Optional[str] = None) -> List[Dict]:
-        # 1. Try REST API endpoints (SPAs load data from APIs, not HTML)
-        for api_url in self._PLENARY_API_CANDIDATES:
-            params = {}
-            if from_date:
-                params["startDate"] = from_date
-            if to_date:
-                params["endDate"] = to_date
-            data = self._api_get(api_url, params=params if params else None)
-            if not data:
-                continue
-            sessions = data if isinstance(data, list) else data.get("sessions", data.get("items", data.get("results", [])))
-            if not sessions:
-                logger.warning(f"[Welsh Parliament] Plenary API {api_url} responded but no sessions (keys: {list(data.keys()) if isinstance(data, dict) else type(data).__name__})")
-                continue
-            logger.info(f"[Welsh Parliament] Plenary API: {len(sessions)} sessions from {api_url}")
-            records = []
-            for session in sessions:
-                session_date = session.get("date", session.get("sittingDate", ""))
-                contributions = session.get("contributions", session.get("speeches", session.get("items", [])))
-                for contrib in contributions:
-                    text = contrib.get("text", contrib.get("body", contrib.get("speech", "")))
-                    if not text or len(text) < 10:
-                        continue
-                    records.append(self._make_record(
-                        data_type="plenary_speech",
-                        member={
-                            "id": str(contrib.get("memberId", "")),
-                            "name": contrib.get("memberName", contrib.get("speaker", "")),
-                            "party": contrib.get("party", ""),
-                            "constituency": contrib.get("constituency", ""),
-                            "role": "MS",
-                        },
-                        date=session_date,
-                        text=text,
-                        title=contrib.get("subject", contrib.get("title", "")),
-                        source_url=api_url,
-                    ))
-            if records:
-                logger.info(f"[Welsh Parliament] {len(records)} plenary records fetched via API")
-                return records
+        """Plenary proceedings via the Senedd's XML transcript export.
 
-        # 2. Try each HTML path individually; stop at the first one that contains session links.
-        # record.senedd.wales is a SPA — most path variants return a nav-only shell with no
-        # content links. Only paths that are server-side rendered include session-link rows.
-        session_links = []
-        for path in _PLENARY_PATHS:
-            url = f"{_RECORD}{path}"
-            soup = self._html_get(url)
-            if not soup:
-                logger.warning(f"[Welsh Parliament] Plenary: could not load {url}")
-                continue
-            found = []
-            all_hrefs = []
-            for link in soup.select("a[href]"):
-                href = link.get("href", "")
-                if not href or not (href.startswith("/") or href.startswith("http")):
-                    continue
-                all_hrefs.append(href)
-                if self._SESSION_LINK_RE.search(href):
-                    full_url = href if href.startswith("http") else f"{_RECORD}{href}"
-                    found.append(full_url)
-            found = list(dict.fromkeys(found))
-            if found:
-                session_links = found
-                logger.info(f"[Welsh Parliament] Plenary: found {len(session_links)} session links at {url}")
-                break
-            body = soup.find("body")
-            snippet = body.get_text(separator=" ", strip=True)[:400] if body else ""
-            sample_hrefs = all_hrefs[:10]
-            logger.warning(f"[Welsh Parliament] Plenary: no session links at {url} — sample hrefs: {sample_hrefs} — snippet: {snippet}")
-
-        # 2b. If record.senedd.wales paths all 404'd, try the main senedd.wales site.
-        # https://senedd.wales/senedd-business/plenary/ is a WordPress SSR page that
-        # lists plenary sessions and may link to record.senedd.wales SSR session pages.
-        if not session_links:
-            for path in _SENEDD_PLENARY_PATHS:
-                url = f"{_BASE}{path}"
-                soup = self._html_get(url)
-                if not soup:
-                    logger.warning(f"[Welsh Parliament] Plenary: could not load {url}")
-                    continue
-                found = []
-                all_hrefs = []
-                for link in soup.select("a[href]"):
-                    href = link.get("href", "")
-                    if not href or not (href.startswith("/") or href.startswith("http")):
-                        continue
-                    all_hrefs.append(href)
-                    if self._SESSION_LINK_RE.search(href):
-                        if href.startswith("http"):
-                            full_link = href
-                        else:
-                            # relative links on senedd.wales resolve against _BASE
-                            full_link = f"{_BASE}{href}"
-                        found.append(full_link)
-                found = list(dict.fromkeys(found))
-                if found:
-                    session_links = found
-                    logger.info(f"[Welsh Parliament] Plenary: found {len(session_links)} session links at {url}")
-                    break
-                body = soup.find("body")
-                snippet = body.get_text(separator=" ", strip=True)[:400] if body else ""
-                sample_hrefs = all_hrefs[:10]
-                logger.warning(f"[Welsh Parliament] Plenary: no session links at {url} — sample hrefs: {sample_hrefs} — snippet: {snippet}")
-                # When landing on the senedd.wales plenary overview, follow sub-pages
-                # (e.g. /senedd-business/plenary/past-plenary-sessions/) to find listings.
-                if "senedd-business/plenary" in path:
-                    sub_paths = [
-                        h for h in all_hrefs
-                        if ("senedd-business/plenary/" in h)
-                        and h not in ("/senedd-business/plenary/", path, url)
-                        and not h.endswith("/what-is-plenary/")
-                    ]
-                    for sub_href in sub_paths[:8]:
-                        sub_url = sub_href if sub_href.startswith("http") else f"{_BASE}{sub_href}"
-                        sub_soup = self._html_get(sub_url)
-                        if not sub_soup:
-                            continue
-                        sub_hrefs = []
-                        for link in sub_soup.select("a[href]"):
-                            h2 = link.get("href", "")
-                            if not h2 or not (h2.startswith("/") or h2.startswith("http")):
-                                continue
-                            sub_hrefs.append(h2)
-                            if self._SESSION_LINK_RE.search(h2):
-                                fl = h2 if h2.startswith("http") else f"{_BASE}{h2}"
-                                found.append(fl)
-                        logger.info(f"[Welsh Parliament] Plenary sub-page {sub_url}: {len(found)} session links — sample hrefs: {sub_hrefs[:8]}")
-                    if found:
-                        session_links = list(dict.fromkeys(found))
-                        logger.info(f"[Welsh Parliament] Plenary: {len(session_links)} session links from sub-pages of {url}")
-                        # Do NOT break here — keep checking remaining _SENEDD_PLENARY_PATHS
-                        # in case other sub-pages add more session links.
-
-        if not session_links:
-            logger.warning("[Welsh Parliament] No plenary session links found — all paths exhausted")
-            return []
-
-        records = []
-        if len(session_links) > MAX_PLENARY_SESSION_PAGES:
-            logger.warning(
-                f"[Welsh Parliament] Plenary: {len(session_links)} session links capped at "
-                f"{MAX_PLENARY_SESSION_PAGES} (MAX_PLENARY_SESSION_PAGES)"
-            )
-        for session_url in session_links[:MAX_PLENARY_SESSION_PAGES]:
-            session_soup = self._html_get(session_url)
-            if not session_soup:
-                continue
-
-            date_el = session_soup.select_one("time[datetime], time, .date, h1, [class*='date']")
-            session_date = ""
-            if date_el:
-                session_date = date_el.get("datetime", date_el.get_text(strip=True))
-            if from_date and session_date and session_date[:10] < from_date:
-                continue
-
-            contrib_selectors = [
-                ".contribution", ".speech", "[class*='contribution']",
-                "[class*='speech']", ".item", "tr.speech",
-                # WordPress content selectors (senedd.wales main site)
-                ".wp-block-post-content p", ".entry-content p", "article p",
-            ]
-            contribs = []
-            for sel in contrib_selectors:
-                contribs = session_soup.select(sel)
-                if contribs:
-                    break
-
-            if not contribs:
-                body = session_soup.find("body")
-                snippet = body.get_text(separator=" ", strip=True)[:300] if body else ""
-                logger.warning(f"[Welsh Parliament] Plenary: 0 contribs at {session_url} — snippet: {snippet}")
-                continue
-
-            for contrib in contribs:
-                speaker_el = (
-                    contrib.select_one(".speaker, .member-name, [class*='speaker'], [class*='member']")
-                    or contrib.select_one("strong, b")
-                )
-                text_el = contrib.select_one(".text, p, .speech-text, [class*='text']")
-                text = text_el.get_text(strip=True) if text_el else contrib.get_text(strip=True)
-                if len(text) < 10:
-                    continue
-                records.append(self._make_record(
-                    data_type="plenary_speech",
-                    member={
-                        "id": "",
-                        "name": speaker_el.get_text(strip=True) if speaker_el else "",
-                        "party": "",
-                        "constituency": "",
-                        "role": "MS",
-                    },
-                    date=session_date,
-                    text=text,
-                    title="",
-                    metadata={"session_url": session_url},
-                    source_url=session_url,
-                ))
-
-        logger.info(f"[Welsh Parliament] {len(records)} plenary records fetched")
+        Enumerate plenary meetings from the XMLExport listing, then parse each
+        meeting's English transcript into per-speaker contributions — the same
+        reliable structured source used for votes, instead of scraping the
+        JS-rendered Record-of-Proceedings pages (which yielded malformed speaker
+        names and dates).
+        """
+        records: List[Dict] = []
+        meetings = self._fetch_meeting_ids_wales(from_date, to_date, votes_only=False)
+        if not meetings:
+            logger.warning("[Welsh Parliament] No plenary meetings found for transcripts")
+            return records
+        logger.info(f"[Welsh Parliament] Fetching transcripts for {len(meetings)} plenary meetings...")
+        hits = 0
+        for i, m in enumerate(meetings):
+            if i and i % 10 == 0:
+                logger.info(f"[Welsh Parliament] Plenary: {i}/{len(meetings)} meetings "
+                            f"processed ({len(records)} records so far)")
+            if self._fetch_transcript_xml(m["id"], m.get("date", ""), from_date, to_date, records):
+                hits += 1
+        logger.info(f"[Welsh Parliament] {hits}/{len(meetings)} meetings had transcripts; "
+                    f"{len(records)} plenary records fetched")
         return records
 
-    # ------------------------------------------------------------------
-    # Votes on division — Record of Proceedings
-    # ------------------------------------------------------------------
-
     def _fetch_meeting_ids_wales(self, from_date: Optional[str] = None,
-                                 to_date: Optional[str] = None) -> List[Dict]:
-        """Enumerate division-bearing plenary meetings from the XMLExport listing.
+                                 to_date: Optional[str] = None,
+                                 votes_only: bool = True) -> List[Dict]:
+        """Enumerate plenary meetings from the XMLExport listing.
 
         record.senedd.wales/XMLExport is a POST filter form.  SelectedCommitteeID=908
         is Plenary, and dates must be MM/dd/yyyy — the server parses dates US-style,
@@ -1820,7 +1689,9 @@ class WelshParliamentScraper(BaseScraper):
         fields do not page back through history — so this reliably covers recent and
         incremental pulls; deep historical enumeration is not exposed by the form.
 
-        Returns [{"id", "date", "has_votes"}] (votes-bearing only), newest-first.
+        Returns [{"id", "date", "has_votes"}] newest-first. With votes_only=True
+        (the votes path) only division-bearing meetings are returned; with False
+        (the plenary path) every plenary meeting is returned.
         """
         start = from_date or "2021-05-06"          # start of the 6th Senedd
         end = to_date or date.today().isoformat()
@@ -1836,15 +1707,16 @@ class WelshParliamentScraper(BaseScraper):
         }
         soup = self._form_post(f"{_RECORD}/XMLExport", payload)
         meetings = self._parse_meeting_rows(soup, from_date, to_date)
-        votes_meetings = [m for m in meetings if m["has_votes"]]
+        result = [m for m in meetings if m["has_votes"]] if votes_only else meetings
         if meetings:
             logger.info(f"[Welsh Parliament] XMLExport listing: {len(meetings)} plenary "
-                        f"meetings in range, {len(votes_meetings)} with divisions")
+                        f"meetings in range ({sum(1 for m in meetings if m['has_votes'])} with "
+                        f"divisions); returning {len(result)}")
         else:
             logger.warning("[Welsh Parliament] XMLExport listing returned no plenary "
                            "meetings (the form exposes only recent meetings; the 6th "
                            "Senedd also wound down before the May 2026 election)")
-        return votes_meetings
+        return result
 
     @staticmethod
     def _parse_meeting_rows(soup, from_date: Optional[str] = None,
