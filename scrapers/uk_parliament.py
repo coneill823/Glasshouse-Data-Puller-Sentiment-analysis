@@ -5,10 +5,10 @@ APIs used:
   Members:          https://members-api.parliament.uk/api
   Written Questions: https://questions-statements-api.parliament.uk/api  (old writtenquestions-api domain retired)
   Commons Votes:    https://commonsvotes-api.parliament.uk/data
-  Hansard (debates): https://hansard.parliament.uk/api
+  Hansard (spoken debate contributions): https://hansard-api.parliament.uk
 """
 import logging
-from datetime import date as _date
+from datetime import date as _date, datetime as _datetime, timedelta as _timedelta
 from typing import Dict, List, Optional
 
 from .base_scraper import BaseScraper
@@ -24,6 +24,13 @@ _HANSARD = _CFG["hansard_api"]
 
 # Members API caps take at 20
 _MEMBERS_PAGE = 20
+
+# The Hansard search index caps deep pagination (results beyond ~10k skip are not
+# returned), so the spoken-contributions pull walks the date range in chunks of
+# this many days to keep each query's result set under the cap. A busy sitting
+# fortnight stays well below 10k Commons contributions.
+_HANSARD_CHUNK_DAYS = 14
+_HANSARD_SKIP_CAP = 10000
 
 
 class UKParliamentScraper(BaseScraper):
@@ -244,120 +251,208 @@ class UKParliamentScraper(BaseScraper):
         return records
 
     # ------------------------------------------------------------------
-    # Plenary business (Written Statements via Hansard API)
+    # Plenary business (spoken debate contributions + written statements)
     # ------------------------------------------------------------------
 
     def fetch_plenary_business(self, from_date: Optional[str] = None,
                                to_date: Optional[str] = None) -> List[Dict]:
+        """Commons plenary business = spoken debate contributions + written statements.
+
+        Spoken contributions are the bulk of plenary and the richest text for
+        sentiment analysis; they come from the Hansard search API. Written
+        ministerial statements come from the questions-statements API. Both are
+        fetched and combined so neither is silently dropped.
+        """
         if not self._member_cache:
             self.fetch_members()
-        records = []
-        # Written statements live on the same API as questions, not hansard.parliament.uk
-        # hansard.parliament.uk/api/* all return 404; correct domain is questions-statements-api
-        endpoints = [
-            (f"{_QUESTIONS}/writtenstatements/statements", "plenary_speech"),
-            (f"{_HANSARD}/writtenStatements/Commons", "plenary_speech"),
-            (f"{_HANSARD}/writtenStatements", "plenary_speech"),
-            (f"{_HANSARD}/debates/Commons", "plenary_speech"),
-            (f"{_HANSARD}/debates", "plenary_speech"),
-        ]
-        for url, dtype in endpoints:
-            params: Dict = {"take": 100, "skip": 0}
-            if from_date:
-                params["startDate"] = from_date
-            if to_date:
-                params["endDate"] = to_date
+        spoken = self._fetch_spoken_contributions(from_date, to_date)
+        written = self._fetch_written_statements(from_date, to_date)
+        logger.info(
+            f"[UK Parliament] {len(spoken) + len(written)} plenary records fetched "
+            f"({len(spoken)} spoken contributions + {len(written)} written statements)"
+        )
+        return spoken + written
+
+    @staticmethod
+    def _iter_date_chunks(start: str, end: str, days: int):
+        """Yield (chunk_start, chunk_end) ISO date pairs covering [start, end] inclusive."""
+        d0 = _datetime.strptime(start[:10], "%Y-%m-%d").date()
+        d1 = _datetime.strptime(end[:10], "%Y-%m-%d").date()
+        cur = d0
+        while cur <= d1:
+            chunk_end = min(cur + _timedelta(days=days - 1), d1)
+            yield cur.isoformat(), chunk_end.isoformat()
+            cur = chunk_end + _timedelta(days=1)
+
+    def _fetch_spoken_contributions(self, from_date: Optional[str] = None,
+                                    to_date: Optional[str] = None) -> List[Dict]:
+        """Spoken Commons debate contributions from the Hansard search API.
+
+        hansard-api.parliament.uk/search/contributions/Spoken.json returns one
+        record per spoken contribution (a Member's speech or intervention in a
+        debate) and honours startDate/endDate, so we walk the range in date
+        chunks to stay under the search index's pagination depth cap.
+        """
+        url = f"{_HANSARD}/search/contributions/Spoken.json"
+        today = to_date or _date.today().isoformat()
+        start = from_date or "2015-01-01"   # match the questions pull's historical floor
+        records: List[Dict] = []
+        for chunk_start, chunk_end in self._iter_date_chunks(start, today, _HANSARD_CHUNK_DAYS):
             skip = 0
-            batch_found = False
-            # The writtenstatements endpoint ignores startDate/endDate and returns the
-            # full corpus (confirmed: identical counts for 3-month and 1-day windows).
-            # Filter client-side and, since results arrive newest-first, stop paginating
-            # once an entire page predates the window.
-            order_desc = None
+            chunk_count = 0
             while True:
-                params["skip"] = skip
-                if skip % 1000 == 0 and skip > 0:
-                    logger.info(f"[UK Parliament] Plenary: fetched {len(records)} so far from {url}...")
+                params: Dict = {
+                    "queryParameters.house": "Commons",
+                    "queryParameters.startDate": chunk_start,
+                    "queryParameters.endDate": chunk_end,
+                    "queryParameters.orderBy": "SittingDateAsc",
+                    "queryParameters.take": 100,
+                    "queryParameters.skip": skip,
+                }
                 resp = self._get(url, params=params, timeout=90)
                 if not resp:
                     break
                 data = resp.json()
-                # questions-statements-api wraps in {"results": [...]} or {"statements": [...]}
-                if isinstance(data, list):
-                    raw_items = data
-                else:
-                    raw_items = data.get("results", data.get("statements", data.get("items", data.get("contributions", []))))
-                # Each item may itself be wrapped in a "value" key
-                items = []
-                for entry in raw_items:
-                    items.append(entry.get("value", entry) if isinstance(entry, dict) else entry)
+                # Search API wraps hits in {"Results": [...]} (PascalCase).
+                items = data.get("Results") or data.get("results") or []
                 if not items:
-                    if skip == 0:
-                        keys = list(data.keys()) if isinstance(data, dict) else type(data).__name__
-                        logger.warning(f"[UK Parliament] Plenary endpoint {url} responded but returned no items (keys: {keys})")
                     break
-                batch_found = True
-                if not hasattr(self, "_plenary_fields_logged"):
-                    self._plenary_fields_logged = True
-                    sample = items[0] if items else {}
-                    member_sample = sample.get("member") or sample.get("Member")
-                    logger.warning(
-                        f"[UK Parliament] Plenary first-item fields: {list(sample.keys())} | "
-                        f"member type={type(member_sample).__name__} value={member_sample!r:.200} | "
-                        f"memberId={sample.get('memberId')!r} cache_size={len(self._member_cache)}"
-                    )
-                page_dates = []
-                for item in items:
-                    item_date = str(item.get("Date", item.get("date", item.get("SittingDate",
-                                    item.get("dateMade", "")))))[:10]
-                    if item_date:
-                        page_dates.append(item_date)
-                    if from_date and item_date and item_date < from_date:
+                for entry in items:
+                    item = entry.get("value", entry) if isinstance(entry, dict) else entry
+                    # ContributionTextFull is the complete speech; ContributionText
+                    # is a search snippet — prefer the full text when present.
+                    text = (item.get("ContributionTextFull") or item.get("ContributionText")
+                            or item.get("Value") or item.get("text") or "")
+                    if not text or len(text.strip()) < 3:
                         continue
-                    text = item.get("Value", item.get("text", item.get("body",
-                           item.get("ContributionText", item.get("StatementText", "")))))
-                    if not text:
-                        continue
-                    member_obj = (item.get("member") or item.get("Member") or {})
-                    plenary_mid = str(item.get("MemberId") or item.get("memberId") or member_obj.get("id") or "")
-                    cached = self._member_cache.get(plenary_mid, {})
+                    sitting = str(item.get("SittingDate") or item.get("sittingDate")
+                                  or item.get("Date") or item.get("date") or "")[:10]
+                    member_id = str(item.get("MemberId") or item.get("memberId") or "")
+                    cached = self._member_cache.get(member_id, {})
+                    name = (item.get("AttributedTo") or item.get("attributedTo")
+                            or item.get("MemberName") or item.get("memberName")
+                            or cached.get("name") or "")
                     records.append(self._make_record(
-                        data_type=dtype,
+                        data_type="plenary_speech",
                         member={
-                            "id": plenary_mid,
-                            "name": (item.get("AttributedTo") or item.get("attributedTo")
-                                     or item.get("MemberName") or item.get("memberName")
-                                     or member_obj.get("name") or item.get("nameDisplayAs")
-                                     or cached.get("name") or ""),
-                            "party": item.get("Party") or member_obj.get("party") or cached.get("party") or "",
-                            "constituency": item.get("MemberFrom") or member_obj.get("memberFrom") or cached.get("constituency") or "",
+                            "id": member_id,
+                            "name": name,
+                            "party": cached.get("party", ""),
+                            "constituency": cached.get("constituency", ""),
                             "role": "MP",
                         },
-                        date=item.get("Date", item.get("date", item.get("SittingDate",
-                             item.get("dateMade", "")))),
+                        date=sitting,
                         text=text,
-                        title=item.get("Title", item.get("title", item.get("DebateSection",
-                              item.get("subject", "")))),
+                        title=(item.get("DebateSection") or item.get("Section")
+                               or item.get("Title") or item.get("title") or ""),
                         metadata={
-                            "statement_id": str(item.get("Id", item.get("id",
-                                              item.get("ContributionId", "")))),
-                            "house": item.get("House", item.get("house", "Commons")),
+                            "contribution_id": str(item.get("ContributionExtId")
+                                                   or item.get("Id") or item.get("id") or ""),
+                            "debate_section": item.get("DebateSection", ""),
+                            "debate_ext_id": item.get("DebateSectionExtId", ""),
+                            "house": item.get("House", "Commons"),
+                            "contribution_type": "spoken",
                         },
                         source_url=url,
                     ))
-                if order_desc is None and len(page_dates) >= 2:
-                    order_desc = page_dates[0] >= page_dates[-1]
-                if from_date and order_desc and page_dates and max(page_dates) < from_date:
-                    logger.info(f"[UK Parliament] Plenary: page at skip={skip} entirely "
-                                f"predates {from_date} — stopping pagination early")
-                    break
+                    chunk_count += 1
                 if len(items) < 100:
                     break
                 skip += 100
-            if batch_found:
-                logger.info(f"[UK Parliament] Plenary data from: {url}")
-                break  # got data from this endpoint — skip remaining
-        logger.info(f"[UK Parliament] {len(records)} plenary records fetched")
+                if skip >= _HANSARD_SKIP_CAP:
+                    logger.warning(
+                        f"[UK Parliament] Plenary: spoken contributions for "
+                        f"{chunk_start}→{chunk_end} reached the {skip} pagination "
+                        f"cap — some contributions in this window may be missing; "
+                        f"reduce _HANSARD_CHUNK_DAYS if this recurs"
+                    )
+                    break
+            if chunk_count:
+                logger.info(f"[UK Parliament] Plenary: {chunk_count} spoken "
+                            f"contributions {chunk_start}→{chunk_end}")
+        return records
+
+    def _fetch_written_statements(self, from_date: Optional[str] = None,
+                                  to_date: Optional[str] = None) -> List[Dict]:
+        """Written ministerial statements from the questions-statements API.
+
+        This endpoint ignores startDate/endDate and returns the full corpus
+        newest-first, so we filter client-side and stop paginating once a whole
+        page predates the requested window.
+        """
+        url = f"{_QUESTIONS}/writtenstatements/statements"
+        records: List[Dict] = []
+        params: Dict = {"take": 100, "skip": 0}
+        if from_date:
+            params["startDate"] = from_date
+        if to_date:
+            params["endDate"] = to_date
+        skip = 0
+        order_desc = None
+        while True:
+            params["skip"] = skip
+            if skip % 1000 == 0 and skip > 0:
+                logger.info(f"[UK Parliament] Plenary (written): {len(records)} so far...")
+            resp = self._get(url, params=params, timeout=90)
+            if not resp:
+                break
+            data = resp.json()
+            if isinstance(data, list):
+                raw_items = data
+            else:
+                raw_items = data.get("results", data.get("statements", data.get("items", [])))
+            items = [e.get("value", e) if isinstance(e, dict) else e for e in raw_items]
+            if not items:
+                if skip == 0:
+                    keys = list(data.keys()) if isinstance(data, dict) else type(data).__name__
+                    logger.warning(f"[UK Parliament] Written-statements endpoint {url} "
+                                   f"returned no items (keys: {keys})")
+                break
+            page_dates = []
+            for item in items:
+                item_date = str(item.get("Date", item.get("date", item.get("dateMade", ""))))[:10]
+                if item_date:
+                    page_dates.append(item_date)
+                if from_date and item_date and item_date < from_date:
+                    continue
+                text = item.get("Value", item.get("text", item.get("body",
+                       item.get("StatementText", ""))))
+                if not text:
+                    continue
+                member_obj = (item.get("member") or item.get("Member") or {})
+                mid = str(item.get("MemberId") or item.get("memberId") or member_obj.get("id") or "")
+                cached = self._member_cache.get(mid, {})
+                records.append(self._make_record(
+                    data_type="plenary_speech",
+                    member={
+                        "id": mid,
+                        "name": (item.get("AttributedTo") or item.get("attributedTo")
+                                 or item.get("MemberName") or item.get("memberName")
+                                 or member_obj.get("name") or item.get("nameDisplayAs")
+                                 or cached.get("name") or ""),
+                        "party": item.get("Party") or member_obj.get("party") or cached.get("party") or "",
+                        "constituency": item.get("MemberFrom") or member_obj.get("memberFrom") or cached.get("constituency") or "",
+                        "role": "MP",
+                    },
+                    date=item.get("Date", item.get("date", item.get("dateMade", ""))),
+                    text=text,
+                    title=item.get("Title", item.get("title", item.get("subject", ""))),
+                    metadata={
+                        "statement_id": str(item.get("Id", item.get("id", ""))),
+                        "house": item.get("House", item.get("house", "Commons")),
+                        "contribution_type": "written_statement",
+                    },
+                    source_url=url,
+                ))
+            if order_desc is None and len(page_dates) >= 2:
+                order_desc = page_dates[0] >= page_dates[-1]
+            if from_date and order_desc and page_dates and max(page_dates) < from_date:
+                logger.info(f"[UK Parliament] Plenary (written): page at skip={skip} entirely "
+                            f"predates {from_date} — stopping pagination early")
+                break
+            if len(items) < 100:
+                break
+            skip += 100
         return records
 
     # ------------------------------------------------------------------

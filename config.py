@@ -30,7 +30,10 @@ PARLIAMENTS = {
         "questions_api": "https://questions-statements-api.parliament.uk/api",
         "commons_votes_api": "https://commonsvotes-api.parliament.uk/data",
         "lords_votes_api": "https://lordsvotes-api.parliament.uk/data",
-        "hansard_api": "https://hansard.parliament.uk/api",
+        # hansard.parliament.uk/api is the public *website*, not the API — every
+        # /api/* path there 404s. The machine-readable Hansard API (spoken debate
+        # contributions, written statements, etc.) is served from hansard-api.*.
+        "hansard_api": "https://hansard-api.parliament.uk",
     },
     "scottish_parliament": {
         "name": "Scottish Parliament",
