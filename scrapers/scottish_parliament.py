@@ -1471,13 +1471,35 @@ class ScottishParliamentScraper(BaseScraper):
     # Votes on division
     # ------------------------------------------------------------------
 
+    # Vote-list selectors. The generic `table tr td:nth-child(N)` patterns were
+    # removed: on the Session-7 SPA shell they match nav/breadcrumb tables and
+    # emit junk "voters" like "Home" / "Chamber and committees".
     _MOTION_VOTER_SELECTORS = [
-        ("aye", [".ayes li", ".for li", "[class*='aye'] li", "[class*='for'] li",
-                 "table tr td:nth-child(1)", "ul.ayes li"]),
-        ("no", [".noes li", ".against li", "[class*='no'] li", "[class*='against'] li",
-                "table tr td:nth-child(2)", "ul.noes li"]),
+        ("aye", [".ayes li", ".for li", "[class*='aye'] li", "[class*='for'] li", "ul.ayes li"]),
+        ("no", [".noes li", ".against li", "[class*='no'] li", "[class*='against'] li", "ul.noes li"]),
         ("abstain", [".abstentions li", ".abstain li", "[class*='abstain'] li"]),
     ]
+
+    # Nav/breadcrumb words that appear on the rebuilt site — a real MSP voter name
+    # never contains these, so their presence marks scraped chrome, not a vote.
+    _NAV_WORDS = {"and", "the", "of", "to", "or", "committees", "business", "home",
+                  "search", "menu", "skip", "content", "glossary", "help", "contact",
+                  "chamber", "official", "report", "parliament"}
+
+    @classmethod
+    def _is_voter_name(cls, name: str) -> bool:
+        """Heuristic guard so nav text isn't recorded as a voter."""
+        n = (name or "").strip()
+        if not n or len(n) > 60:
+            return False
+        if any(w in cls._NAV_WORDS for w in n.lower().split()):
+            return False
+        # "Surname, Forename (Constituency) (Party)" roll-call style
+        if re.match(r"^[A-Z][\w'’-]+,\s*[A-Z]", n):
+            return True
+        # otherwise require two+ capitalised name words
+        words = n.split()
+        return len(words) >= 2 and sum(1 for w in words if w[:1].isupper()) >= 2
 
     def _extract_motion_voters(self, detail: BeautifulSoup, url: str, motion_ref: str,
                                date_str: str, div_title: str, records: List[Dict]) -> int:
@@ -1490,7 +1512,7 @@ class ScottishParliamentScraper(BaseScraper):
                     break
             for voter_el in voters:
                 name = voter_el.get_text(strip=True)
-                if not name or len(name) < 2:
+                if not self._is_voter_name(name):
                     continue
                 records.append(self._make_record(
                     data_type="vote",
