@@ -129,7 +129,9 @@ def save_results(parliament_name: str, data_type: str, records: List[Dict],
     if not new_records:
         logger.info(f"{parliament_name}/{data_type}: all {len(records)} records "
                     f"already pulled previously — nothing new to save")
-        return {}
+        # Report the real skipped count so a fully-duplicate run still reconciles
+        # in the summary (returning {} made it show new=0 / skipped=0).
+        return {"new": 0, "skipped": skipped}
     if skipped:
         logger.info(f"{parliament_name}/{data_type}: {len(new_records)} new records, "
                     f"{skipped} already pulled (skipped)")
