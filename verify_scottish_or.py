@@ -124,9 +124,44 @@ def drive_search():
             page.wait_for_load_state("networkidle", timeout=15000)
         except Exception:
             pass
-        page.wait_for_timeout(3500)
+
+        # Results load via AJAX — poll until the meeting-link count stabilises.
+        import time
+        last, stable = -1, 0
+        deadline = time.time() + 35
+        while time.time() < deadline:
+            page.wait_for_timeout(1500)
+            n = len(re.findall(r"meeting=\d+", page.content()))
+            if n == last:
+                stable += 1
+                if stable >= 2 and n > 0:
+                    break
+            else:
+                stable = 0
+            last = n
+
+        print(f"\n  page.url after search: {page.url}")
+        # result count / 'no results' message
+        for sel in ["#resultCount", "[class*='resultCount']", "[class*='result-count']",
+                    "[class*='no-result']", "[class*='noResult']"]:
+            loc = page.locator(sel)
+            try:
+                if loc.count():
+                    print(f"  {sel}: {loc.first.inner_text()[:120]!r}")
+            except Exception:
+                pass
+        # raw meeting hrefs — reveals the real result-link format
+        raw = page.eval_on_selector_all(
+            "a[href*='meeting=']", "els => els.map(e => e.getAttribute('href')).slice(0, 12)")
+        print(f"  raw meeting hrefs after search ({len(raw)} shown): {raw}")
 
         found = extract(page.content())
+        # looser fallback: any ?meeting=id with a preceding CODE-date in the href
+        if not found:
+            for h in re.findall(r'href="([^"]*meeting=\d+[^"]*)"', page.content()):
+                m = re.search(r"/([A-Za-z]+)-(\d{2}-\d{2}-\d{4})\?meeting=(\d+)", h)
+                if m:
+                    found[m.group(3)] = (m.group(1).upper(), m.group(2))
         codes = {}
         for c, d in found.values():
             codes[c] = codes.get(c, 0) + 1
