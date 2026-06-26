@@ -164,8 +164,68 @@ class WelshParliamentScraper(BaseScraper):
     # ------------------------------------------------------------------
 
     def fetch_members(self) -> List[Dict]:
-        members = self._scrape_members()
+        # The Senedd's ModernGov web service is the clean, structured source;
+        # fall back to scraping the listing page only if it's unavailable.
+        members = self._fetch_members_moderngov()
+        if not members:
+            logger.warning("[Welsh Parliament] ModernGov member service returned nothing "
+                           "— falling back to listing-page scrape")
+            members = self._scrape_members()
         logger.info(f"[Welsh Parliament] {len(members)} MSs fetched")
+        return members
+
+    def _fetch_members_moderngov(self) -> List[Dict]:
+        """Fetch all MSs from the Senedd's ModernGov web service.
+
+        business.senedd.wales/mgwebservice.asmx/GetCouncillorsByWard returns every
+        Member grouped by ward (= constituency/region) as XML, with clean
+        id / name / party fields — far more reliable than scraping the JS-rendered
+        senedd.wales listing (which now yields only nav chrome).
+        """
+        url = f"{_BUSINESS}/mgwebservice.asmx/GetCouncillorsByWard"
+        saved = dict(self.session.headers)
+        self.session.headers.update({"User-Agent": _BROWSER_UA,
+                                     "Accept": "text/xml,application/xml,*/*;q=0.8"})
+        resp = self._get(url, timeout=60)
+        self.session.headers.clear()
+        self.session.headers.update(saved)
+        if not resp or not resp.ok:
+            return []
+        try:
+            root = ET.fromstring(resp.content)
+        except ET.ParseError as e:
+            logger.warning(f"[Welsh Parliament] ModernGov member XML parse error: {e}")
+            return []
+        for el in root.iter():
+            if "}" in el.tag:
+                el.tag = el.tag.split("}", 1)[1]
+
+        def _txt(parent, tag: str) -> str:
+            e = parent.find(tag)
+            return (e.text or "").strip() if e is not None and e.text else ""
+
+        members: List[Dict] = []
+        seen: set = set()
+        for ward in root.iter("ward"):
+            ward_title = _txt(ward, "wardtitle")
+            for c in ward.iter("councillor"):
+                cid = _txt(c, "councillorid")
+                # "Steve Bayliss MS" / "Steve Bayliss AS" -> drop the trailing title
+                name = re.sub(r"\s+(MS|AS)$", "", _txt(c, "fullusername")).strip()
+                if not name or (cid and cid in seen):
+                    continue
+                if cid:
+                    seen.add(cid)
+                members.append({
+                    "id": cid,
+                    "name": name,
+                    "party": _txt(c, "politicalpartytitle"),
+                    "constituency": ward_title,
+                    "role": "MS",
+                    "status": "current",
+                })
+        if members:
+            logger.info(f"[Welsh Parliament] {len(members)} MSs from ModernGov web service")
         return members
 
     def _try_wp_rest_members(self) -> List[Dict]:
