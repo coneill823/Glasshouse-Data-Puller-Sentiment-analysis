@@ -1284,11 +1284,17 @@ class ScottishParliamentScraper(BaseScraper):
 
         # ----------------------------------------------------------------
         # 4. Direct date-based URL construction for recent sitting days.
+        #    Reconnaissance (2026-06) confirmed this pattern now returns a
+        #    byte-for-byte identical nav-only shell for EVERY date — recent and
+        #    historical Session 6 sittings alike — so we probe only until a short
+        #    run of empties re-confirms it's dead, rather than rendering dozens of
+        #    shell pages on every run.
         # ----------------------------------------------------------------
         month_names = ["january", "february", "march", "april", "may", "june",
                        "july", "august", "september", "october", "november", "december"]
         tried = 0
         hit = 0
+        consec_empty = 0
         for iso_date in self._recent_sitting_dates(90):
             y, mo, d = iso_date.split("-")
             slug = f"official-report-{int(d)}-{month_names[int(mo) - 1]}-{y}"
@@ -1298,16 +1304,21 @@ class ScottishParliamentScraper(BaseScraper):
             tried += 1
             if added > 0:
                 hit += 1
-        empty = getattr(self, "_or_empty_count", 0)
+                consec_empty = 0
+            else:
+                consec_empty += 1
+                if consec_empty >= 5:
+                    break
         if tried:
-            if hit == 0 and empty > 3:
+            if hit == 0:
                 logger.warning(
-                    f"[Scottish Parliament] Date-URL probe: {tried} dates tried, 0 had content "
-                    f"({empty} empty-shell pages, first 3 logged above) — "
-                    f"parliament.scot appears to have rebuilt its OR infrastructure for Session 7; "
-                    f"the /what-was-said-in-parliament/{'{date}'} URL pattern returns a nav-only "
-                    f"SPA shell for all probed dates including pre-election Session 6 sittings. "
-                    f"OR will become available once the new session's transcripts are published."
+                    f"[Scottish Parliament] Date-URL OR probe: {tried} dates tried, 0 had content "
+                    f"(aborted after a run of empty shells). The Session 7 rebuild moved the "
+                    f"Official Report behind a search interface — the OData meeting entities 404, "
+                    f"and the /what-was-said-in-parliament/{'{date}'} pattern serves an identical "
+                    f"nav-only shell for every date, including historical Session 6 sittings. "
+                    f"Scottish plenary stays at 0 until parliament.scot exposes a machine-readable "
+                    f"Official Report source again (re-confirmed 2026-06)."
                 )
             else:
                 logger.info(
