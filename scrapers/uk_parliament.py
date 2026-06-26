@@ -323,6 +323,7 @@ class UKParliamentScraper(BaseScraper):
                     # is a search snippet — prefer the full text when present.
                     text = (item.get("ContributionTextFull") or item.get("ContributionText")
                             or item.get("Value") or item.get("text") or "")
+                    text = self._strip_html(text)   # drop column-number spans, <em>, etc.
                     if not text or len(text.strip()) < 3:
                         continue
                     sitting = str(item.get("SittingDate") or item.get("sittingDate")
@@ -419,6 +420,7 @@ class UKParliamentScraper(BaseScraper):
                        item.get("StatementText", ""))))
                 if not text:
                     continue
+                text = self._strip_html(text)
                 member_obj = (item.get("member") or item.get("Member") or {})
                 mid = str(item.get("MemberId") or item.get("memberId") or member_obj.get("id") or "")
                 cached = self._member_cache.get(mid, {})

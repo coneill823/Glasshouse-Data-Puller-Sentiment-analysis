@@ -254,6 +254,22 @@ class BaseScraper(ABC):
                 pass
         return ""
 
+    @staticmethod
+    def _strip_html(text: str) -> str:
+        """Strip HTML tags from API-supplied text, preserving the readable content.
+
+        Hansard's ContributionTextFull (and some statement bodies) embed markup —
+        empty <span class="column-number"> markers, <em>/<i> emphasis, etc. — that
+        is pure noise for sentiment analysis. Returns the text unchanged if it has
+        no angle brackets (the common case) or if parsing fails.
+        """
+        if not text or "<" not in text:
+            return text
+        try:
+            return BeautifulSoup(text, "lxml").get_text()
+        except Exception:
+            return text
+
     def _make_record(self, data_type: str, member: Dict, date: str,
                      text: str, title: str = "", metadata: Optional[Dict] = None,
                      source_url: str = "") -> Dict:
