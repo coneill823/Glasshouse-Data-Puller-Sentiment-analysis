@@ -433,7 +433,7 @@ def test_scotland(verbose: bool = False, save_dir: Optional[Path] = None) -> Lis
          "last 30 days; SPA question pages browser-rendered, parsed by field labels (Asked by/Date lodged/Question/Answer)", True),
         ("votes_on_division",
          lambda: s.fetch_votes_on_division(from_date=RECENT_30),
-         "OData 404 → motion-page/division scraping, now with headless-browser render for JS-rendered pages", True),
+         "VotesMotionsSearch/SearchVotes API → per-division motion-page roll-call (For/Against/Abstained/Did-not-vote MSP links), plain HTTP", True),
         ("plenary_business",
          lambda: s.fetch_plenary_business(from_date=RECENT_90),
          f"Official Report via browser-driven search (meeting-of-parliament IDs) → media-API PDF → PyMuPDF; recent windows can be sparse around the May 2026 election but historical sittings parse fully", True),
