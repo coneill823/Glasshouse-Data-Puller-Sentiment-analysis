@@ -1748,63 +1748,78 @@ class WelshParliamentScraper(BaseScraper):
 
     def _fetch_meeting_ids_wales(self, from_date: Optional[str] = None,
                                  to_date: Optional[str] = None) -> List[Dict]:
-        """Discover plenary meeting IDs from the record.senedd.wales XMLExport form.
+        """Enumerate division-bearing plenary meetings from the XMLExport listing.
 
-        The export UI (record.senedd.wales/XMLExport) filters meetings by committee
-        and date range and lists each matching meeting with an
-        XMLExport/Download?meetingID=N link.  SelectedCommitteeID=908 is Plenary, so
-        one filtered request enumerates exactly the plenary meetings whose divisions
-        we need — far cheaper and more reliable than scanning the (sparse, irregular)
-        meeting-ID space.  Returns [{"id": str, "date": str}] newest-first.
+        record.senedd.wales/XMLExport is a POST filter form.  SelectedCommitteeID=908
+        is Plenary, and dates must be MM/dd/yyyy — the server parses dates US-style,
+        and any other format silently clears the results.  Each listing row carries
+        the meeting date and one download link per export type, so a row that links
+        xmlDownloadType=Votes is a plenary meeting that actually held divisions.
+
+        NOTE: the form only ever returns the most-recent meetings — the Start/End
+        fields do not page back through history — so this reliably covers recent and
+        incremental pulls; deep historical enumeration is not exposed by the form.
+
+        Returns [{"id", "date", "has_votes"}] (votes-bearing only), newest-first.
         """
-        start = from_date or "2021-05-06"   # start of the 6th Senedd
+        start = from_date or "2021-05-06"          # start of the 6th Senedd
         end = to_date or date.today().isoformat()
 
-        def _ddmmyyyy(iso: str) -> str:
-            return f"{iso[8:10]}/{iso[5:7]}/{iso[0:4]}"
+        def _mmddyyyy(iso: str) -> str:
+            return f"{iso[5:7]}/{iso[8:10]}/{iso[0:4]}"
 
-        params = {
+        payload = {
             "SelectedCommitteeID": _PLENARY_COMMITTEE_ID,
-            "Start": _ddmmyyyy(start),
-            "End": _ddmmyyyy(end),
-            "submittingButton": "",
+            "Start": _mmddyyyy(start),
+            "End": _mmddyyyy(end),
+            "submittingButton": "Search",
         }
-        url = f"{_RECORD}/XMLExport"
-
-        # The filter form is GET-able (shareable URL); fall back to POST if GET
-        # returns only the empty form with no meeting links.
-        soup = self._html_get(url, params=params)
-        ids = self._extract_meeting_ids(soup)
-        if not ids:
-            soup = self._form_post(url, params)
-            ids = self._extract_meeting_ids(soup)
-
-        meetings = [{"id": mid, "date": ""} for mid in ids]
+        soup = self._form_post(f"{_RECORD}/XMLExport", payload)
+        meetings = self._parse_meeting_rows(soup, from_date, to_date)
+        votes_meetings = [m for m in meetings if m["has_votes"]]
         if meetings:
-            logger.info(f"[Welsh Parliament] {len(meetings)} plenary meeting IDs from "
-                        f"XMLExport filter ({start} -> {end})")
+            logger.info(f"[Welsh Parliament] XMLExport listing: {len(meetings)} plenary "
+                        f"meetings in range, {len(votes_meetings)} with divisions")
         else:
-            logger.warning(f"[Welsh Parliament] XMLExport filter returned no plenary "
-                           f"meeting IDs for {start} -> {end} (the 6th Senedd wound down "
-                           f"before the May 2026 election, so recent windows can be empty)")
-        return meetings
+            logger.warning("[Welsh Parliament] XMLExport listing returned no plenary "
+                           "meetings (the form exposes only recent meetings; the 6th "
+                           "Senedd also wound down before the May 2026 election)")
+        return votes_meetings
 
     @staticmethod
-    def _extract_meeting_ids(soup) -> List[Dict]:
-        """Pull meeting IDs out of an XMLExport listing (newest-first, deduped)."""
+    def _parse_meeting_rows(soup, from_date: Optional[str] = None,
+                            to_date: Optional[str] = None) -> List[Dict]:
+        """Parse XMLExport listing <tr> rows into {id, date, has_votes} (Plenary only).
+
+        A row looks like:
+          24/06/2026 13:30 Plenary ... <a href="...meetingID=16077&xmlDownloadType=Votes">Votes</a>
+        so the date is the leading DD/MM/YYYY and has_votes is the presence of a
+        Votes download link.
+        """
         if not soup:
             return []
-        html = str(soup)
-        ids: List[str] = []
+        out: List[Dict] = []
         seen: set = set()
-        # Listing rows link to XMLExport/Download?meetingID=N (and sometimes /Plenary/N)
-        for pat in (r"meetingID=(\d+)", r"/[Pp]lenary/(\d+)"):
-            for m in re.finditer(pat, html, re.I):
-                mid = m.group(1)
-                if mid not in seen:
-                    seen.add(mid)
-                    ids.append(mid)
-        return sorted(ids, key=lambda x: -int(x))
+        for tr in soup.find_all("tr"):
+            links = tr.find_all("a", href=re.compile(r"meetingID=\d+", re.I))
+            if not links:
+                continue
+            row_text = tr.get_text(" ", strip=True)
+            if "Plenary" not in row_text or "Business Committee" in row_text:
+                continue
+            mid = re.search(r"meetingID=(\d+)", links[0]["href"], re.I).group(1)
+            if mid in seen:
+                continue
+            seen.add(mid)
+            dm = re.match(r"(\d{2})/(\d{2})/(\d{4})", row_text)
+            iso = f"{dm.group(3)}-{dm.group(2)}-{dm.group(1)}" if dm else ""
+            if from_date and iso and iso < from_date:
+                continue
+            if to_date and iso and iso > to_date:
+                continue
+            has_votes = any("xmlDownloadType=Votes" in a.get("href", "") for a in links)
+            out.append({"id": mid, "date": iso, "has_votes": has_votes})
+        return sorted(out, key=lambda m: m["date"], reverse=True)
 
     def _form_post(self, url: str, data: Dict):
         """POST a form with browser headers; return BeautifulSoup or None."""
@@ -1876,7 +1891,12 @@ class WelshParliamentScraper(BaseScraper):
             return e.text.strip() if e is not None and e.text else ""
 
         before = len(records)
-        for row in root.iter("XML_Plenary-SixthSenedd_Vote"):
+        # Vote rows are the repeated children of <dataroot>; the element name
+        # encodes the Senedd number (...-SixthSenedd_Vote, ...-SeventhSenedd_Vote),
+        # so match by structure (a Member_name_English child) to stay agnostic.
+        for row in root:
+            if row.find("Member_name_English") is None:
+                continue
             name = _txt(row, "Member_name_English")
             if not name:
                 continue
@@ -2012,21 +2032,22 @@ class WelshParliamentScraper(BaseScraper):
                                 to_date: Optional[str] = None) -> List[Dict]:
         records: List[Dict] = []
 
-        # Primary path: enumerate plenary meetings via the XMLExport filter, then
-        # parse each meeting's Votes export.
-        meeting_ids = self._fetch_meeting_ids_wales(from_date, to_date)
-        if meeting_ids:
-            logger.info(f"[Welsh Parliament] Fetching votes for {len(meeting_ids)} plenary meetings...")
+        # Primary path: enumerate division-bearing plenary meetings from the
+        # XMLExport listing, then parse each meeting's Votes export.
+        meetings = self._fetch_meeting_ids_wales(from_date, to_date)
+        if meetings:
+            logger.info(f"[Welsh Parliament] Fetching votes for {len(meetings)} "
+                        f"division-bearing plenary meetings...")
             hits = 0
-            for i, m in enumerate(meeting_ids):
-                if i and i % 25 == 0:
-                    logger.info(f"[Welsh Parliament] Votes: {i}/{len(meeting_ids)} meetings "
+            for i, m in enumerate(meetings):
+                if i and i % 10 == 0:
+                    logger.info(f"[Welsh Parliament] Votes: {i}/{len(meetings)} meetings "
                                 f"processed ({len(records)} records so far)")
                 added = self._fetch_votes_xml_export(m["id"], m.get("date", ""),
                                                      from_date, records, to_date)
                 if added:
                     hits += 1
-            logger.info(f"[Welsh Parliament] {hits}/{len(meeting_ids)} meetings had votes; "
+            logger.info(f"[Welsh Parliament] {hits}/{len(meetings)} meetings yielded votes; "
                         f"{len(records)} vote records fetched")
             if records:
                 return records
