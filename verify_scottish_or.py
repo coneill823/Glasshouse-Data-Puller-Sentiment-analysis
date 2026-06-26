@@ -39,6 +39,29 @@ def extract(html):
     return out
 
 
+def _dismiss_cookies(page):
+    """The Civic Cookie Control banner (#ccc) overlays the form and intercepts
+    clicks. Accept it if we can find a button, else strip the DOM nodes."""
+    for sel in ["#ccc-recommended-settings", "#ccc-notify-accept",
+                ".ccc-accept-button", "#ccc-dismiss-button", "button#ccc-close"]:
+        loc = page.locator(sel)
+        try:
+            if loc.count() and loc.first.is_visible():
+                loc.first.click(timeout=3000)
+                print(f"  dismissed cookie banner via {sel}")
+                page.wait_for_timeout(400)
+                return
+        except Exception:
+            pass
+    try:
+        page.evaluate("() => { for (const id of ['ccc','ccc-overlay','cc-panel']) "
+                      "{ const e=document.getElementById(id); if (e) e.remove(); } "
+                      "document.querySelectorAll('.ccc-overlay,[id^=ccc]').forEach(e=>e.remove()); }")
+        print("  removed cookie overlay via JS")
+    except Exception as e:
+        print(f"  cookie removal failed: {e}")
+
+
 def drive_search():
     from playwright.sync_api import sync_playwright
     found = {}
@@ -49,6 +72,7 @@ def drive_search():
         print("loading search page…")
         page.goto(SEARCH, wait_until="domcontentloaded")
         page.wait_for_timeout(2500)
+        _dismiss_cookies(page)
 
         for name in ["dateSelect", "committeeSelect", "showPlenary", "showCommittee"]:
             cnt = page.locator(f'[name="{name}"]').count()
@@ -62,31 +86,33 @@ def drive_search():
         # --- set filters: Session 6, plenary only ---
         try:
             page.select_option('select[name="dateSelect"]', label="Session 6")
+            page.evaluate("() => { const s=document.querySelector('select[name=dateSelect]');"
+                          " if (s) s.dispatchEvent(new Event('change',{bubbles:true})); }")
             print("  set dateSelect=Session 6")
         except Exception as e:
             print(f"  !! select dateSelect failed: {type(e).__name__}: {e}")
         try:
             box = page.locator('input[name="showCommittee"]')
             if box.count() and box.is_checked():
-                box.uncheck()
+                box.uncheck(timeout=8000)
                 print("  unchecked showCommittee")
         except Exception as e:
             print(f"  !! uncheck showCommittee failed: {type(e).__name__}: {e}")
 
-        # --- click Search (try several selectors) ---
+        # --- click Search (try several selectors, fail fast) ---
         clicked = False
-        for sel in ['#orsearch button[type="submit"]', '#orsearch input[type="submit"]',
-                    '#orsearch button', 'button:has-text("Search")',
-                    '#orsearch a:has-text("Search")', 'a:has-text("Search results")']:
+        for sel in ['#orsearch button.loadButton', '#orsearch button[type="submit"]',
+                    '#orsearch input[type="submit"]', 'button.new-button:has-text("Search")',
+                    'button:has-text("Search")']:
             loc = page.locator(sel)
             if loc.count():
                 try:
-                    loc.first.click()
+                    loc.first.click(timeout=8000)
                     print(f"  clicked search via {sel!r}")
                     clicked = True
                     break
                 except Exception as e:
-                    print(f"  click {sel!r} failed: {type(e).__name__}: {e}")
+                    print(f"  click {sel!r} failed: {type(e).__name__}: {str(e)[:120]}")
         if not clicked:
             print("  !! no search button clicked — #orsearch inner HTML follows:")
             try:
@@ -119,9 +145,16 @@ def parse_or_pdf(content):
     text = "\n".join(doc[i].get_text() for i in range(doc.page_count))
     doc.close()
     lines = [ln.rstrip() for ln in text.splitlines()]
-    # Speaker line: "Name (Constituency) (Party):" or "The Presiding Officer:" etc.
-    spk = re.compile(r"^(The [A-Z][\w’'. -]+|[A-Z][\w’'.-]+(?: [A-Z][\w’'.-]+){0,4})"
-                     r"(?: \([^)]+\))*:\s*(.*)$")
+    # A Scottish OR speaker attribution is one of:
+    #   "The Presiding Officer:" / "The Convener:"      (office, starts with "The")
+    #   "Claire Baker:" / "Name Name (Region) (Party):" (two+ name words)
+    #   "Surname (Constituency) (Party):"               (single name BUT with parens)
+    # A bare single word ("Women:") is rejected to avoid title/heading false matches.
+    spk = re.compile(
+        r"^(The [A-Z][\w’'. -]+"
+        r"|[A-Z][\w’'.-]+(?: [A-Z][\w’'.-]+)+(?: \([^)]+\))*"
+        r"|[A-Z][\w’'.-]+ \([^)]+\)(?: \([^)]+\))*)"
+        r":\s*(.*)$")
     contribs = []
     cur_name, cur_text = "", []
     started = False
