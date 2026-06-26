@@ -106,8 +106,17 @@ class UKParliamentScraper(BaseScraper):
 
     def fetch_register_of_interests(self, members: List[Dict]) -> List[Dict]:
         records = []
-        total = len(members)
-        for i, member in enumerate(members):
+        # The Members RegisteredInterests endpoint serves the *current* register, so
+        # departed (historical) members return nothing. Skip them rather than spend a
+        # request each on thousands of former MPs — the full member list is ~8x the
+        # size of the current House, and querying all of it took 30+ minutes.
+        current = [m for m in members if m.get("status") != "historical"]
+        skipped_hist = len(members) - len(current)
+        if skipped_hist:
+            logger.info(f"[UK Parliament] Interests: skipping {skipped_hist} historical "
+                        f"members; querying {len(current)} current members")
+        total = len(current)
+        for i, member in enumerate(current):
             if i % 100 == 0:
                 logger.info(f"[UK Parliament] Interests: {i}/{total} members processed ({len(records)} records so far)")
             url = f"{_MEMBERS}/Members/{member['id']}/RegisteredInterests"
