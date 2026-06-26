@@ -88,13 +88,13 @@ _NORMAL_EMPTY = {"plenary_business", "votes_on_division"}
 # Data types that are known to return 0 records (or partial fields) for reasons
 # outside the scraper's control. A 0-count for these appears in the run summary
 # as an expected limitation, not a failure needing attention.
+#
+# (Welsh votes and Scottish plenary were previously listed here but are now
+# fetched — Welsh via the Senedd Votes export, Scottish via browser-driven
+# Official Report search + PDF parsing. Scottish plenary can still be sparse for
+# very recent windows because Session 7 has barely sat since the May 2026
+# election, but that is handled as a _NORMAL_EMPTY 0, not a hard limitation.)
 KNOWN_LIMITATIONS = {
-    ("Scottish Parliament", "plenary_business"):
-        "parliament.scot rebuilt for Session 7 (Jun 2026); old Official Report date-URLs "
-        "return a nav-only shell for all dates — will resolve when Session 7 OR is published",
-    ("Welsh Parliament (Senedd)", "votes_on_division"):
-        "XMLExport serves only 5th-Senedd committee meetings (no divisions); "
-        "Search/record pages are JS-rendered — 0 records expected",
     ("Welsh Parliament (Senedd)", "register_of_interests"):
         "~200 ongoing-role register entries carry no inline date in the source PDF — "
         "empty date fields expected",
