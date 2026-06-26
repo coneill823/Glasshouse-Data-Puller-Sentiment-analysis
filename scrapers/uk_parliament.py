@@ -208,7 +208,7 @@ class UKParliamentScraper(BaseScraper):
                         seen_ids.add(q_id)
                     if not seen_ids or len(seen_ids) == 1:
                         asking_sample = v.get("askingMember")
-                        logger.warning(
+                        logger.debug(
                             f"[UK Parliament] Questions first-record fields: {list(v.keys())} | "
                             f"askingMember type={type(asking_sample).__name__} value={asking_sample!r:.200} | "
                             f"askingMemberId={v.get('askingMemberId')!r} cache_size={len(self._member_cache)}"

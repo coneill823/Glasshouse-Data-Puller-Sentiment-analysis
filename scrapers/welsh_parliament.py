@@ -216,7 +216,7 @@ class WelshParliamentScraper(BaseScraper):
                         "status": "current",
                     })
                 if members:
-                    logger.warning(f"[Welsh Parliament] WP REST API {url}: {len(members)} MSs, sample={members[0]!r:.200}")
+                    logger.debug(f"[Welsh Parliament] WP REST API {url}: {len(members)} MSs, sample={members[0]!r:.200}")
                     return members
         return []
 
@@ -357,7 +357,7 @@ class WelshParliamentScraper(BaseScraper):
         # Fallback: scrape profile pages from the member listing
         # senedd.wales profile URLs match /find-a-member-of-the-senedd/{slug}/ or /senedd-members/{slug}/
         sample_hrefs = [a.get("href", "") for a in soup.select("a[href]")][:20]
-        logger.warning(f"[Welsh Parliament] Sample hrefs on listing page: {sample_hrefs}")
+        logger.debug(f"[Welsh Parliament] Sample hrefs on listing page: {sample_hrefs}")
         profile_links = list(dict.fromkeys(
             (a["href"] if a["href"].startswith("http") else f"{_BASE}{a['href']}")
             for a in soup.select("a[href]")
@@ -366,7 +366,7 @@ class WelshParliamentScraper(BaseScraper):
                 a.get("href", ""), re.I)
             and not re.search(r"/(category|tag|page|search|help|glossary|contact)", a.get("href", ""), re.I)
         ))
-        logger.warning(f"[Welsh Parliament] Member profile links found: {len(profile_links)} — e.g. {profile_links[:3]}")
+        logger.debug(f"[Welsh Parliament] Member profile links found: {len(profile_links)} — e.g. {profile_links[:3]}")
 
         if profile_links:
             for profile_url in profile_links[:80]:
@@ -394,7 +394,7 @@ class WelshParliamentScraper(BaseScraper):
                         c for el in profile_soup.select("[class]")
                         for c in el.get("class", [])
                     })
-                    logger.warning(
+                    logger.debug(
                         f"[Welsh Parliament] First MS profile {profile_url}: "
                         f"name={name!r} party={party!r} const={constituency!r} "
                         f"all CSS classes: {classes_found[:40]}\n"
@@ -429,7 +429,7 @@ class WelshParliamentScraper(BaseScraper):
 
         if cards:
             sample_cls = sorted({c for el in cards[0].select("[class]") for c in el.get("class", [])})
-            logger.warning(
+            logger.debug(
                 f"[Welsh Parliament] Fallback card selectors — first card CSS classes: {sample_cls[:20]}\n"
                 f"  Snippet: {str(cards[0])[:400]}"
             )
@@ -1028,7 +1028,7 @@ class WelshParliamentScraper(BaseScraper):
                 if page == 1 and records and not hasattr(self, "_search_q_sample_logged"):
                     self._search_q_sample_logged = True
                     samp = records[-1]
-                    logger.warning(
+                    logger.debug(
                         f"[Welsh Parliament] Search question sample: "
                         f"name={samp.get('member', {}).get('name', '')!r} "
                         f"date={samp.get('date', '')!r} "
@@ -1198,7 +1198,7 @@ class WelshParliamentScraper(BaseScraper):
             if wq_items:
                 if not hasattr(self, "_op_item_logged"):
                     self._op_item_logged = True
-                    logger.warning(
+                    logger.debug(
                         f"[Welsh Parliament] Order-paper itemContent structure ({day_str}): "
                         f"{len(wq_items)} items. First HTML: {str(wq_items[0])[:700]!r}"
                     )
@@ -1290,7 +1290,7 @@ class WelshParliamentScraper(BaseScraper):
                     if not first_row_logged:
                         first_row_logged = True
                         self._op_inline_logged = True
-                        logger.warning(
+                        logger.debug(
                             f"[Welsh Parliament] Order-paper INLINE row ({q_id}): "
                             f"name={member_name!r} cells={[td.get_text(strip=True) for td in row.select('td')][:6]} "
                             f"HTML={str(row)[:600]!r}"

@@ -124,12 +124,12 @@ class ScottishParliamentScraper(BaseScraper):
                     self._expand_logged = True
                     sample = expand_rows[0]
                     mp = sample.get("MemberParties")
-                    logger.warning(f"[Scottish Parliament] Members?$expand=MemberParties sample MemberParties={mp!r:.200}")
+                    logger.debug(f"[Scottish Parliament] Members?$expand=MemberParties sample MemberParties={mp!r:.200}")
         except Exception:
             pass
         rows = expand_rows or self._odata_get("Members")
         if rows:
-            logger.warning(f"[Scottish Parliament] Members OData sample fields: {list(rows[0].keys())} | sample={dict(list(rows[0].items())[:8])!r:.400}")
+            logger.debug(f"[Scottish Parliament] Members OData sample fields: {list(rows[0].keys())} | sample={dict(list(rows[0].items())[:8])!r:.400}")
         members = []
         for m in rows:
             member_id = str(
@@ -196,7 +196,7 @@ class ScottishParliamentScraper(BaseScraper):
             return
         if not hasattr(self, "_parties_logged"):
             self._parties_logged = True
-            logger.warning(f"[Scottish Parliament] Parties fields: {list(party_rows[0].keys())} | sample={party_rows[0]!r:.300}")
+            logger.debug(f"[Scottish Parliament] Parties fields: {list(party_rows[0].keys())} | sample={party_rows[0]!r:.300}")
         party_name_by_id: Dict[str, str] = {}
         for pr in party_rows:
             pid = str(pr.get("ID") or pr.get("Id") or pr.get("PartyID") or "")
@@ -213,7 +213,7 @@ class ScottishParliamentScraper(BaseScraper):
             return
         if not hasattr(self, "_memberparties_logged"):
             self._memberparties_logged = True
-            logger.warning(f"[Scottish Parliament] MemberParties fields: {list(mp_rows[0].keys())} | sample={mp_rows[0]!r:.300}")
+            logger.debug(f"[Scottish Parliament] MemberParties fields: {list(mp_rows[0].keys())} | sample={mp_rows[0]!r:.300}")
 
         # Group membership rows per person so we can choose the most recent/current.
         per_person: Dict[str, list] = {}
@@ -1087,7 +1087,7 @@ class ScottishParliamentScraper(BaseScraper):
             if not items:
                 logger.warning(f"[Scottish Parliament] Events endpoint {entity}: 0 items")
                 continue
-            logger.warning(f"[Scottish Parliament] Events fields: {list(items[0].keys())} | sample={items[0]!r:.300}")
+            logger.debug(f"[Scottish Parliament] Events fields: {list(items[0].keys())} | sample={items[0]!r:.300}")
             for item in items:
                 meeting_id = str(
                     item.get("EventId") or item.get("MeetingId") or item.get("Id") or item.get("id") or ""

@@ -362,7 +362,7 @@ class NIAssemblyScraper(BaseScraper):
             return []
 
         if rows:
-            logger.warning(f"[NI Assembly] Register sample fields: {list(rows[0].keys())} | sample={dict(list(rows[0].items())[:6])!r:.300}")
+            logger.debug(f"[NI Assembly] Register sample fields: {list(rows[0].keys())} | sample={dict(list(rows[0].items())[:6])!r:.300}")
 
         lookup = self._member_lookup(members)
         records = []
@@ -557,7 +557,7 @@ class NIAssemblyScraper(BaseScraper):
                 data = self._parse_asmx_response(resp, url)
                 items = _first_list(data)
                 if items and not records:
-                    logger.warning(f"[NI Assembly] Question sample fields ({q_type}): {list(items[0].keys())} | sample={dict(list(items[0].items())[:6])!r:.300}")
+                    logger.debug(f"[NI Assembly] Question sample fields ({q_type}): {list(items[0].keys())} | sample={dict(list(items[0].items())[:6])!r:.300}")
                 for q in items:
                     q_text = q.get("QuestionText", q.get("Text", ""))
                     answer = q.get("AnswerText", q.get("Answer", ""))
@@ -781,7 +781,7 @@ class NIAssemblyScraper(BaseScraper):
             comp_items = _first_list(comp_data)
             if i == 0:
                 if comp_items:
-                    logger.warning(f"[NI Assembly] Plenary component fields: {list(comp_items[0].keys())} | sample={comp_items[0]!r:.400}")
+                    logger.debug(f"[NI Assembly] Plenary component fields: {list(comp_items[0].keys())} | sample={comp_items[0]!r:.400}")
                 else:
                     logger.warning(f"[NI Assembly] Component fetch for first report_id={report_id!r} returned 0 items (comp_resp={bool(comp_resp)})")
 
@@ -997,7 +997,7 @@ class NIAssemblyScraper(BaseScraper):
             data = self._parse_asmx_response(resp, url)
             vote_items = _first_list(data)
             if vote_items and not records:
-                logger.warning(f"[NI Assembly] Vote sample fields: {list(vote_items[0].keys())} | sample={dict(list(vote_items[0].items())[:6])!r:.300}")
+                logger.debug(f"[NI Assembly] Vote sample fields: {list(vote_items[0].keys())} | sample={dict(list(vote_items[0].items())[:6])!r:.300}")
             for division in vote_items:
                 div_id = str(division.get("EventID") or division.get("DocumentID") or division.get("DivisionId") or "")
                 div_title = division.get("DivisionSubject") or division.get("MotionText") or division.get("DivisionTitle") or ""
@@ -1014,7 +1014,7 @@ class NIAssemblyScraper(BaseScraper):
                 if member_votes and not hasattr(self, "_vote_member_fields_logged"):
                     self._vote_member_fields_logged = True
                     sample_mv = member_votes[0] if member_votes else {}
-                    logger.warning(f"[NI Assembly] MemberVoting[0]: type={type(sample_mv).__name__} | {sample_mv!r:.300}")
+                    logger.debug(f"[NI Assembly] MemberVoting[0]: type={type(sample_mv).__name__} | {sample_mv!r:.300}")
 
                 doc_id = str(division.get("DocumentID") or division.get("DocumentId") or div_id)
                 if not member_votes and div_id:
@@ -1035,7 +1035,7 @@ class NIAssemblyScraper(BaseScraper):
                                 member_votes = candidate
                                 self._per_div_method_found = method
                                 self._per_div_method_param = id_param
-                                logger.warning(f"[NI Assembly] Per-division method found: {method} (param={id_param}) → {len(member_votes)} votes | sample={member_votes[0]!r:.300}")
+                                logger.debug(f"[NI Assembly] Per-division method found: {method} (param={id_param}) → {len(member_votes)} votes | sample={member_votes[0]!r:.300}")
                                 break
                         # If confirmed methods failed, try fallbacks
                         if not member_votes:
@@ -1054,7 +1054,7 @@ class NIAssemblyScraper(BaseScraper):
                                         member_votes = candidate
                                         self._per_div_method_found = method
                                         self._per_div_method_param = id_param
-                                        logger.warning(f"[NI Assembly] Per-division fallback found: {method} (param={id_param}) → {len(member_votes)} votes | sample={member_votes[0]!r:.300}")
+                                        logger.debug(f"[NI Assembly] Per-division fallback found: {method} (param={id_param}) → {len(member_votes)} votes | sample={member_votes[0]!r:.300}")
                                         break
                                 if member_votes:
                                     break
