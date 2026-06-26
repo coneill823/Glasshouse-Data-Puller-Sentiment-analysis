@@ -9,7 +9,7 @@ import logging
 import re
 from datetime import date, timedelta
 from typing import Dict, List, Optional, Tuple
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlencode
 
 from bs4 import BeautifulSoup
 
@@ -27,6 +27,10 @@ _BROWSER_UA = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0.0.0 Safari/537.36"
 )
+
+_OR_SEARCH = f"{_WEB}/chamber-and-committees/official-report/search-what-was-said-in-parliament"
+_OR_MEDIA = f"{_WEB}/api/sitecore/CustomMedia/OfficialReport"
+_MAX_OR_PAGES = 60   # safety cap on Official Report search pagination
 
 
 class ScottishParliamentScraper(BaseScraper):
@@ -1105,67 +1109,201 @@ class ScottishParliamentScraper(BaseScraper):
                 break
         return meetings
 
-    def _fetch_or_via_api(self, meeting_id: str, meeting_date: str,
-                           records: List[Dict], from_date: Optional[str]) -> int:
-        """Fetch Official Report for one meeting via the parliament.scot media API.
+    # ------------------------------------------------------------------
+    # Plenary Official Report — browser-discovered meetings + PDF parsing
+    # ------------------------------------------------------------------
 
-        The API returns HTML with speaker contributions — parse each paragraph.
-        Returns number of records added.
+    @staticmethod
+    def _extract_or_meetings(html: str) -> Dict[str, str]:
+        """meeting_id -> DD-MM-YYYY for plenary result links in OR search HTML."""
+        out: Dict[str, str] = {}
+        for m in re.finditer(
+                r"search-what-was-said-in-parliament/([\w-]+?)-(\d{2}-\d{2}-\d{4})\?meeting=(\d+)", html):
+            if m.group(1) == "meeting-of-parliament":   # plenary, not a committee
+                out[m.group(3)] = m.group(2)
+        return out
+
+    def _dismiss_or_cookies(self, page) -> None:
+        """The Civic Cookie Control banner overlays the page and intercepts clicks —
+        accept it if a button is present, else strip the nodes."""
+        for sel in ["#ccc-recommended-settings", "#ccc-notify-accept", ".ccc-accept-button"]:
+            loc = page.locator(sel)
+            try:
+                if loc.count() and loc.first.is_visible():
+                    loc.first.click(timeout=3000)
+                    page.wait_for_timeout(300)
+                    return
+            except Exception:
+                pass
+        try:
+            page.evaluate("() => { document.querySelectorAll('[id^=ccc],.ccc-overlay')"
+                          ".forEach(e => e.remove()); }")
+        except Exception:
+            pass
+
+    @staticmethod
+    def _wait_or_results(page) -> None:
+        """OR results render via AJAX — wait until the meeting-link count stabilises."""
+        import time
+        last, stable, deadline = -1, 0, time.time() + 30
+        while time.time() < deadline:
+            page.wait_for_timeout(1500)
+            n = len(re.findall(r"meeting=\d+", page.content()))
+            if n == last and n > 0:
+                stable += 1
+                if stable >= 2:
+                    return
+            else:
+                stable = 0
+            last = n
+
+    def _discover_plenary_meetings(self, from_date: Optional[str] = None,
+                                   to_date: Optional[str] = None) -> List[Dict]:
+        """Discover Meeting-of-the-Parliament IDs by driving the OR search in a browser.
+
+        parliament.scot's Official Report search is a client-side SPA — the OData
+        meeting entities 404 and plain HTTP can't drive the filter. We navigate a
+        headless browser to the search URL with the date range + plenary filter, let
+        the results render, page through them, and collect the meeting IDs behind the
+        'meeting-of-parliament-{date}?meeting={id}' links. Returns [{id, date}].
+        Returns [] (logged) if Playwright is unavailable.
+        """
+        start = from_date or "2021-05-06"
+        end = to_date or date.today().isoformat()
+        params = {
+            "qry": "", "msp": "", "committeeSelect": "", "dateSelect": "custom",
+            "dtDateFrom": start, "dtDateTo": end,
+            "showPlenary": "true", "ShowDebates": "true", "ShowFMQs": "true",
+            "ShowGeneralQuestions": "true", "ShowPortfolioQuestions": "true",
+            "ShowSPCBQuestions": "true", "ShowTopicalQuestions": "true",
+            "ShowUrgentQuestions": "true", "ResultDisplayType": "Reports",
+        }
+        url = f"{_OR_SEARCH}?{urlencode(params)}"
+
+        browser = self._get_browser()
+        if browser is None:
+            logger.warning("[Scottish Parliament] Playwright unavailable — cannot drive the "
+                           "Official Report search; plenary discovery skipped.")
+            return []
+
+        meetings: Dict[str, str] = {}
+        page = None
+        try:
+            page = browser.new_page(user_agent=_BROWSER_UA)
+            page.set_default_timeout(25000)
+            page.goto(url, wait_until="domcontentloaded")
+            page.wait_for_timeout(1500)
+            self._dismiss_or_cookies(page)
+            for _ in range(_MAX_OR_PAGES):
+                self._wait_or_results(page)
+                meetings.update(self._extract_or_meetings(page.content()))
+                nxt = page.locator("a[rel=next], a:has-text('Next')")
+                if not nxt.count():
+                    break
+                try:
+                    nxt.first.click(timeout=8000)
+                    page.wait_for_timeout(1200)
+                except Exception:
+                    break
+        except Exception as e:
+            logger.warning(f"[Scottish Parliament] OR search drive failed: {type(e).__name__}: {e}")
+        finally:
+            if page is not None:
+                try:
+                    page.close()
+                except Exception:
+                    pass
+
+        def _iso(d: str) -> str:
+            return f"{d[6:10]}-{d[3:5]}-{d[0:2]}" if len(d) == 10 else d
+
+        out = [{"id": mid, "date": _iso(d)} for mid, d in meetings.items()]
+        out.sort(key=lambda m: m["date"], reverse=True)
+        logger.info(f"[Scottish Parliament] {len(out)} plenary meetings discovered via OR "
+                    f"search ({start} -> {end})")
+        return out
+
+    # Page-header/footer noise in the OR PDF: running date lines + bare column numbers.
+    _OR_NOISE_RE = re.compile(r"^(\d{1,4}\s+)?\d{1,2}\s+[A-Za-z]+\s+\d{4}(\s+\d{1,4})?$")
+    _OR_SPEAKER_RE = re.compile(
+        r"^(The [A-Z][\w’'. -]+"
+        r"|[A-Z][\w’'.-]+(?: [A-Z][\w’'.-]+)+(?: \([^)]+\))*"
+        r"|[A-Z][\w’'.-]+ \([^)]+\)(?: \([^)]+\))*)"
+        r":\s*(.*)$")
+
+    @classmethod
+    def _parse_or_contributions(cls, text: str):
+        """Split OR PDF text into (speaker, contribution) pairs, dropping page noise."""
+        contribs, name, buf, started = [], "", [], False
+        for raw in text.splitlines():
+            s = raw.strip()
+            if not s or cls._OR_NOISE_RE.match(s):
+                continue
+            if not started:
+                if cls._OR_SPEAKER_RE.match(s):
+                    started = True
+                else:
+                    continue
+            m = cls._OR_SPEAKER_RE.match(s)
+            if m and len(m.group(1)) < 70:
+                if name and buf:
+                    contribs.append((name, " ".join(buf).strip()))
+                name, buf = m.group(1), ([m.group(2)] if m.group(2) else [])
+            elif name:
+                buf.append(s)
+        if name and buf:
+            contribs.append((name, " ".join(buf).strip()))
+        return [(n, t) for n, t in contribs if len(t) >= 10]
+
+    def _fetch_or_via_api(self, meeting_id: str, meeting_date: str,
+                          records: List[Dict], from_date: Optional[str]) -> int:
+        """Fetch one plenary meeting's Official Report PDF and parse its contributions.
+
+        parliament.scot/api/sitecore/CustomMedia/OfficialReport?meetingId=N returns
+        the full Official Report as a PDF; we extract per-speaker contributions with
+        PyMuPDF. Returns the number of records added.
         """
         if from_date and meeting_date and meeting_date < from_date:
             return 0
-        url = f"{_WEB}/api/sitecore/CustomMedia/OfficialReport"
+        try:
+            import fitz  # PyMuPDF
+        except Exception as e:
+            logger.warning(f"[Scottish Parliament] PyMuPDF unavailable ({type(e).__name__}: {e}) "
+                           "— OR PDF parsing skipped")
+            return 0
         saved = dict(self.session.headers)
-        self.session.headers.update({
-            "User-Agent": _BROWSER_UA,
-            "Accept": "text/html,*/*;q=0.8",
-            "Referer": f"{_WEB}/chamber-and-committees/official-report/",
-        })
-        resp = self._get(url, params={"meetingId": meeting_id}, timeout=60)
+        self.session.headers.update({"User-Agent": _BROWSER_UA, "Accept": "application/pdf,*/*"})
+        resp = self._get(_OR_MEDIA, params={"meetingId": meeting_id}, timeout=90)
         self.session.headers.clear()
         self.session.headers.update(saved)
         if not resp or not resp.ok:
             return 0
-        ct = resp.headers.get("Content-Type", "")
-        if "json" in ct:
-            try:
-                payload = resp.json()
-                html_content = payload.get("html") or payload.get("content") or ""
-                if not html_content:
-                    return 0
-                soup = BeautifulSoup(html_content, "lxml")
-            except Exception:
-                return 0
-        else:
-            soup = BeautifulSoup(resp.text, "lxml")
-
+        ct = resp.headers.get("Content-Type", "").lower()
+        if "pdf" not in ct and resp.content[:5] != b"%PDF-":
+            return 0
+        try:
+            doc = fitz.open(stream=resp.content, filetype="pdf")
+            text = "\n".join(doc[i].get_text() for i in range(doc.page_count))
+            doc.close()
+        except Exception as e:
+            logger.warning(f"[Scottish Parliament] OR PDF parse error meeting {meeting_id}: "
+                           f"{type(e).__name__}: {e}")
+            return 0
         before = len(records)
-        # Each contribution is typically <p> with speaker name bolded or in a span,
-        # or structured as rows with speaker + text cells.
-        for contrib in soup.select("p, .contribution, tr, .or-contribution, .speech"):
-            text = contrib.get_text(strip=True)
-            if len(text) < 10:
-                continue
-            speaker_el = contrib.select_one("strong, b, .speaker, th, td:first-child")
-            name = speaker_el.get_text(strip=True) if speaker_el else ""
-            # If name is embedded at start of text "Name: speech..."
-            if not name and ":" in text:
-                prefix = text.split(":", 1)[0].strip()
-                if prefix and len(prefix) < 60:
-                    name = prefix
+        for name, body in self._parse_or_contributions(text):
             records.append(self._make_record(
                 data_type="plenary_speech",
                 member={"id": "", "name": name, "party": "", "constituency": "", "role": "MSP"},
                 date=meeting_date,
-                text=text,
+                text=body,
                 title="",
-                source_url=f"{url}?meetingId={meeting_id}",
+                metadata={"meeting_id": meeting_id, "source_format": "pdf"},
+                source_url=f"{_OR_MEDIA}?meetingId={meeting_id}",
             ))
         added = len(records) - before
-        if added == 0 and not hasattr(self, "_or_api_empty_logged"):
-            self._or_api_empty_logged = True
-            snippet = soup.get_text(strip=True)[:300] if soup else ""
-            logger.warning(f"[Scottish Parliament] OR API meeting {meeting_id}: 0 contribs — snippet: {snippet}")
+        if added:
+            logger.info(f"[Scottish Parliament] OR meeting {meeting_id} ({meeting_date}): "
+                        f"{added} contributions")
         return added
 
     def fetch_plenary_business(self, from_date: Optional[str] = None,
@@ -1173,11 +1311,11 @@ class ScottishParliamentScraper(BaseScraper):
         records: List[Dict] = []
 
         # ----------------------------------------------------------------
-        # 1. Official Report via parliament.scot media API.
-        #    GET /api/sitecore/CustomMedia/OfficialReport?meetingId=NNNN
-        #    Meeting IDs come from the data.parliament.scot OData Events entity.
+        # 1. Official Report PDFs via the media API, for plenary meetings
+        #    discovered by driving the OR search in a headless browser.
+        #    GET /api/sitecore/CustomMedia/OfficialReport?meetingId=NNNN -> PDF
         # ----------------------------------------------------------------
-        meetings = self._fetch_meeting_ids(from_date, to_date)
+        meetings = self._discover_plenary_meetings(from_date, to_date)
         if meetings:
             logger.info(f"[Scottish Parliament] Fetching OR for {len(meetings)} meetings via API...")
             hits = 0
