@@ -70,26 +70,31 @@ class BaseScraper(ABC):
             headers["Accept"] = accept
         effective_timeout = timeout if timeout is not None else REQUEST_TIMEOUT
 
-        # Once a host is clearly struggling, stop spending the full retry budget /
-        # 30s timeout on each item — fail fast so the circuit opens promptly
-        # instead of the run crawling at ~96s per dead request.
+        # The circuit tracks only connection/timeout failures — a host that has
+        # stopped responding (the case that stalls the run at ~96s per dead
+        # request). HTTP 5xx is handled separately: the server is alive but errored
+        # on this item, so we retry then skip just that item and keep going (an old
+        # ASMX service that 500s on a few historical reports must still complete the
+        # rest, as it did before the circuit existed). Once timeouts are mounting we
+        # also drop to a single short-timeout attempt so the circuit opens promptly.
         degrading = self._consecutive_host_failures.get(host, 0) >= CIRCUIT_DEGRADE_AT
         attempts = 1 if degrading else MAX_RETRIES
         if degrading:
             effective_timeout = min(effective_timeout, CIRCUIT_FAST_TIMEOUT)
 
-        def _note_failure():
+        def _note_timeout_failure():
             n = self._consecutive_host_failures.get(host, 0) + 1
             self._consecutive_host_failures[host] = n
             if n >= CIRCUIT_OPEN_THRESHOLD:
                 self._circuit_open_until[host] = time.time() + CIRCUIT_COOLDOWN
                 self._degraded = True
                 logger.warning(
-                    f"[{self.parliament_name}] {host}: {n} consecutive failures — opening "
+                    f"[{self.parliament_name}] {host}: {n} consecutive timeouts — opening "
                     f"circuit for {CIRCUIT_COOLDOWN}s. Further requests fast-fail; this data "
                     f"type will be recorded incomplete and retried on a later run."
                 )
 
+        timed_out = False
         for attempt in range(attempts):
             try:
                 resp = self.session.get(url, params=params, timeout=effective_timeout, headers=headers)
@@ -108,6 +113,8 @@ class BaseScraper(ABC):
                     logger.error(f"HTTP {code} from {url} — skipping.")
                     return None
             except requests.exceptions.RequestException as e:
+                # Timeouts / connection errors — the host isn't responding.
+                timed_out = True
                 wait = RETRY_BACKOFF_BASE ** attempt
                 logger.warning(f"Request error (attempt {attempt + 1}/{attempts}): {e}. Retry in {wait}s.")
                 time.sleep(wait)
@@ -119,7 +126,10 @@ class BaseScraper(ABC):
                 logger.error(f"Unfetchable URL {url}: {type(e).__name__}: {e} — skipping.")
                 return None
         logger.error(f"All {attempts} attempts failed for {url}")
-        _note_failure()
+        # Only unresponsiveness (timeouts) trips the circuit; exhausted 5xx retries
+        # just skip this one item so a flaky-but-alive host still finishes the type.
+        if timed_out:
+            _note_timeout_failure()
         return None
 
     def _paginate(self, url: str, params: Dict, page_size: int = 100,
