@@ -14,7 +14,7 @@ from urllib.parse import urljoin, urlencode
 from bs4 import BeautifulSoup
 
 from .base_scraper import BaseScraper
-from config import PARLIAMENTS, MAX_QUESTION_DETAIL_PAGES
+from config import PARLIAMENTS
 
 logger = logging.getLogger(__name__)
 
@@ -606,46 +606,14 @@ class ScottishParliamentScraper(BaseScraper):
     # Questions — scraped from parliament.scot
     # ------------------------------------------------------------------
 
-    # A real question-detail link points at the question viewer or carries a
-    # question reference (S6W-12345 written, S6O- portfolio, S6T- topical, plus
-    # the new session-7 S7* equivalents). The previous "any href with /\d+ or a
-    # date" rule matched generic site navigation, so we ended up following links
-    # into landing pages and harvesting their boilerplate <p> text as "questions".
-    _QUESTION_HREF_RE = re.compile(
-        r"questions?-and-answers/question\b|[?&](?:reference|ref|uri|qref)=|S\d+[WTOFR]-\d+", re.I)
-    _QUESTION_HREF_EXCLUDE_RE = re.compile(
-        r"/about\b|general-questions|guidance|standing-orders|how-parliament-works|/help\b|/glossary\b",
-        re.I)
-
-    def _question_links(self, soup: BeautifulSoup) -> List[str]:
-        out: List[str] = []
-        for a in soup.select("a[href]"):
-            href = a.get("href", "")
-            if not href.startswith(("/", "http")):
-                continue
-            if self._QUESTION_HREF_RE.search(href) and not self._QUESTION_HREF_EXCLUDE_RE.search(href):
-                out.append(href)
-        return out
-
-    # A rendered question-detail page (e.g. ?ref=S7W-00729) carries NO .question /
-    # .answer CSS hooks — just generic "basic-content" blocks. The content is laid
-    # out as labelled fields instead, so we parse by label rather than by selector:
+    # A question-search result card carries its reference, asker and answerer as
+    # labelled lines (parsed in _parse_question_card):
     #   Question reference: S7W-00729
     #   Asked by: Alexander Burnett, MSP for Aberdeenshire West, Scottish Conservative...
-    #   Date lodged: 2 June 2026
-    #   Current status: Answered by Angela Constance on 16 June 2026
-    #   Question  <question prose>
-    #   Answer    <answer prose>
+    #   Current Status: Answered by Angela Constance on 16 June 2026
     _Q_REF_RE = re.compile(r"Question reference:\s*(S\d+\w-\d+)", re.I)
-    _Q_ASKED_BY_RE = re.compile(r"Asked by:\s*(.+?)\s+Date lodged:", re.I)
-    _Q_DATE_LODGED_RE = re.compile(r"Date lodged:\s*(\d{1,2}\s+\w+\s+\d{4})", re.I)
     _Q_ANSWERED_BY_RE = re.compile(
         r"Answered by\s+(.+?)\s+on\s+(\d{1,2}\s+\w+\s+\d{4})", re.I)
-    # Footer/nav lines that can trail the answer prose once the SPA has rendered.
-    _Q_FOOTER_RE = re.compile(
-        r"^(back to top|share|related|previous|next|search|all questions|"
-        r"current and previous|sign up|©|cookie|this website|contact us|"
-        r"copyright|follow us|accessibility|other questions)", re.I)
 
     @staticmethod
     def _split_asker(s: str) -> Tuple[str, str, str]:
@@ -661,66 +629,77 @@ class ScottishParliamentScraper(BaseScraper):
                 party = p  # the remaining non-MSP fragment is the party
         return name, party, constituency
 
-    def _parse_question_detail(self, soup: BeautifulSoup, full_url: str,
-                               from_date: Optional[str], records: List[Dict]) -> int:
-        """Parse a rendered question-detail page by its field labels.
+    # The questions-and-answers page is server-side rendered: submitting the
+    # search form is a plain GET back to the page itself. The date-range control
+    # carries a "<token>|<from>|<to>" value; the server parses the two date
+    # strings (the leading token is a stable, range-agnostic prefix) and renders
+    # 10 result cards per page, each card holding the full question + answer
+    # inline — so we bound the fetch by date and page through, parsing cards
+    # directly (no per-question detail fetch needed).
+    _QUESTIONS_URL = f"{_WEB}/chamber-and-committees/questions-and-answers"
+    _Q_DATE_SELECT_TOKEN = "acfe09e8571447b6ac663f6362a20f42"
+    _Q_PAGE_SIZE = 10
+    _Q_MAX_PAGES = 600   # safety cap (~6000 questions per pull)
+    _SCOTTISH_PARLIAMENT_EPOCH = "1999-05-12"  # opening of the Scottish Parliament
+    _Q_REF_IN_HREF_RE = re.compile(r"ref=(S\d+\w-\d+)", re.I)
 
-        Produces one record for the question (attributed to the asking MSP, with
-        party/constituency lifted straight off the page) and, when present, one
-        for the answer (attributed to the responding minister). Returns the count
-        added, or 0 if the page carried no recognisable question reference.
+    @staticmethod
+    def _format_q_date(iso: str) -> str:
+        """YYYY-MM-DD -> the 'Weekday, Mon D, YYYY' string the date control sends."""
+        from datetime import datetime as _dt
+        d = _dt.strptime(iso, "%Y-%m-%d")
+        # %-d (no leading zero) isn't portable across platforms; build it by hand.
+        return f"{d.strftime('%A, %b')} {d.day}, {d.year}"
+
+    def _card_ref(self, card) -> str:
+        a = card.select_one("a[href*='ref=']")
+        if a:
+            m = self._Q_REF_IN_HREF_RE.search(a.get("href", ""))
+            if m:
+                return m.group(1).upper()
+        m = self._Q_REF_RE.search(card.get_text(" ", strip=True))
+        return m.group(1).upper() if m else ""
+
+    def _parse_question_card(self, card, ref: str, from_date: Optional[str],
+                             records: List[Dict]) -> int:
+        """Parse one div.content-list__block search-result card.
+
+        Emits a record for the question (attributed to the asking MSP, with
+        party/constituency lifted off the 'Asked by' line) and, when answered,
+        one for the answer (attributed to the responding minister). Returns the
+        number of records added.
         """
-        main = soup.find("main") or soup.find("article") or soup.find("body") or soup
-        # Collapse each text node to a single line so the "Question"/"Answer"
-        # headings stand alone and metadata fields keep their trailing labels.
-        lines = [re.sub(r"\s+", " ", ln).strip()
-                 for ln in main.get_text("\n", strip=True).split("\n")]
-        lines = [ln for ln in lines if ln]
-        flat = " ".join(lines)
+        def _li(label: str) -> str:
+            for li in card.select("ul.contents-nav li"):
+                t = li.get_text(" ", strip=True)
+                if t.lower().startswith(label.lower()):
+                    return t
+            return ""
 
-        ref_m = self._Q_REF_RE.search(flat)
-        if not ref_m:
-            return 0
-        ref = ref_m.group(1)
-        body = flat[ref_m.end():]
-
-        lodged_m = self._Q_DATE_LODGED_RE.search(body)
-        date_lodged = self._extract_date_from_text(lodged_m.group(1)) if lodged_m else ""
-        if from_date and date_lodged and date_lodged < from_date:
-            return 0
-
-        asker_name, asker_party, asker_constit = "", "", ""
-        asked_m = self._Q_ASKED_BY_RE.search(body)
+        asker_name = asker_party = asker_constit = ""
+        asked_m = re.search(r"Asked by:\s*(.+)", _li("Asked by:"), re.I)
         if asked_m:
             asker_name, asker_party, asker_constit = self._split_asker(asked_m.group(1))
 
-        answered_m = self._Q_ANSWERED_BY_RE.search(body)
+        date_lodged = self._extract_date_from_text(_li("Date lodged:"))
+        if from_date and date_lodged and date_lodged < from_date:
+            return 0
+
+        answered_m = self._Q_ANSWERED_BY_RE.search(_li("Current Status:"))
         answerer = answered_m.group(1).strip() if answered_m else ""
         answer_date = (self._extract_date_from_text(answered_m.group(2))
                        if answered_m else date_lodged)
 
-        # Locate the standalone "Question" / "Answer" heading lines and take the
-        # prose that follows each, stopping at the answer heading or page footer.
-        def _heading_idx(want: tuple) -> int:
-            return next((i for i, l in enumerate(lines)
-                         if l.lower() in want), -1)
+        # Question prose = the card's direct <p> children (skip the empty lead
+        # <p>); the answer lives in the hidden .waanswer.rich-text panel.
+        q_text = " ".join(
+            t for t in (p.get_text(" ", strip=True)
+                        for p in card.find_all("p", recursive=False)) if t).strip()
+        ans_el = (card.select_one("div.waanswer.rich-text")
+                  or card.select_one("div.waanswer"))
+        a_text = ans_el.get_text(" ", strip=True) if ans_el else ""
 
-        def _footer_idx(start: int) -> int:
-            for i in range(start, len(lines)):
-                if self._Q_FOOTER_RE.match(lines[i]):
-                    return i
-            return len(lines)
-
-        q_idx = _heading_idx(("question", "question text"))
-        a_idx = _heading_idx(("answer", "answer text"))
-        q_text, a_text = "", ""
-        if q_idx != -1:
-            q_end = a_idx if a_idx > q_idx else _footer_idx(q_idx + 1)
-            q_text = " ".join(lines[q_idx + 1:q_end]).strip()
-        if a_idx != -1:
-            a_end = _footer_idx(a_idx + 1)
-            a_text = " ".join(lines[a_idx + 1:a_end]).strip()
-
+        url = f"{self._QUESTIONS_URL}/question?ref={ref}"
         added = 0
         if len(q_text) >= 10:
             records.append(self._make_record(
@@ -732,7 +711,7 @@ class ScottishParliamentScraper(BaseScraper):
                 title=ref,
                 metadata={"question_ref": ref, "qa_role": "question",
                           "answered_by": answerer},
-                source_url=full_url,
+                source_url=url,
             ))
             added += 1
         if len(a_text) >= 10:
@@ -745,115 +724,60 @@ class ScottishParliamentScraper(BaseScraper):
                 title=ref,
                 metadata={"question_ref": ref, "qa_role": "answer",
                           "asked_by": asker_name},
-                source_url=full_url,
+                source_url=url,
             ))
             added += 1
         return added
 
-    def _diagnose_question_structure(self, soup: BeautifulSoup, full_url: str, rendered: bool) -> None:
-        """One-shot structural dump of a question-detail page that matched no item
-        selector, so the real markup can be targeted next time."""
-        if hasattr(self, "_q_diag_logged"):
-            return
-        self._q_diag_logged = True
-        all_cls = sorted({c for el in soup.select("[class]") for c in el.get("class", [])})
-        tag_counts: Dict[str, int] = {}
-        for el in soup.find_all(True):
-            tag_counts[el.name] = tag_counts.get(el.name, 0) + 1
-        common_tags = sorted(tag_counts.items(), key=lambda kv: -kv[1])[:15]
-        iframes = [f.get("src", "") for f in soup.find_all("iframe")]
-        main_el = soup.find("main") or soup.find("article") or soup.find("body")
-        main_text = main_el.get_text(separator=" ", strip=True)[:600] if main_el else ""
-        main_html = str(main_el)[:1000] if main_el else ""
-        logger.warning(
-            f"[Scottish Parliament] Question structure dump ({'rendered' if rendered else 'plain HTTP'}) "
-            f"{full_url}: css_classes(first 50)={all_cls[:50]} | tag_counts={common_tags} | "
-            f"iframes={iframes[:5]} | main_text_sample={main_text!r}"
-        )
-        logger.warning(
-            f"[Scottish Parliament] Question HTML sample {full_url}: {main_html!r}"
-        )
-
     def fetch_questions(self, from_date: Optional[str] = None,
                         to_date: Optional[str] = None) -> List[Dict]:
-        # to_date is enforced by fetch_all's post-filter; the question listing
-        # has no date-range parameter to bound the fetch server-side.
-        # Try every candidate listing and keep whichever yields the best result —
-        # "best" meaning the most records with a member name attached, falling
-        # back to raw record count. Breaking on the first path to return *any*
-        # records is unsound here: the search SPA can render a small, sparsely
-        # attributed subset while the plainer listing page yields a much larger,
-        # better-attributed set (or vice versa) depending on what's JS-rendered.
-        best_records: List[Dict] = []
+        start = from_date or self._SCOTTISH_PARLIAMENT_EPOCH
+        end = to_date or date.today().isoformat()
+        try:
+            date_select = (f"{self._Q_DATE_SELECT_TOKEN}|"
+                           f"{self._format_q_date(start)}|{self._format_q_date(end)}")
+        except ValueError:
+            # Unparseable dates — fall back to the full-history range.
+            date_select = (f"{self._Q_DATE_SELECT_TOKEN}|"
+                           f"{self._format_q_date(self._SCOTTISH_PARLIAMENT_EPOCH)}|"
+                           f"{self._format_q_date(date.today().isoformat())}")
+        base = {"msp": "", "qry": "", "qryref": "", "dateSelect": date_select}
 
-        for path in [
-            # The real, working search listing (the "/question-search" path 404s).
-            "/chamber-and-committees/written-questions-and-answers",
-            "/chamber-and-committees/questions-and-answers/question-search",
-            "/chamber-and-committees/questions-and-answers",
-        ]:
-            url = f"{_WEB}{path}"
-            soup = self._html_get(url)
-            links = self._question_links(soup) if soup else []
-
-            if not links:
-                # parliament.scot's question search is a JS single-page app — plain
-                # HTTP often returns an empty shell. Re-render it through a browser.
-                rendered = self._browser_get(url, wait_selector="a[href*='question'], a[href*='answer'], main")
-                if rendered:
-                    rendered_links = self._question_links(rendered)
-                    if rendered_links:
-                        soup, links = rendered, rendered_links
-                        logger.info(f"[Scottish Parliament] Found {len(links)} question links at {url} (rendered)")
-
-            if not soup:
-                continue
-            if not links:
-                body = soup.find("body")
-                snippet = body.get_text(separator=" ", strip=True)[:500] if body else ""
-                logger.warning(f"[Scottish Parliament] No question links at {url} — snippet: {snippet}")
-                continue
-
-            logger.info(f"[Scottish Parliament] Found {len(links)} question links at {url}")
-            if len(links) > MAX_QUESTION_DETAIL_PAGES:
-                logger.warning(
-                    f"[Scottish Parliament] Questions: {len(links)} links found but capped at "
-                    f"{MAX_QUESTION_DETAIL_PAGES} (MAX_QUESTION_DETAIL_PAGES) — raise in config.py for full coverage"
-                )
-            path_records: List[Dict] = []
-            for href in links[:MAX_QUESTION_DETAIL_PAGES]:
-                full_url = href if href.startswith("http") else f"{_WEB}{href}"
-                detail = self._html_get(full_url)
-                added = (self._parse_question_detail(detail, full_url, from_date, path_records)
-                         if detail else 0)
-                rendered = None
-                if added == 0:
-                    # The question viewer is a JS single-page app — plain HTTP
-                    # returns the nav shell. Re-render so the labelled Q&A loads.
-                    rendered = self._browser_get(
-                        full_url, wait_selector="main p, .basic-content, main h2")
-                    if rendered:
-                        added = self._parse_question_detail(rendered, full_url, from_date, path_records)
-                page = rendered or detail
-                if page is None:
+        records: List[Dict] = []
+        seen: set = set()
+        page = 0
+        for page in range(1, self._Q_MAX_PAGES + 1):
+            params = dict(base)
+            if page > 1:
+                params["page"] = page
+            soup = self._html_get(self._QUESTIONS_URL, params=params)
+            cards = soup.select("div.content-list__block") if soup else []
+            if not cards:
+                break
+            new_refs = 0
+            for card in cards:
+                ref = self._card_ref(card)
+                if not ref or ref in seen:
                     continue
-                if added == 0:
-                    body = page.find("body")
-                    snippet = body.get_text(separator=" ", strip=True)[:300] if body else ""
-                    logger.warning(f"[Scottish Parliament] 0 items from question page {full_url} — snippet: {snippet}")
-                    self._diagnose_question_structure(page, full_url, rendered=bool(rendered))
+                seen.add(ref)
+                new_refs += 1
+                self._parse_question_card(card, ref, from_date, records)
+            # Paging past the last page re-serves page 1 (all-seen) or an empty
+            # list; either way no new refs means we're done.
+            if new_refs == 0:
+                break
+            if len(cards) < self._Q_PAGE_SIZE:
+                break
+        else:
+            logger.warning(
+                f"[Scottish Parliament] Questions: hit the {self._Q_MAX_PAGES}-page "
+                f"cap ({len(seen)} questions) — narrow the date range or raise _Q_MAX_PAGES"
+            )
 
-            def _score(recs: List[Dict]) -> Tuple[int, int]:
-                named = sum(1 for r in recs if str(r.get("member", {}).get("name", "")).strip())
-                return (named, len(recs))
-
-            logger.info(f"[Scottish Parliament] {url} yielded {len(path_records)} question records "
-                        f"({_score(path_records)[0]} with member names)")
-            if _score(path_records) > _score(best_records):
-                best_records = path_records
-
-        logger.info(f"[Scottish Parliament] {len(best_records)} question records fetched (best of candidates)")
-        return best_records
+        logger.info(f"[Scottish Parliament] {len(records)} question records fetched "
+                    f"from {len(seen)} questions across {page} page(s) "
+                    f"({start} → {end})")
+        return records
 
     # ------------------------------------------------------------------
     # Plenary business — Official Report from parliament.scot

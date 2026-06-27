@@ -430,7 +430,7 @@ def test_scotland(verbose: bool = False, save_dir: Optional[Path] = None) -> Lis
          "OData 404 → register published as consolidated PDF, parsed with PyMuPDF", True),
         ("questions",
          lambda: s.fetch_questions(from_date=RECENT_30),
-         "last 30 days; SPA question pages browser-rendered, parsed by field labels (Asked by/Date lodged/Question/Answer)", True),
+         "last 30 days; SSR question search (dateSelect=token|from|to, page=N, 10/page), full Q&A parsed inline per result card — no detail fetch", True),
         ("votes_on_division",
          lambda: s.fetch_votes_on_division(from_date=RECENT_30),
          "VotesMotionsSearch/SearchVotes API → per-division motion-page roll-call (For/Against/Abstained/Did-not-vote MSP links), plain HTTP", True),
