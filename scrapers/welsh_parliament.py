@@ -16,7 +16,7 @@ import logging
 import re
 import xml.etree.ElementTree as ET
 from datetime import date, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
@@ -547,6 +547,27 @@ class WelshParliamentScraper(BaseScraper):
     # Register of interests
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _find_register_pdf(soup: BeautifulSoup) -> Tuple[str, int]:
+        """Pick the newest Register-of-Interests PDF link on the page.
+
+        Matches links whose href/text mention both 'register' and 'interest'
+        (so unrelated /media/ assets and the non-interest "Assembly Register"
+        archives are skipped), and returns the one with the latest year, as
+        (href, year) — ("", -1) if none found.
+        """
+        best_href, best_year = "", -1
+        for a in soup.select("a[href*='.pdf']"):
+            href = a.get("href", "")
+            haystack = f"{href} {a.get_text(strip=True)}".lower()
+            if "register" not in haystack or "interest" not in haystack:
+                continue
+            years = [int(y) for y in re.findall(r"(?:19|20)\d{2}", haystack)]
+            year = max(years) if years else 0
+            if year > best_year:
+                best_href, best_year = href, year
+        return best_href, best_year
+
     def fetch_register_of_interests(self, members: List[Dict]) -> List[Dict]:
         soup = self._try_paths(_BASE, _INTEREST_PATHS)
         records = []
@@ -554,14 +575,29 @@ class WelshParliamentScraper(BaseScraper):
             logger.warning("[Welsh Parliament] Could not load register of interests page")
             return records
 
-        # The interests page may link to a PDF or list interests inline.
-        # The Senedd publishes the consolidated register as a single PDF — download
-        # and parse it with PyMuPDF when that's what we find.
-        pdf_links = soup.select("a[href$='.pdf'], a[href*='/media/']")
-        if pdf_links:
-            pdf_url = pdf_links[0].get("href", "")
-            logger.info(f"[Welsh Parliament] Register of interests is a PDF — downloading and parsing: {pdf_url}")
-            return self._parse_interests_pdf(pdf_url, members)
+        # The Senedd publishes the consolidated Register of Interests only as an
+        # end-of-term PDF (one per Senedd/Assembly), and the page lists every
+        # term's archive. Pick the newest *register* PDF by the years in its link
+        # rather than the first link in DOM order — which is an older archive or
+        # an unrelated /media/ asset (Scotland's scraper hit the same trap).
+        pdf_href, pdf_year = self._find_register_pdf(soup)
+        if pdf_href:
+            pdf_url = pdf_href if pdf_href.startswith("http") else urljoin(_BASE, pdf_href)
+            logger.info(f"[Welsh Parliament] Register of interests PDF "
+                        f"(newest published, to {pdf_year or 'unknown'}): {pdf_url}")
+            records = self._parse_interests_pdf(pdf_url, members)
+            if not records:
+                # 0 records here is the genuine source state, not a parse failure:
+                # the newest consolidated register on the site is the previous
+                # term's end-of-term archive, whose Members predate the current
+                # Senedd. The in-term register lives on per-member profile pages
+                # (not scraped here) and no consolidated PDF exists for it yet.
+                logger.info(
+                    "[Welsh Parliament] 0 register records — the newest published "
+                    "consolidated register is a prior-term archive; the current "
+                    "Senedd's consolidated register is not yet published."
+                )
+            return records
 
         # Try to find per-member interest sections
         section_selectors = [

@@ -96,8 +96,10 @@ _NORMAL_EMPTY = {"plenary_business", "votes_on_division"}
 # election, but that is handled as a _NORMAL_EMPTY 0, not a hard limitation.)
 KNOWN_LIMITATIONS = {
     ("Welsh Parliament (Senedd)", "register_of_interests"):
-        "~200 ongoing-role register entries carry no inline date in the source PDF — "
-        "empty date fields expected",
+        "Senedd publishes the consolidated Register of Interests only as an "
+        "end-of-term PDF; the current Senedd's is not yet published, so this "
+        "returns 0 records until then (in-term interests live on per-member "
+        "profile pages, not scraped here)",
 }
 
 
