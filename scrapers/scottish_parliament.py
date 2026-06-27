@@ -14,7 +14,7 @@ from urllib.parse import urljoin, urlencode
 from bs4 import BeautifulSoup
 
 from .base_scraper import BaseScraper
-from config import PARLIAMENTS
+from config import PARLIAMENTS, MAX_SCOTTISH_QUESTION_PAGES
 
 logger = logging.getLogger(__name__)
 
@@ -639,7 +639,7 @@ class ScottishParliamentScraper(BaseScraper):
     _QUESTIONS_URL = f"{_WEB}/chamber-and-committees/questions-and-answers"
     _Q_DATE_SELECT_TOKEN = "acfe09e8571447b6ac663f6362a20f42"
     _Q_PAGE_SIZE = 10
-    _Q_MAX_PAGES = 600   # safety cap (~6000 questions per pull)
+    _Q_MAX_PAGES = MAX_SCOTTISH_QUESTION_PAGES   # safety cap (config-tunable)
     _SCOTTISH_PARLIAMENT_EPOCH = "1999-05-12"  # opening of the Scottish Parliament
     _Q_REF_IN_HREF_RE = re.compile(r"ref=(S\d+\w-\d+)", re.I)
 

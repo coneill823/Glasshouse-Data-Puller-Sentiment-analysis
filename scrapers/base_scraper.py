@@ -3,21 +3,17 @@ import time
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
 
-from config import REQUEST_TIMEOUT, MAX_RETRIES, RETRY_BACKOFF_BASE, RATE_LIMIT_DELAY
+from config import (REQUEST_TIMEOUT, MAX_RETRIES, RETRY_BACKOFF_BASE, RATE_LIMIT_DELAY,
+                    CIRCUIT_DEGRADE_AT, CIRCUIT_OPEN_THRESHOLD, CIRCUIT_FAST_TIMEOUT,
+                    CIRCUIT_COOLDOWN)
 
 logger = logging.getLogger(__name__)
-
-# After this many consecutive failures from the same host, sleep before retrying.
-# Set high enough that it only fires for genuinely persistent outages (not transient blips
-# or expected rate-limiting runs like NI Assembly ~report 450).
-_CONSECUTIVE_FAIL_THRESHOLD = 20
-_CONSECUTIVE_FAIL_SLEEP = 30  # seconds
 
 
 class BaseScraper(ABC):
@@ -29,8 +25,15 @@ class BaseScraper(ABC):
             "User-Agent": "GlasshouseDataPuller/1.0 (Parliamentary Sentiment Analysis Research)",
         })
         self._last_request_time = 0.0
-        # Track consecutive failures per hostname to avoid hammering rate-limited servers
+        # Circuit breaker state, per hostname.
         self._consecutive_host_failures: Dict[str, int] = {}
+        self._circuit_open_until: Dict[str, float] = {}
+        # Set True whenever a request is fast-failed/skipped because a host's
+        # circuit is open. fetch_all resets this before each data type and reads
+        # it after, so a data type cut short by an outage is recorded incomplete.
+        self._degraded = False
+        # Members fetched once at the start of a run, reused by register/questions.
+        self._members_for_run: List[Dict] = []
         # Lazily-launched headless browser for JS-rendered (single-page-app) pages.
         # Most sites are plain HTML and never touch this — see _browser_get().
         self._browser = None
@@ -45,27 +48,54 @@ class BaseScraper(ABC):
 
     def _get(self, url: str, params: Optional[Dict] = None, accept: Optional[str] = None,
              timeout: Optional[int] = None) -> Optional[requests.Response]:
+        host = urlparse(url).netloc or url
+
+        # Circuit breaker: if this host has been failing hard, fast-fail without
+        # hammering it. Once the cooldown elapses we let a single probe through
+        # (half-open) to test recovery.
+        open_until = self._circuit_open_until.get(host, 0.0)
+        if open_until:
+            if time.time() < open_until:
+                self._degraded = True
+                logger.debug(f"[{self.parliament_name}] circuit open for {host} "
+                             f"({open_until - time.time():.0f}s left) — skipping {url}")
+                return None
+            # Cooldown elapsed: clear the flag and probe once below.
+            logger.info(f"[{self.parliament_name}] {host}: cooldown elapsed — probing recovery")
+            self._circuit_open_until.pop(host, None)
+
         self._rate_limit()
         headers = {}
         if accept:
             headers["Accept"] = accept
         effective_timeout = timeout if timeout is not None else REQUEST_TIMEOUT
 
-        host = urlparse(url).netloc or url
-        consec = self._consecutive_host_failures.get(host, 0)
-        if consec >= _CONSECUTIVE_FAIL_THRESHOLD:
-            logger.warning(
-                f"[{self.parliament_name}] {host} has failed {consec}× consecutively — "
-                f"sleeping {_CONSECUTIVE_FAIL_SLEEP}s before retrying"
-            )
-            time.sleep(_CONSECUTIVE_FAIL_SLEEP)
-            self._consecutive_host_failures[host] = 0
+        # Once a host is clearly struggling, stop spending the full retry budget /
+        # 30s timeout on each item — fail fast so the circuit opens promptly
+        # instead of the run crawling at ~96s per dead request.
+        degrading = self._consecutive_host_failures.get(host, 0) >= CIRCUIT_DEGRADE_AT
+        attempts = 1 if degrading else MAX_RETRIES
+        if degrading:
+            effective_timeout = min(effective_timeout, CIRCUIT_FAST_TIMEOUT)
 
-        for attempt in range(MAX_RETRIES):
+        def _note_failure():
+            n = self._consecutive_host_failures.get(host, 0) + 1
+            self._consecutive_host_failures[host] = n
+            if n >= CIRCUIT_OPEN_THRESHOLD:
+                self._circuit_open_until[host] = time.time() + CIRCUIT_COOLDOWN
+                self._degraded = True
+                logger.warning(
+                    f"[{self.parliament_name}] {host}: {n} consecutive failures — opening "
+                    f"circuit for {CIRCUIT_COOLDOWN}s. Further requests fast-fail; this data "
+                    f"type will be recorded incomplete and retried on a later run."
+                )
+
+        for attempt in range(attempts):
             try:
                 resp = self.session.get(url, params=params, timeout=effective_timeout, headers=headers)
                 resp.raise_for_status()
                 self._consecutive_host_failures[host] = 0
+                self._circuit_open_until.pop(host, None)  # recovered → close circuit
                 return resp
             except requests.exceptions.HTTPError:
                 code = resp.status_code
@@ -74,21 +104,22 @@ class BaseScraper(ABC):
                     logger.warning(f"HTTP {code} from {url}. Waiting {wait}s.")
                     time.sleep(wait)
                 else:
+                    # 4xx (not 429): client error, not a host outage — don't count it.
                     logger.error(f"HTTP {code} from {url} — skipping.")
                     return None
             except requests.exceptions.RequestException as e:
                 wait = RETRY_BACKOFF_BASE ** attempt
-                logger.warning(f"Request error (attempt {attempt + 1}/{MAX_RETRIES}): {e}. Retry in {wait}s.")
+                logger.warning(f"Request error (attempt {attempt + 1}/{attempts}): {e}. Retry in {wait}s.")
                 time.sleep(wait)
             except Exception as e:
                 # Malformed URLs (e.g. urllib3 LocationParseError from a bad scraped
                 # href) raise outside the requests exception hierarchy. Retrying
-                # won't help and one bad link must never kill a whole pull.
+                # won't help and one bad link must never kill a whole pull — and it
+                # isn't a host outage, so it doesn't count toward the circuit.
                 logger.error(f"Unfetchable URL {url}: {type(e).__name__}: {e} — skipping.")
                 return None
-        logger.error(f"All {MAX_RETRIES} attempts failed for {url}")
-        # Use current dict value, not stale `consec` — the sleep above may have reset it to 0
-        self._consecutive_host_failures[host] = self._consecutive_host_failures.get(host, 0) + 1
+        logger.error(f"All {attempts} attempts failed for {url}")
+        _note_failure()
         return None
 
     def _paginate(self, url: str, params: Dict, page_size: int = 100,
@@ -323,7 +354,22 @@ class BaseScraper(ABC):
         return kept
 
     def fetch_all(self, from_date: Optional[str] = None,
-                  to_date: Optional[str] = None) -> Dict[str, List[Dict]]:
+                  to_date: Optional[str] = None,
+                  on_data_type: Optional["Callable[[str, List[Dict], bool], None]"] = None,
+                  should_skip: Optional["Callable[[str], bool]"] = None
+                  ) -> Dict[str, List[Dict]]:
+        """Pull every data type for this parliament.
+
+        If ``on_data_type`` is given it is called as ``(data_type, records,
+        complete)`` immediately after each type is fetched, so callers can persist
+        results incrementally — a later type stalling or crashing never loses the
+        earlier ones. ``complete`` is False when a host's circuit opened mid-fetch
+        (data was skipped), so the caller can mark that type for retry.
+
+        If ``should_skip(data_type)`` returns True, that type is not fetched (used
+        to skip types already pulled today). ``members`` is always fetched because
+        ``register_of_interests`` depends on it.
+        """
         range_str = f"{from_date or 'all history'} → {to_date or 'today'}"
         logger.info(f"[{self.parliament_name}] Starting full data pull ({range_str})")
 
@@ -336,23 +382,39 @@ class BaseScraper(ABC):
                              f"{type(e).__name__}: {e}", exc_info=True)
                 return []
 
+        results: Dict[str, List[Dict]] = {}
+
+        def _emit(dtype, records):
+            if on_data_type:
+                on_data_type(dtype, records, not self._degraded)
+            results[dtype] = records
+
+        # Scrapers bound the fetch server-side where the source supports it; the
+        # post-filter guarantees the to_date bound holds everywhere else.
+        specs = [
+            ("register_of_interests", lambda: self.fetch_register_of_interests(self._members_for_run), False),
+            ("questions", lambda: self.fetch_questions(from_date, to_date), True),
+            ("plenary_business", lambda: self.fetch_plenary_business(from_date, to_date), True),
+            ("votes_on_division", lambda: self.fetch_votes_on_division(from_date, to_date), True),
+        ]
+
         try:
-            members = _safe("members", self.fetch_members)
-            logger.info(f"[{self.parliament_name}] {len(members)} members found")
-            results = {
-                "members": members,
-                "register_of_interests": _safe(
-                    "register_of_interests",
-                    lambda: self.fetch_register_of_interests(members)),
-                # Scrapers bound the fetch server-side where the source supports it;
-                # this post-filter guarantees the to_date bound holds everywhere else.
-                "questions": self._filter_to_date(_safe(
-                    "questions", lambda: self.fetch_questions(from_date, to_date)), to_date),
-                "plenary_business": self._filter_to_date(_safe(
-                    "plenary_business", lambda: self.fetch_plenary_business(from_date, to_date)), to_date),
-                "votes_on_division": self._filter_to_date(_safe(
-                    "votes_on_division", lambda: self.fetch_votes_on_division(from_date, to_date)), to_date),
-            }
+            # members is always fetched (cheap, and register/questions depend on it)
+            self._degraded = False
+            self._members_for_run = _safe("members", self.fetch_members)
+            logger.info(f"[{self.parliament_name}] {len(self._members_for_run)} members found")
+            _emit("members", self._members_for_run)
+
+            for dtype, fn, needs_filter in specs:
+                if should_skip and should_skip(dtype):
+                    logger.info(f"[{self.parliament_name}] {dtype}: skipped (already pulled today)")
+                    continue
+                self._degraded = False           # reset per type for the circuit signal
+                recs = _safe(dtype, fn)
+                if needs_filter:
+                    recs = self._filter_to_date(recs, to_date)
+                _emit(dtype, recs)
+
             totals = {k: len(v) for k, v in results.items()}
             logger.info(f"[{self.parliament_name}] Pull complete: {totals}")
             return results

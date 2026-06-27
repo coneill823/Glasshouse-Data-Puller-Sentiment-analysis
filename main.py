@@ -159,38 +159,71 @@ def run_parliament(parliament_key: str, scraper_class, from_date: Optional[str] 
     manifest = load_manifest(cfg["name"])
     effective_from = from_date or manifest.get("last_pulled_from")
     run_start = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-    try:
-        results = scraper.fetch_all(from_date=effective_from, to_date=to_date)
-    except Exception as e:
-        logger.error(f"Pull failed for {cfg['name']}: {e}", exc_info=True)
-        return None, {}
+    run_date = run_start
 
     if dry_run:
+        try:
+            results = scraper.fetch_all(from_date=effective_from, to_date=to_date)
+        except Exception as e:
+            logger.error(f"Pull failed for {cfg['name']}: {e}", exc_info=True)
+            return None, {}
         for dtype, records in results.items():
             logger.info(f"  [DRY RUN] {dtype}: {len(records)} records (not saved)")
         return results, {}
 
-    run_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # Per-data-type progress, so multiple runs in one day accumulate coverage:
+    # a type already pulled completely today (over the same from_date) is skipped,
+    # so a re-run picks up where a stalled/interrupted run left off.
+    progress = manifest.setdefault("data_types", {})
+    results: Dict[str, List[Dict]] = {}
     dedup_stats: Dict[str, Dict[str, int]] = {}
-    for dtype, records in results.items():
+
+    def _should_skip(dtype: str) -> bool:
+        info = progress.get(dtype) or {}
+        done = (info.get("date") == run_date
+                and info.get("from_date") == effective_from
+                and info.get("complete"))
+        if done:
+            logger.info(f"[{cfg['name']}] {dtype}: already pulled today "
+                        f"({info.get('count', 0)} records) — skipping")
+        return bool(done)
+
+    def _on_data_type(dtype: str, records: List[Dict], complete: bool):
+        # Persist as each type finishes so a later stall can't lose earlier work.
         paths = save_results(cfg["name"], dtype, records, run_date=run_date)
         dedup_stats[dtype] = {"new": paths.get("new", 0), "skipped": paths.get("skipped", 0)}
+        results[dtype] = records
+        progress[dtype] = {
+            "date": run_date, "from_date": effective_from,
+            "count": len(records), "complete": complete,
+        }
+        if not complete:
+            logger.warning(f"[{cfg['name']}] {dtype}: saved {len(records)} records but the "
+                           f"source degraded mid-pull — marked incomplete, will retry next run")
+        manifest["last_pulled_at"] = datetime.now(timezone.utc).isoformat()
+        write_manifest(cfg["name"], manifest)   # checkpoint after every data type
 
-    manifest["last_pulled_at"] = datetime.now(timezone.utc).isoformat()
-    # Advance the resume point so the next default run is incremental:
-    # an open-ended pull resumes from the day this one started; a bounded
-    # (--to) pull only advances to its end date, so the gap between the
-    # range end and today isn't silently skipped next time.
-    manifest["last_pulled_from"] = min(to_date, run_start) if to_date else run_start
+    try:
+        scraper.fetch_all(from_date=effective_from, to_date=to_date,
+                          on_data_type=_on_data_type, should_skip=_should_skip)
+    except Exception as e:
+        # Incremental saves already persisted whatever completed before this.
+        logger.error(f"Pull for {cfg['name']} ended early: {e}", exc_info=True)
+
+    # Only advance the global resume point once every type is complete for this
+    # range; otherwise leave it so the next run re-attempts the unfinished types.
+    all_complete = all((progress.get(dt) or {}).get("complete")
+                       for dt in ("members", "register_of_interests", "questions",
+                                  "plenary_business", "votes_on_division"))
+    if all_complete:
+        manifest["last_pulled_from"] = min(to_date, run_start) if to_date else run_start
     manifest["runs"] = manifest.get("runs", []) + [{
-        "date": run_date,
-        "from_date": effective_from,
-        "to_date": to_date,
-        "counts": {dtype: len(records) for dtype, records in results.items()},
+        "date": run_date, "from_date": effective_from, "to_date": to_date,
+        "counts": {dtype: len(r) for dtype, r in results.items()},
     }]
     write_manifest(cfg["name"], manifest)
-    logger.info(f"Completed pull for {cfg['name']}")
+    logger.info(f"Completed pull for {cfg['name']}"
+                f"{'' if all_complete else ' (some types incomplete — re-run to finish)'}")
     return results, dedup_stats
 
 
