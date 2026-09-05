@@ -16,8 +16,8 @@ import logging
 import re
 import time
 import xml.etree.ElementTree as ET
-from datetime import date, timedelta
-from typing import Dict, List, Optional, Tuple
+from datetime import date, datetime, timedelta
+from typing import Dict, List, Optional
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
@@ -548,26 +548,76 @@ class WelshParliamentScraper(BaseScraper):
     # Register of interests
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _find_register_pdf(soup: BeautifulSoup) -> Tuple[str, int]:
-        """Pick the newest Register-of-Interests PDF link on the page.
+    # Matches "as on 8 April 2026" in an archive-page snapshot link's text.
+    _ARCHIVE_SNAPSHOT_DATE_RE = re.compile(r"as on (\d{1,2} \w+ \d{4})", re.I)
 
-        Matches links whose href/text mention both 'register' and 'interest'
-        (so unrelated /media/ assets and the non-interest "Assembly Register"
-        archives are skipped), and returns the one with the latest year, as
-        (href, year) — ("", -1) if none found.
+    def _find_register_snapshots(self, soup: BeautifulSoup) -> List[Dict]:
+        """Enumerate every register-of-interests PDF reachable from the main
+        interests page, across every term.
+
+        The Senedd's site structure (confirmed live 2026-09-05) is not one PDF
+        per term: older terms (1st-4th Assembly, 5th Senedd) each link a single
+        end-of-term PDF directly. But the most recently *completed* term (6th
+        Senedd, 2021-2026) instead links to a separate archive page that lists
+        many dated snapshots of the compiled register — 14 of them, roughly
+        every 4 months from April 2022 to 8 April 2026 (just before the 2026
+        election) — each captioned "... as on <date> (PDF ...)". A naive
+        "grab the newest PDF" pass over the main page never follows that link
+        and so falls back to the 5th Senedd's 2021 archive, matched against
+        zero of the current members.
+
+        Returns [{"url", "term", "date"}] for every snapshot found (direct
+        single-PDF terms get one entry with date=""; multi-snapshot archive
+        pages get one entry per dated PDF). This generically picks up any
+        future term published the same way (e.g. once the 7th Senedd gets its
+        own compiled-register archive page).
         """
-        best_href, best_year = "", -1
-        for a in soup.select("a[href*='.pdf']"):
+        snapshots: List[Dict] = []
+        seen_pages: set = set()
+        for a in soup.select("a[href]"):
             href = a.get("href", "")
-            haystack = f"{href} {a.get_text(strip=True)}".lower()
-            if "register" not in haystack or "interest" not in haystack:
+            text = a.get_text(strip=True)
+            haystack = f"{href} {text}".lower()
+            if not href or "register" not in haystack or "interest" not in haystack:
                 continue
-            years = [int(y) for y in re.findall(r"(?:19|20)\d{2}", haystack)]
-            year = max(years) if years else 0
-            if year > best_year:
-                best_href, best_year = href, year
-        return best_href, best_year
+
+            if href.lower().endswith(".pdf"):
+                snapshots.append({"url": urljoin(_BASE, href), "term": text, "date": ""})
+                continue
+
+            # A same-site page link (not a direct PDF) — e.g. "Sixth Senedd
+            # Register 2021-2026" — points at an archive of dated snapshots.
+            if href.startswith(("http://", "https://")) and _BASE not in href:
+                continue
+            if href in seen_pages:
+                continue
+            seen_pages.add(href)
+
+            archive_url = href if href.startswith("http") else urljoin(_BASE, href)
+            archive_soup = self._html_get(archive_url)
+            if not archive_soup:
+                logger.warning(f"[Welsh Parliament] Could not load register archive page {archive_url}")
+                continue
+
+            found_here = 0
+            for pdf_a in archive_soup.select("a[href*='.pdf']"):
+                pdf_href = pdf_a.get("href", "")
+                pdf_text = pdf_a.get_text(strip=True)
+                if "register" not in f"{pdf_href} {pdf_text}".lower():
+                    continue
+                snap_date = ""
+                dm = self._ARCHIVE_SNAPSHOT_DATE_RE.search(pdf_text)
+                if dm:
+                    try:
+                        snap_date = datetime.strptime(dm.group(1), "%d %B %Y").strftime("%Y-%m-%d")
+                    except ValueError:
+                        pass
+                snapshots.append({"url": urljoin(_BASE, pdf_href), "term": text, "date": snap_date})
+                found_here += 1
+            logger.info(f"[Welsh Parliament] Register archive page {archive_url}: "
+                        f"{found_here} dated snapshot(s) found")
+
+        return snapshots
 
     def fetch_register_of_interests(self, members: List[Dict]) -> List[Dict]:
         soup = self._try_paths(_BASE, _INTEREST_PATHS)
@@ -576,28 +626,24 @@ class WelshParliamentScraper(BaseScraper):
             logger.warning("[Welsh Parliament] Could not load register of interests page")
             return records
 
-        # The Senedd publishes the consolidated Register of Interests only as an
-        # end-of-term PDF (one per Senedd/Assembly), and the page lists every
-        # term's archive. Pick the newest *register* PDF by the years in its link
-        # rather than the first link in DOM order — which is an older archive or
-        # an unrelated /media/ asset (Scotland's scraper hit the same trap).
-        pdf_href, pdf_year = self._find_register_pdf(soup)
-        if pdf_href:
-            pdf_url = pdf_href if pdf_href.startswith("http") else urljoin(_BASE, pdf_href)
-            logger.info(f"[Welsh Parliament] Register of interests PDF "
-                        f"(newest published, to {pdf_year or 'unknown'}): {pdf_url}")
-            records = self._parse_interests_pdf(pdf_url, members)
-            if not records:
-                # 0 records here is the genuine source state, not a parse failure:
-                # the newest consolidated register on the site is the previous
-                # term's end-of-term archive, whose Members predate the current
-                # Senedd. The in-term register lives on per-member profile pages
-                # (not scraped here) and no consolidated PDF exists for it yet.
-                logger.info(
-                    "[Welsh Parliament] 0 register records — the newest published "
-                    "consolidated register is a prior-term archive; the current "
-                    "Senedd's consolidated register is not yet published."
-                )
+        # Pull every register-of-interests PDF reachable from the interests
+        # page — every term's single end-of-term archive, plus every dated
+        # snapshot on any term's multi-snapshot archive page — rather than
+        # just the single "newest" one, so this reflects the full published
+        # history (including how members' declared interests changed over a
+        # term), not just a point-in-time snapshot.
+        snapshots = self._find_register_snapshots(soup)
+        if snapshots:
+            logger.info(f"[Welsh Parliament] {len(snapshots)} register-of-interests PDF "
+                        f"snapshot(s) found across all terms; parsing each...")
+            for i, snap in enumerate(snapshots):
+                if i and i % 5 == 0:
+                    logger.info(f"[Welsh Parliament] Register snapshots: {i}/{len(snapshots)} "
+                                f"parsed ({len(records)} records so far)")
+                records.extend(self._parse_interests_pdf(
+                    snap["url"], members, snapshot_date=snap["date"], term=snap["term"]))
+            logger.info(f"[Welsh Parliament] {len(records)} total interest records across "
+                        f"{len(snapshots)} snapshot(s)")
             return records
 
         # Try to find per-member interest sections
@@ -647,7 +693,8 @@ class WelshParliamentScraper(BaseScraper):
     # "1. Remunerated employment, office, profession etc." or "2) Sponsorship".
     _PDF_CATEGORY_RE = re.compile(r"^\s*(\d{1,2})[.)]\s+(.{3,120})$")
 
-    def _parse_interests_pdf(self, pdf_url: str, members: List[Dict]) -> List[Dict]:
+    def _parse_interests_pdf(self, pdf_url: str, members: List[Dict],
+                             snapshot_date: str = "", term: str = "") -> List[Dict]:
         """Download the consolidated register-of-interests PDF and parse it with PyMuPDF.
 
         Layout (per the published Senedd register): each Member's name appears as
@@ -657,6 +704,17 @@ class WelshParliamentScraper(BaseScraper):
         extracted text line-by-line, switching the "current member" whenever a
         line exactly matches a name from the known member roster, and the
         "current category" whenever a line matches the numbered-heading pattern.
+
+        Many entries are ongoing declarations ("I am a member of Unite...") with
+        no date of their own — for those, `snapshot_date` (this PDF's own "as on
+        <date>" cover date, when known) is used as the record's date instead of
+        leaving it blank, since that's a genuine, meaningful date: the point in
+        time at which the member had this interest on record. An entry-specific
+        date found inline (e.g. "Initial statement lodged: 02 June 2021") always
+        takes precedence over the snapshot date. `term` (e.g. "Sixth Senedd
+        Register 2021-2026") is carried through as metadata so records from
+        different terms/snapshots of the same underlying interest stay
+        distinguishable.
         """
         records: List[Dict] = []
         full_url = pdf_url if pdf_url.startswith("http") else urljoin(_BASE, pdf_url)
@@ -701,10 +759,18 @@ class WelshParliamentScraper(BaseScraper):
             entry_text = " ".join(b for b in buffer if b).strip()
             if len(entry_text) >= 5:
                 entry_date = self._extract_date_from_text(entry_text)
-                if not entry_date and not hasattr(self, "_no_date_diag_logged"):
-                    # Confirm whether the absence of a parsed date reflects the
-                    # source text genuinely carrying no date (a structural fact
-                    # about the register) or a format our regexes don't cover.
+                used_snapshot_date = False
+                if not entry_date and snapshot_date:
+                    # No date in the entry itself (typical for an ongoing
+                    # declaration like "I am a member of Unite...") — fall back
+                    # to this register PDF's own "as on <date>" cover date
+                    # rather than leaving the record dateless.
+                    entry_date = snapshot_date
+                    used_snapshot_date = True
+                elif not entry_date and not hasattr(self, "_no_date_diag_logged"):
+                    # No entry date AND no snapshot date to fall back on — confirm
+                    # whether this reflects the source text genuinely carrying no
+                    # date, or a format our regexes don't cover.
                     self._no_date_diag_logged = True
                     logger.warning(
                         f"[Welsh Parliament] No date extracted from interest entry — "
@@ -716,7 +782,9 @@ class WelshParliamentScraper(BaseScraper):
                     date=entry_date,
                     text=entry_text,
                     title=current_category,
-                    metadata={"source_format": "pdf"},
+                    metadata={"source_format": "pdf", "term": term,
+                              "register_snapshot_date": snapshot_date,
+                              "date_is_snapshot_fallback": used_snapshot_date},
                     source_url=full_url,
                 ))
 
@@ -750,10 +818,11 @@ class WelshParliamentScraper(BaseScraper):
         if not records:
             logger.warning(
                 f"[Welsh Parliament] 0 interest records parsed from PDF {full_url} "
-                f"({len(text)} chars extracted, {len(member_by_name)} known member names) — "
-                f"text sample: {text[:400]!r}"
+                f"(term={term!r}, snapshot_date={snapshot_date!r}, {len(text)} chars extracted, "
+                f"{len(member_by_name)} known member names) — text sample: {text[:400]!r}"
             )
-        logger.info(f"[Welsh Parliament] {len(records)} interest records parsed from PDF")
+        logger.info(f"[Welsh Parliament] {len(records)} interest records parsed from "
+                    f"{term!r} snapshot {snapshot_date or full_url}")
         return records
 
     # ------------------------------------------------------------------
