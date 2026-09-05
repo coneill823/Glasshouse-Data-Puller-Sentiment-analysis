@@ -14,6 +14,7 @@ endpoint is confirmed SSR and returns question/vote cards with member names.
 """
 import logging
 import re
+import time
 import xml.etree.ElementTree as ET
 from datetime import date, timedelta
 from typing import Dict, List, Optional, Tuple
@@ -1712,46 +1713,102 @@ class WelshParliamentScraper(BaseScraper):
 
     def _fetch_meeting_ids_wales(self, from_date: Optional[str] = None,
                                  to_date: Optional[str] = None,
-                                 votes_only: bool = True) -> List[Dict]:
-        """Enumerate plenary meetings from the XMLExport listing.
+                                 votes_only: bool = True,
+                                 max_pages: int = 200) -> List[Dict]:
+        """Enumerate plenary meetings across the full historical archive.
 
-        record.senedd.wales/XMLExport is a POST filter form.  SelectedCommitteeID=908
-        is Plenary, and dates must be MM/dd/yyyy — the server parses dates US-style,
-        and any other format silently clears the results.  Each listing row carries
-        the meeting date and one download link per export type, so a row that links
-        xmlDownloadType=Votes is a plenary meeting that actually held divisions.
+        The plain XMLExport filter form (SelectedCommitteeID=908 for the current
+        Plenary committee) always caps out at that committee's most-recent ~15
+        rows, no matter what Start/End dates are sent — the 908 ID is reissued
+        fresh every Senedd term, so it only ever has the current term's history.
 
-        NOTE: the form only ever returns the most-recent meetings — the Start/End
-        fields do not page back through history — so this reliably covers recent and
-        incremental pulls; deep historical enumeration is not exposed by the form.
+        The site's own "See More" button (record.senedd.wales/XMLExport/SeeMore)
+        is real, working pagination, though: it walks the *unfiltered* listing
+        (all committees, ~2,900+ meetings as of 2026) 16 rows at a time, newest
+        first, and does not require any session/cookie state — confirmed live
+        2026-09-05. Filtering by committee **name** containing "Plenary" (rather
+        than by ID) is what actually reaches multiple terms' worth of Plenary
+        history, since each term's Plenary sits under a different ID but is
+        always named "Plenary" / "Plenary - Sixth Senedd" / etc.
+
+        Each listing row carries the meeting date and one download link per
+        export type, so a row that links xmlDownloadType=Votes is a plenary
+        meeting that actually held divisions.
 
         Returns [{"id", "date", "has_votes"}] newest-first. With votes_only=True
         (the votes path) only division-bearing meetings are returned; with False
-        (the plenary path) every plenary meeting is returned.
+        (the plenary path) every plenary meeting is returned. Paging stops once
+        a whole page's oldest row predates `from_date` (default: 2021-05-06,
+        the start of the 6th Senedd), the site reports no more pages, or
+        `max_pages` is hit (a full since-2021 pull is ~185 pages).
         """
-        start = from_date or "2021-05-06"          # start of the 6th Senedd
-        end = to_date or date.today().isoformat()
+        effective_from = from_date or "2021-05-06"    # start of the 6th Senedd
+        seen: set = set()
+        all_meetings: List[Dict] = []
+        page = 1
+        hit_cap = False
+        while True:
+            resp = self._get(
+                f"{_RECORD}/XMLExport/SeeMore",
+                params={"Committee": "0", "Start": "0001-01-01", "End": "0001-01-01",
+                        "Page": page, "_": int(time.time() * 1000)},
+                timeout=30,
+            )
+            if not resp or not resp.ok:
+                break
+            try:
+                payload = resp.json()
+            except ValueError:
+                logger.warning(f"[Welsh Parliament] XMLExport/SeeMore page {page}: non-JSON response")
+                break
+            html_fragment = payload.get("Html", "")
+            if not html_fragment.strip():
+                break
 
-        def _mmddyyyy(iso: str) -> str:
-            return f"{iso[5:7]}/{iso[8:10]}/{iso[0:4]}"
+            soup = BeautifulSoup(f"<table>{html_fragment}</table>", "lxml")
+            for m in self._parse_meeting_rows(soup, effective_from, to_date):
+                if m["id"] not in seen:
+                    seen.add(m["id"])
+                    all_meetings.append(m)
 
-        payload = {
-            "SelectedCommitteeID": _PLENARY_COMMITTEE_ID,
-            "Start": _mmddyyyy(start),
-            "End": _mmddyyyy(end),
-            "submittingButton": "Search",
-        }
-        soup = self._form_post(f"{_RECORD}/XMLExport", payload)
-        meetings = self._parse_meeting_rows(soup, from_date, to_date)
-        result = [m for m in meetings if m["has_votes"]] if votes_only else meetings
-        if meetings:
-            logger.info(f"[Welsh Parliament] XMLExport listing: {len(meetings)} plenary "
-                        f"meetings in range ({sum(1 for m in meetings if m['has_votes'])} with "
-                        f"divisions); returning {len(result)}")
+            # The unfiltered listing is globally date-sorted across every committee,
+            # so the oldest row on this page (any committee, not just Plenary) tells
+            # us whether paging further could still be within range.
+            row_dates = []
+            for tr in soup.find_all("tr"):
+                dm = re.match(r"(\d{2})/(\d{2})/(\d{4})", tr.get_text(" ", strip=True))
+                if dm:
+                    row_dates.append(f"{dm.group(3)}-{dm.group(2)}-{dm.group(1)}")
+            oldest_on_page = min(row_dates) if row_dates else None
+
+            if page % 20 == 0:
+                logger.info(f"[Welsh Parliament] XMLExport/SeeMore: page {page}, "
+                            f"{len(all_meetings)} Plenary meetings so far "
+                            f"(oldest row seen: {oldest_on_page})")
+
+            if not payload.get("MoreToShow"):
+                break
+            if oldest_on_page and oldest_on_page < effective_from:
+                break
+            if page >= max_pages:
+                hit_cap = True
+                break
+            page += 1
+
+        if hit_cap:
+            logger.warning(f"[Welsh Parliament] XMLExport/SeeMore: hit the {max_pages}-page "
+                           f"safety cap before reaching {effective_from}")
+
+        all_meetings.sort(key=lambda m: m["date"], reverse=True)
+        result = [m for m in all_meetings if m["has_votes"]] if votes_only else all_meetings
+        if all_meetings:
+            logger.info(f"[Welsh Parliament] XMLExport/SeeMore: {len(all_meetings)} plenary "
+                        f"meetings found across {page} page(s) "
+                        f"({sum(1 for m in all_meetings if m['has_votes'])} with divisions); "
+                        f"returning {len(result)}")
         else:
-            logger.warning("[Welsh Parliament] XMLExport listing returned no plenary "
-                           "meetings (the form exposes only recent meetings; the 6th "
-                           "Senedd also wound down before the May 2026 election)")
+            logger.warning(f"[Welsh Parliament] XMLExport/SeeMore returned no plenary meetings "
+                           f"in range {effective_from}–{to_date or '(today)'}")
         return result
 
     @staticmethod

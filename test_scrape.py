@@ -493,8 +493,11 @@ def _wales_votes_sample(s: WelshParliamentScraper) -> Tuple[List[Dict], str]:
     # 3. Fallback: HTML division-index scraping (all known paths now broken)
     soup = s._try_paths(_WALES_RECORD, _WALES_DIV_PATHS) if _WALES_DIV_PATHS else None
     if not soup:
-        return [], ("XMLExport serves only 5th-Senedd committee meetings (no divisions); "
-                    "Search/record pages are JS-rendered → 0 expected")
+        return [], ("no votes found via XMLExport/SeeMore or Search — treat this as a "
+                    "regression, not a known limitation: as of 2026-09-05, "
+                    "_fetch_meeting_ids_wales pages back through full history via "
+                    "record.senedd.wales/XMLExport/SeeMore, so a 0 here should only happen "
+                    "if that pagination itself broke, not just because the Senedd is in recess")
 
     rows = []
     for sel in ["table tr", ".division-row", "li.division", "article.division", "li"]:
