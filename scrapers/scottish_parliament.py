@@ -1492,10 +1492,12 @@ class ScottishParliamentScraper(BaseScraper):
         v_date = division.get("date", "")
         result = division.get("result", "")
         before = len(records)
-        # Each party panel: <h5 class="h5">For</h5><ul><li><a>member</a>…</ul>,
+        # Each party panel: <h4 class="h5">For</h4><ul><li><a>member</a>…</ul>,
         # then Against/Abstained/Did-not-vote (just "0" text when none, so the
         # member <ul> is only present as the heading's immediate next tag sibling).
-        for h5 in soup.select("h5.h5"):
+        # NB: the direction heading is an <h4> styled with a "h5" CSS class, not
+        # an actual <h5> element — confirmed against live markup 2026-09-05.
+        for h5 in soup.select("h4.h5"):
             direction = self._VOTE_DIRECTION.get(h5.get_text(strip=True))
             if not direction:
                 continue
