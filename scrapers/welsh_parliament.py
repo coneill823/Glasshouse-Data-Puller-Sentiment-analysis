@@ -18,7 +18,7 @@ import time
 import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -550,6 +550,11 @@ class WelshParliamentScraper(BaseScraper):
 
     # Matches "as on 8 April 2026" in an archive-page snapshot link's text.
     _ARCHIVE_SNAPSHOT_DATE_RE = re.compile(r"as on (\d{1,2} \w+ \d{4})", re.I)
+    # Register PDFs print each member heading with a trailing role token —
+    # "Rhys ab Owen MS" / "... AS" (Aelod o'r Senedd), and pre-2020 Assembly-era
+    # PDFs "... AM" / "... AC" (Aelod Cynulliad). The roster stores the bare name,
+    # so strip this token before matching a heading line to a member.
+    _ROLE_SUFFIX_RE = re.compile(r"\s+(?:MS|AS|AM|AC)$", re.I)
 
     def _find_register_snapshots(self, soup: BeautifulSoup) -> List[Dict]:
         """Enumerate every register-of-interests PDF reachable from the main
@@ -587,13 +592,23 @@ class WelshParliamentScraper(BaseScraper):
 
             # A same-site page link (not a direct PDF) — e.g. "Sixth Senedd
             # Register 2021-2026" — points at an archive of dated snapshots.
-            if href.startswith(("http://", "https://")) and _BASE not in href:
+            # Resolve to an absolute URL, then require it to actually live on
+            # senedd.wales. A raw "_BASE not in href" substring test wrongly
+            # accepts an off-site link that merely carries senedd.wales inside a
+            # query string (e.g. a Facebook share button:
+            # facebook.com/sharer?u=https://senedd.wales/...), and never handles
+            # mailto:/tel: links, which then waste a fetch.
+            archive_url = urljoin(_BASE, href)
+            parsed = urlparse(archive_url)
+            if parsed.scheme not in ("http", "https"):
+                continue  # mailto:, tel:, javascript:, bare #fragment, etc.
+            base_host = urlparse(_BASE).netloc.lower()
+            link_host = parsed.netloc.lower()
+            if link_host and link_host != base_host and not link_host.endswith("." + base_host):
+                continue  # off-site (facebook.com, twitter.com, …)
+            if archive_url in seen_pages:
                 continue
-            if href in seen_pages:
-                continue
-            seen_pages.add(href)
-
-            archive_url = href if href.startswith("http") else urljoin(_BASE, href)
+            seen_pages.add(archive_url)
             archive_soup = self._html_get(archive_url)
             if not archive_soup:
                 logger.warning(f"[Welsh Parliament] Could not load register archive page {archive_url}")
@@ -794,6 +809,12 @@ class WelshParliamentScraper(BaseScraper):
                 continue
 
             matched_member = member_by_name.get(line.lower())
+            if matched_member is None:
+                # PDF headings carry a trailing role token ("Rhys ab Owen MS");
+                # the roster stores the bare name, so retry after stripping it.
+                stripped = self._ROLE_SUFFIX_RE.sub("", line).strip()
+                if stripped != line:
+                    matched_member = member_by_name.get(stripped.lower())
             if matched_member is not None:
                 flush()
                 buffer = []
