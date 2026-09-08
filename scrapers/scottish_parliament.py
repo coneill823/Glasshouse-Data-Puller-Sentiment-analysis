@@ -174,8 +174,23 @@ class ScottishParliamentScraper(BaseScraper):
         if members:
             self._enrich_msp_parties(members)
             self._enrich_msp_constituencies(members)
+            self._label_office_holders(members)
         logger.info(f"[Scottish Parliament] {len(members)} MSPs fetched")
         return members
+
+    def _label_office_holders(self, members: List[Dict]) -> None:
+        """Show the office instead of a bare "No Party Affiliation".
+
+        The Presiding Officer relinquishes party allegiance while in the chair
+        and is recorded by the Parliament as "No Party Affiliation" (the two
+        Deputy Presiding Officers keep their party, so only the PO is recorded
+        this way). Relabel current such members so the party column reads the
+        office rather than an unhelpful "No Party Affiliation".
+        """
+        for m in members:
+            if (m.get("status") == "current"
+                    and (m.get("party") or "").strip().lower() == "no party affiliation"):
+                m["party"] = "Presiding Officer"
 
     # Current-role line on a parliament.scot MSP profile page reads
     # "MSP for <Area> (Constituency)" or "... (Region)". Former roles are
