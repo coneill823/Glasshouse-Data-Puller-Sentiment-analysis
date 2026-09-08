@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-Recon: how does data.parliament.scot link an MSP (PersonID) to their
-constituency or region? The /Members entity doesn't carry the area name, so we
-need to find the link + name entities (same shape as MemberParties + Parties).
+Recon round 2: find how data.parliament.scot links an MSP (PersonID) to a
+Constituency/Region. Round 1 found Constituencies + Regions (with names) but the
+member->area link entity is still unknown and $metadata is disabled.
 
-Run on a machine with network access to data.parliament.scot, then paste the
-whole output back:
+Run on a machine with network access, paste the whole output:
 
     python diagnose_scot_constituency.py
 
@@ -17,16 +16,18 @@ import requests
 API = "https://data.parliament.scot/api"
 S = requests.Session()
 S.headers.update({"Accept": "application/json",
-                  "User-Agent": "GlasshouseRecon/1.0 (constituency recon)"})
+                  "User-Agent": "GlasshouseRecon/1.0"})
 
 
 def get(path, **params):
-    params.setdefault("$format", "json")
+    if params.get("_raw"):
+        params.pop("_raw")
+    else:
+        params.setdefault("$format", "json")
     try:
-        r = S.get(f"{API}/{path}", params=params, timeout=30)
-        return r.status_code, r
+        return S.get(f"{API}/{path}", params=params, timeout=30)
     except Exception as e:
-        return None, e
+        return e
 
 
 def rows_of(r):
@@ -34,73 +35,92 @@ def rows_of(r):
         d = r.json()
     except Exception:
         return None
-    if isinstance(d, dict):
-        return d.get("value", d.get("d", d))
-    return d
+    return d.get("value", d.get("d", d)) if isinstance(d, dict) else d
 
 
 def hr(t):
     print("\n" + "=" * 72 + f"\n{t}\n" + "=" * 72)
 
 
-# 1. Full entity list from $metadata (version-agnostic).
-hr("1 — entity sets ($metadata)")
-try:
-    meta = S.get(f"{API}/$metadata", timeout=30)
-    names = sorted(set(re.findall(r'EntitySet Name="([^"]+)"', meta.text)))
-    print(f"HTTP {meta.status_code} — {len(names)} entity sets:")
-    print(names)
-    # highlight the ones that look area-related
-    area = [n for n in names if re.search(r"constitu|region|area|seat|member", n, re.I)]
-    print("\narea/member-ish entities:", area)
-except Exception as e:
-    print("metadata failed:", type(e).__name__, e)
+# 1. Service document at the API root — lists every collection.
+hr("1 — service document (API root)")
+for path in ("", "/"):
+    try:
+        r = S.get(f"{API}{path}", params={"$format": "json"}, timeout=30)
+        print(f"GET {API}{path}?$format=json -> HTTP {r.status_code}, {len(r.text)} bytes")
+        txt = r.text.strip()
+        # JSON list of collections?
+        try:
+            d = r.json()
+            coll = d.get("value") or (d.get("d") or {}).get("EntitySets") or d
+            print("  parsed collections:", coll if isinstance(coll, list) else list(d.keys()))
+        except Exception:
+            print("  raw head:", txt[:1500])
+    except Exception as e:
+        print(f"GET {API}{path} failed: {type(e).__name__}: {e}")
 
-# 2. Members fields — is the area (name or FK id) actually on the member row?
-hr("2 — Members fields + any area-ish values")
-code, r = get("Members", **{"$top": 3})
-if code == 200:
-    rows = rows_of(r) or []
-    if rows:
-        print("fields:", list(rows[0].keys()))
-        for m in rows[:3]:
-            area = {k: v for k, v in m.items()
-                    if re.search(r"constitu|region|area|seat", str(k), re.I)}
-            print(f"  {m.get('ParliamentaryName') or m.get('PreferredName')!r}: {area}")
-else:
-    print("Members ->", code)
+# 2. Find a current MSP's PersonID, then inspect member-side navigation.
+hr("2 — a current MSP + Members(id) detail / $expand")
+r = get("Members", **{"$top": 50})
+rows = rows_of(r) or []
+cur = next((m for m in rows if m.get("IsCurrent")), rows[0] if rows else {})
+pid = cur.get("PersonID")
+print("sample current MSP:", cur.get("ParliamentaryName"), "PersonID=", pid)
+if pid is not None:
+    # entity detail (may expose navigation link names)
+    r = get(f"Members({pid})")
+    print(f"  Members({pid}) -> HTTP {getattr(r,'status_code','ERR')}; keys="
+          f"{list((rows_of(r) or {}).keys()) if hasattr(r,'json') else r}")
+    base_keys = set(cur.keys())
+    for exp in ("MemberConstituencies", "MemberRegions", "MemberConstituencyRegions",
+                "ConstituencyMembers", "RegionMembers", "MemberElections",
+                "ElectionResults", "MemberElectionResults", "Memberships",
+                "MemberSeats", "MemberMandates", "Mandates", "MemberConstituencyStatuses"):
+        r = get("Members", **{"$top": 1, "$filter": f"PersonID eq {pid}", "$expand": exp})
+        rr = rows_of(r) or []
+        if getattr(r, "status_code", 0) == 200 and rr:
+            new = {k: rr[0][k] for k in rr[0] if k not in base_keys}
+            if new:
+                print(f"  $expand={exp}: NEW KEYS -> {str(new)[:400]}")
 
-# 3. Probe candidate area + link entities; show fields + a sample row.
-hr("3 — candidate area / link entities")
-candidates = [
-    "Constituencies", "Regions", "ElectionAreas", "SeatAreas",
-    "MemberConstituencies", "MemberRegions", "MemberConstituency", "MemberRegion",
-    "MembersConstituencies", "MembersRegions",
-    "MembershipConstituency", "MembershipRegion", "Memberships",
-    "MemberElectionAreas", "MemberSeatAreas",
+# 3. Broader entity sweep, incl. election/seat/mandate + reverse links.
+hr("3 — broader entity probe")
+cands = [
+    "MemberConstituencies", "MemberRegions", "MemberConstituencyRegions",
+    "MemberElections", "MemberElectionResults", "ElectionResults", "Elections",
+    "MemberSeats", "Seats", "MemberMandates", "Mandates",
+    "MembershipConstituencies", "MembershipRegions", "MembershipAreas",
+    "MemberConstituencyStatuses", "MemberRegionStatuses",
+    "ConstituencyMembers", "RegionMembers", "MemberAreas", "MemberElectoralAreas",
 ]
-for c in candidates:
-    code, r = get(c, **{"$top": 2})
+for c in cands:
+    r = get(c, **{"$top": 2})
+    code = getattr(r, "status_code", "ERR")
     if code == 200:
-        rows = rows_of(r) or []
-        print(f"  [200] {c}: fields={list(rows[0].keys()) if rows else '(empty)'}")
-        if rows:
-            print(f"        sample={rows[0]}")
+        rr = rows_of(r) or []
+        print(f"  [200] {c}: fields={list(rr[0].keys()) if rr else '(empty)'}")
+        if rr:
+            print(f"        sample={rr[0]}")
     else:
         print(f"  [{code}] {c}")
 
-# 4. If a current MSP's PersonID is known, show what a Members?$expand reveals.
-hr("4 — Members?$expand candidates (inline navigation)")
-for exp in ("MemberConstituencies", "MemberRegions", "Constituencies", "Regions",
-            "ElectionAreas", "Memberships"):
-    code, r = get("Members", **{"$top": 1, "$expand": exp})
-    ok = "OK" if code == 200 else f"HTTP {code}"
-    detail = ""
-    if code == 200:
-        rows = rows_of(r) or []
-        if rows:
-            detail = " -> " + str({k: v for k, v in rows[0].items()
-                                   if exp.rstrip("s") in k or k == exp})[:300]
-    print(f"  $expand={exp}: {ok}{detail}")
+# 4. Reverse: does Constituencies / Regions expand to members?
+hr("4 — reverse expand from Constituencies / Regions")
+for ent in ("Constituencies", "Regions"):
+    for exp in ("Members", "MemberConstituencies", "MemberRegions", "People"):
+        r = get(ent, **{"$top": 1, "$expand": exp})
+        code = getattr(r, "status_code", "ERR")
+        if code == 200:
+            rr = rows_of(r) or []
+            extra = {k: v for k, v in (rr[0].items() if rr else [])
+                     if k not in ("ID", "Name", "ConstituencyCode", "RegionCode",
+                                  "ShortName", "ValidFromDate", "ValidUntilDate",
+                                  "StartDate", "EndDate", "RegionID")}
+            if extra:
+                print(f"  {ent}?$expand={exp}: {str(extra)[:400]}")
+            else:
+                print(f"  {ent}?$expand={exp}: HTTP 200 (no extra keys)")
+        else:
+            print(f"  {ent}?$expand={exp}: HTTP {code}")
 
 print("\n" + "=" * 72 + "\nDONE — paste the whole output.\n" + "=" * 72)
