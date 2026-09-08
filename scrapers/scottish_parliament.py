@@ -173,8 +173,62 @@ class ScottishParliamentScraper(BaseScraper):
         # Attempt to enrich party info from the PersonParties / Parties OData entities
         if members:
             self._enrich_msp_parties(members)
+            self._enrich_msp_constituencies(members)
         logger.info(f"[Scottish Parliament] {len(members)} MSPs fetched")
         return members
+
+    # Current-role line on a parliament.scot MSP profile page reads
+    # "MSP for <Area> (Constituency)" or "... (Region)". Former roles are
+    # prefixed "Former MSP for ..." and must be skipped.
+    _PROFILE_ROLE_RE = re.compile(r"(Former )?MSP for (.+?) \((Constituency|Region)\)")
+
+    def _enrich_msp_constituencies(self, members: List[Dict]) -> None:
+        """Fill each CURRENT MSP's constituency (or region, for list MSPs).
+
+        data.parliament.scot exposes no member->area link, but its Websites
+        entity gives each member's parliament.scot profile URL, whose current
+        role line reads 'MSP for <Area> (Constituency|Region)'. We fetch that
+        page per current MSP and take the first non-'Former' match, so a
+        regional (list) MSP gets their region and a constituency MSP their
+        constituency — both being the electoral "area" a voter is graded on.
+        Only current MSPs are enriched (historical ones are kept for attributing
+        old records but don't need an area for the app).
+        """
+        current = [m for m in members if m.get("status") == "current" and m.get("id")]
+        if not current:
+            return
+        web_rows = self._odata_get("Websites") or []
+        profile_by_id: Dict[str, str] = {}
+        for w in web_rows:
+            pid = str(w.get("PersonID") or "")
+            url = w.get("WebURL") or w.get("WebUrl") or ""
+            if pid and "parliament.scot/msps" in url.lower():
+                if pid not in profile_by_id or w.get("IsDefault"):
+                    profile_by_id[pid] = url
+        if not profile_by_id:
+            logger.warning("[Scottish Parliament] Websites gave no MSP profile URLs — "
+                           "cannot enrich constituencies")
+            return
+        filled = 0
+        for i, m in enumerate(current):
+            url = profile_by_id.get(m["id"])
+            if not url:
+                continue
+            if i and i % 25 == 0:
+                logger.info(f"[Scottish Parliament] Constituency enrichment: {i}/{len(current)} "
+                            f"profiles processed ({filled} filled)")
+            soup = self._html_get(url)
+            if not soup:
+                continue
+            text = soup.get_text(" ", strip=True)
+            for former, area, _kind in self._PROFILE_ROLE_RE.findall(text):
+                if former:
+                    continue  # skip historical roles
+                m["constituency"] = area.strip()
+                filled += 1
+                break
+        logger.info(f"[Scottish Parliament] Constituency enrichment: filled "
+                    f"{filled}/{len(current)} current MSPs from profile pages")
 
     def _enrich_msp_parties(self, members: List[Dict]) -> None:
         """Fill in MSP party by joining the MemberParties and Parties OData entities.
