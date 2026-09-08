@@ -51,11 +51,26 @@ def _json_default(obj):
 def _record_key(record: Dict) -> str:
     """Stable dedup hash for a record.
 
+    Two record shapes exist. Enveloped records from _make_record carry
+    parliament/data_type/member{}/date/title/text; flat roster entries from
+    fetch_members carry {id,name,party,constituency,role,status} at the top
+    level and none of those envelope fields. A flat member record must be keyed
+    on its own identity — otherwise every member collapses to the same empty
+    hash ("|||||") and all but the first are dropped as duplicates (which left
+    exactly one member per parliament in the saved data).
+
     Deliberately excludes pulled_at/source_url volatility: the same speech or
     question fetched on two different runs must hash identically. Text is
     truncated so cosmetic trailing changes on huge transcripts don't defeat
     the dedup.
     """
+    if "data_type" not in record and not isinstance(record.get("member"), dict):
+        # Flat roster entry (members) — key on the member's own identity fields.
+        raw = "member|" + "|".join(
+            str(record.get(k, "")) for k in
+            ("id", "name", "party", "constituency", "role"))
+        return hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest()
+
     m = record.get("member") or {}
     raw = "|".join([
         str(record.get("data_type", "")),
