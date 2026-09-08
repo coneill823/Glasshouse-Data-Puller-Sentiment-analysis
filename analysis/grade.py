@@ -157,9 +157,13 @@ def load_roster(parl_dir: Path):
     for chunk in pd.read_csv(path, dtype=str, keep_default_na=False,
                              encoding="utf-8-sig", chunksize=5000):
         for r in chunk.to_dict("records"):
+            # Canonical key: the roster id where present, else the normalised
+            # name. Records that carry an id and records that carry only a name
+            # both resolve to this one key, so a member isn't double-counted.
+            canon = r["id"] if r.get("id") else "nk:" + _norm_name(r.get("name", ""))
             info = {"name": r.get("name", ""), "party": r.get("party", ""),
                     "constituency": r.get("constituency", ""),
-                    "status": r.get("status", "")}
+                    "status": r.get("status", ""), "key": canon}
             if r.get("id"):
                 roster_by_id[r["id"]] = info
             if r.get("name"):
@@ -195,7 +199,13 @@ def grade(data_dir: Path, out_dir: Path, current_only: bool = False):
             info = roster_by_id.get(mid)
             if info is None:
                 info = roster_by_name.get(_norm_name(rec.get("member_name", "")))
-            key = f"{parl_slug}:{mid}" if mid else f"{parl_slug}:name:{_norm_name(rec.get('member_name',''))}"
+            if info is not None:
+                # Canonicalise to the roster identity so id-only and name-only
+                # records for the same person merge into one member.
+                key = f"{parl_slug}:{info['key']}"
+            else:
+                nm = _norm_name(rec.get("member_name", ""))
+                key = f"{parl_slug}:name:{nm}" if nm else f"{parl_slug}:unknown"
             m = members[key]
             if not m["name"]:
                 m["name"] = (info or {}).get("name") or rec.get("member_name", "")
