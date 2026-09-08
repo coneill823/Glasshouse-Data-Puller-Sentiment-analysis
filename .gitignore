@@ -11,3 +11,6 @@ dist/
 build/
 .DS_Store
 *.log
+
+# Grading outputs (generated)
+analysis/output/
