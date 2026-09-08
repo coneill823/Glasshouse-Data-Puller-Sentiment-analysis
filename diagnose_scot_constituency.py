@@ -83,6 +83,7 @@ for m in sample:
     for label in ("Region", "Constituency"):
         i = html.find(label)
         if i != -1:
-            print(f"    raw around {label!r}: {re.sub(r'\\s+',' ', html[i-40:i+120])!r}")
+            snippet = re.sub(r"\s+", " ", html[i - 40:i + 120])
+            print(f"    raw around {label!r}: {snippet!r}")
 
 print("\n" + "=" * 72 + "\nDONE — paste the whole output.\n" + "=" * 72)
