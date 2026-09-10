@@ -181,6 +181,25 @@ def _norm_name(name: str) -> str:
     return re.sub(r"[^a-z ]+", " ", n).strip()
 
 
+# Chair/office and parsing-artifact "speakers" that aren't gradeable members.
+# Only applied to speakers NOT matched to the roster, so a real member is never
+# dropped even if their name happens to contain one of these words.
+_CHAIR_MARKERS = ("speaker", "presiding officer", "llywydd", "lywydd", "chairman",
+                  "chairperson", "the chair", "deputy chair", "lord speaker",
+                  "clerk", "temporary chair")
+_HAS_DIGIT = re.compile(r"\d")
+
+
+def _is_gradeable_name(name: str) -> bool:
+    """False for the chair and plenary parsing artifacts ("13:3", "level 1")."""
+    n = (name or "").strip().lower()
+    if not n or _HAS_DIGIT.search(n):
+        return False
+    if any(marker in n for marker in _CHAIR_MARKERS):
+        return False
+    return len(re.sub(r"[^a-z]", "", n)) >= 2
+
+
 def grade(data_dir: Path, out_dir: Path, current_only: bool = False):
     if pd is None:
         sys.exit("pandas is required: pip install pandas")
@@ -199,6 +218,8 @@ def grade(data_dir: Path, out_dir: Path, current_only: bool = False):
             info = roster_by_id.get(mid)
             if info is None:
                 info = roster_by_name.get(_norm_name(rec.get("member_name", "")))
+            if info is None and not _is_gradeable_name(rec.get("member_name", "")):
+                return None  # chair / parsing artifact, not a member — skip
             if info is not None:
                 # Canonicalise to the roster identity so id-only and name-only
                 # records for the same person merge into one member.
@@ -228,6 +249,8 @@ def grade(data_dir: Path, out_dir: Path, current_only: bool = False):
                     if not text:
                         continue
                     m = resolve(rec)
+                    if m is None:
+                        continue  # chair / artifact speaker
                     m[counter] += 1
                     hits, tpos, tneg = score_text(text)
                     m["tone_pos"] += tpos
@@ -251,6 +274,8 @@ def grade(data_dir: Path, out_dir: Path, current_only: bool = False):
                     if not motion:
                         continue
                     m = resolve(rec)
+                    if m is None:
+                        continue  # chair / artifact speaker
                     m["n_votes"] += 1
                     support = 1 if direction == "aye" else -1
                     for tp, lean in motion_topic_stance(motion).items():

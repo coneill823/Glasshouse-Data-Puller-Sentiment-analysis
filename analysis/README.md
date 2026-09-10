@@ -46,6 +46,15 @@ Everything gradeable lives in **`analysis/topics.py`** — edit it freely:
   is a political judgement — make the lists mean what you intend.
 - `GENERAL_POSITIVE` / `GENERAL_NEGATIVE` drive the topic-independent tone score.
 
+## Who gets graded
+
+Members are canonicalised to the roster, so a person with both id-bearing and
+name-only records is counted once (not duplicated). Speakers that aren't
+gradeable members — the chair (`Mr Speaker`, `The Presiding Officer`, `Y
+Llywydd`) and plenary parsing artifacts (`13:3`, `level 1`) — are excluded.
+`--current-only` further restricts to sitting members. Note the artifacts still
+exist in the raw plenary data; the grader just doesn't grade them.
+
 ## Caveats
 
 - **Vote stance is heuristic**: it infers a motion's lean from its wording and
