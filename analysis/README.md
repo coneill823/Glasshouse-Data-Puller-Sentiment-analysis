@@ -81,3 +81,13 @@ exist in the raw plenary data; the grader just doesn't grade them.
 - The final "grade" is intentionally left to the app: the CSVs expose the
   components (tone, activity, per-topic stance) so you can weight them however
   the product needs.
+
+## Feeding the app
+
+```bash
+python -m analysis.export_app_data       # CSVs -> app/data.json
+```
+
+Keeps sitting members that have a constituency (`--all` to include the rest),
+strips the `Pro-` prefix, and writes one compact JSON the front end loads. See
+`app/README.md`.
