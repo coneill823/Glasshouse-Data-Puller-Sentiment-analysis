@@ -52,21 +52,37 @@ Stance runs **−1 (against) … +1 (pro)** and is always read as *pro that topi
 the grading CSVs name categories `Pro-<topic>`; the exporter strips the prefix
 because the app states the convention once, in its method note.
 
-## Standalone / hosted copy
+## Standalone single-file build
 
 `index.html` reads its data from an inline
 `<script id="app-data" type="application/json">` block if one is populated, and
-otherwise falls back to `fetch("data.json")`. So the same file serves the repo
-unchanged, and a self-contained single-file copy is just:
+otherwise falls back to `fetch("data.json")`. So the same page serves the repo
+unchanged, and a self-contained copy — one file, no server needed, opens by
+double-clicking — is:
 
 ```bash
-python - <<'PY'
-import pathlib
-d = pathlib.Path("app/data.json").read_text(encoding="utf-8")
-h = pathlib.Path("app/index.html").read_text(encoding="utf-8")
-pathlib.Path("glasshouse-grades.html").write_text(
-    h.replace('<script id="app-data" type="application/json">null</script>',
-              '<script id="app-data" type="application/json">' + d + '</script>'),
-    encoding="utf-8")
-PY
+python app/build_standalone.py          # -> dist/glasshouse-grades.html
+python app/build_standalone.py --out ~/Desktop/grades.html
 ```
+
+Use this for hosts that won't serve a `.json` file or let you create folders,
+and for emailing someone a working copy.
+
+## Putting it on a website
+
+Nothing server-side is involved — it's static files — so any host works:
+
+- **A folder on your host** (FTP/cPanel, Netlify, Cloudflare Pages): upload
+  `index.html` and `data.json` together into e.g. `/grades/`.
+- **GitHub Pages**: Settings → Pages → deploy from branch, folder `/app`.
+- **One file**: upload `dist/glasshouse-grades.html` anywhere.
+- **Inside an existing page** (WordPress/Squarespace/Wix, where you can't upload
+  loose HTML): host it by one of the above, then embed it:
+  ```html
+  <iframe src="https://yoursite.com/grades/" title="Glasshouse Grades"
+          style="width:100%;height:min(1100px,85vh);border:0"
+          loading="lazy"></iframe>
+  ```
+
+Re-run `analysis.export_app_data` (and `build_standalone.py` if you use it)
+after each data pull to refresh what's published.
