@@ -32,9 +32,22 @@ n_votes, activity_total, tone_score, topics_engaged, top_pro_topic, top_con_topi
 `… topic, mentions, spoken_pro, spoken_con, spoken_stance, vote_pro, vote_con,
 vote_stance, combined_stance`
 
-Stance columns run **-1 (con) … +1 (pro)**. `constituency` lets the app group by
-area (“show and grade the representatives for my area”). Filter `status=current`
-for sitting members.
+Stance columns run **-1 (con) … +1 (pro)**. Categories are named **`Pro-<topic>`**
+so a positive score always means the member leans to that category's supportive
+side (see `topics.py` for the axis of each — e.g. `Pro-Crime & justice` =
+pro-law-and-order). `constituency` lets the app group by area (“show and grade the
+representatives for my area”). Filter `status=current` for sitting members.
+
+**How stance is scored:**
+- `spoken_stance` / `vote_stance` / `combined_stance` = `(pro − con) / (pro + con + K)`
+  with a shrink constant `K` (default 4), so **one hit doesn't saturate to ±1** —
+  only strong, consistent evidence approaches the extremes.
+- `combined_stance` is a **weighted** blend of the two signals present, with
+  **votes weighted more than speech** (votes are unambiguous and negation-proof).
+- `top_pro_topic` / `top_con_topic` are chosen only from topics with at least
+  `MIN_STANCE_HITS` (default 3) pro+con hits, so a one-off blip can't win.
+- Tune `STANCE_SHRINK_K`, `VOTE_WEIGHT`, `SPEECH_WEIGHT`, `MIN_STANCE_HITS` at the
+  top of `grade.py`.
 
 ## Tuning
 
@@ -60,9 +73,11 @@ exist in the raw plenary data; the grader just doesn't grade them.
 - **Vote stance is heuristic**: it infers a motion's lean from its wording and
   combines it with the member's vote. Motions with neutral wording contribute
   nothing; genuinely mis-worded motions can mislead. Treat it as a signal.
-- Lexicon scoring can't read sarcasm, negation ("not enough funding") or
-  context. It's a fast, explainable first pass — curate the word lists to improve
-  it.
+- **Negation is partially handled**: a stance term is flipped if a negation cue
+  ("not", "never", "against", "oppose"…) appears in the few tokens *before* it
+  ("we will not fund the NHS" → con). But a *post-modified* attack ("net zero is
+  a disaster") isn't caught — an inherent limit of lexicon scoring. This is why
+  votes are weighted above speech. Sarcasm is likewise invisible.
 - The final "grade" is intentionally left to the app: the CSVs expose the
   components (tone, activity, per-topic stance) so you can weight them however
   the product needs.

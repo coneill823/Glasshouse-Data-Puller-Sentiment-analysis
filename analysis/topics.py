@@ -28,6 +28,13 @@ Matching notes:
 
 The pro/con axis is a political judgement — edit these lists so the axis means
 what you intend for your product.
+
+Naming: each category is prefixed "Pro-" so a POSITIVE score always means the
+member leans to that category's supportive side (per its axis comment). For most
+this reads naturally ("Pro-Health & social care", "Pro-Environment & climate").
+A few need the axis in mind: "Pro-Crime & justice" = pro-law-and-order (more
+police / tougher sentences), "Pro-Immigration & asylum" = pro-welcoming, and
+"Pro-Economy & finance" = pro-public-spending / progressive tax.
 """
 
 # ---------------------------------------------------------------------------
@@ -54,7 +61,7 @@ GENERAL_NEGATIVE = [
 # ---------------------------------------------------------------------------
 TOPICS = {
     # axis: pro = fund/expand NHS & care ; con = cuts/privatisation/criticism
-    "Health & social care": {
+    "Pro-Health & social care": {
         "keywords": ["nhs", "health", "healthcare", "hospital", "hospitals", "gp",
                      "gps", "doctor", "doctors", "nurse", "nurses", "patient",
                      "patients", "a&e", "ambulance", "mental health", "social care",
@@ -69,7 +76,7 @@ TOPICS = {
                 "nhs crisis", "care crisis", "backlog"],
     },
     # axis: pro = build more homes / renter protections ; con = block/oppose/criticism
-    "Housing & planning": {
+    "Pro-Housing & planning": {
         "keywords": ["housing", "house", "houses", "homes", "homelessness",
                      "homeless", "rent", "renters", "tenant", "tenants",
                      "landlord", "mortgage", "planning", "affordable homes",
@@ -85,7 +92,7 @@ TOPICS = {
                 "unaffordable homes"],
     },
     # axis: pro = welcoming / rights-based ; con = restrictive / control
-    "Immigration & asylum": {
+    "Pro-Immigration & asylum": {
         "keywords": ["immigration", "immigrant", "immigrants", "migrant",
                      "migrants", "migration", "asylum", "refugee", "refugees",
                      "border", "borders", "visa", "visas", "deportation",
@@ -100,7 +107,7 @@ TOPICS = {
                 "uncontrolled immigration", "people smugglers", "abuse of the system"],
     },
     # axis: pro = climate action ; con = scepticism / cost-focus
-    "Environment & climate": {
+    "Pro-Environment & climate": {
         "keywords": ["climate", "climate change", "net zero", "carbon",
                      "emissions", "environment", "environmental", "pollution",
                      "biodiversity", "nature", "recycling", "flooding", "sewage",
@@ -114,7 +121,7 @@ TOPICS = {
                 "climate alarmism", "eco zealots", "climate sceptic", "delay net zero"],
     },
     # axis: pro = renewables/security/lower bills ; con = high bills/oppose transition
-    "Energy": {
+    "Pro-Energy": {
         "keywords": ["energy", "electricity", "gas", "oil", "nuclear", "wind",
                      "solar", "energy bills", "energy prices", "fuel", "power",
                      "grid", "north sea", "fossil fuels", "fracking",
@@ -127,7 +134,7 @@ TOPICS = {
                 "ban new oil", "expensive energy", "energy rationing"],
     },
     # axis: pro = public investment / progressive tax ; con = austerity / low-tax framing
-    "Economy & finance": {
+    "Pro-Economy & finance": {
         "keywords": ["economy", "economic", "gdp", "growth", "recession",
                      "inflation", "cost of living", "tax", "taxes", "taxation",
                      "budget", "deficit", "borrowing", "spending", "public finances",
@@ -140,7 +147,7 @@ TOPICS = {
                 "waste of taxpayers money", "balance the books"],
     },
     # axis: pro = fund/expand schools ; con = cuts/criticism
-    "Education": {
+    "Pro-Education": {
         "keywords": ["education", "school", "schools", "teacher", "teachers",
                      "pupil", "pupils", "student", "students", "university",
                      "universities", "college", "colleges", "curriculum",
@@ -155,7 +162,7 @@ TOPICS = {
                 "overcrowded classrooms", "attainment gap", "failing schools"],
     },
     # axis: pro = police numbers / tough on crime + victims ; con = cuts/failure
-    "Crime & justice": {
+    "Pro-Crime & justice": {
         "keywords": ["crime", "police", "policing", "prison", "prisons",
                      "sentencing", "courts", "court", "justice", "offenders",
                      "antisocial", "anti-social", "knife crime", "violence",
@@ -169,7 +176,7 @@ TOPICS = {
                 "victims let down", "justice delayed", "cuts to policing"],
     },
     # axis: pro = strong/higher defence spending ; con = cuts/scepticism
-    "Defence": {
+    "Pro-Defence": {
         "keywords": ["defence", "military", "armed forces", "army", "navy",
                      "raf", "nato", "troops", "veterans", "nuclear deterrent",
                      "trident", "ukraine", "armed services"],
@@ -182,7 +189,7 @@ TOPICS = {
                 "reduce defence spending"],
     },
     # axis: pro = internationalist / aid ; con = cut aid / inward focus
-    "Foreign affairs & aid": {
+    "Pro-Foreign affairs & aid": {
         "keywords": ["foreign", "diplomacy", "international", "united nations",
                      "aid", "overseas aid", "sanctions", "trade deal",
                      "human rights", "commonwealth", "gaza", "israel", "china",
@@ -196,7 +203,7 @@ TOPICS = {
                 "scrap overseas aid"],
     },
     # axis: pro = closer EU ties ; con = pro-Brexit / divergence
-    "Europe & Brexit": {
+    "Pro-Europe & Brexit": {
         "keywords": ["brexit", "european union", " eu ", "single market",
                      "customs union", "northern ireland protocol", "windsor framework",
                      "european", "trade barriers", "rejoin", "divergence"],
@@ -208,7 +215,7 @@ TOPICS = {
                 "no going back", "regulatory divergence"],
     },
     # axis: pro = workers' rights ; con = deregulation / business burden
-    "Employment & work": {
+    "Pro-Employment & work": {
         "keywords": ["employment", "jobs", "job", "unemployment", "workers",
                      "worker", "wages", "wage", "minimum wage", "trade union",
                      "trade unions", "zero hours", "workforce", "redundancies",
@@ -222,7 +229,7 @@ TOPICS = {
                 "job losses", "mass redundancies", "cut employment rights"],
     },
     # axis: pro = maintain/expand welfare ; con = cuts / conditionality
-    "Welfare & social security": {
+    "Pro-Welfare & social security": {
         "keywords": ["welfare", "benefits", "universal credit", "pension",
                      "pensions", "pensioners", "disability", "pip", "child benefit",
                      "poverty", "food banks", "cost of living", "social security",
@@ -236,7 +243,7 @@ TOPICS = {
                 "cap benefits", "scrap the winter fuel", "reduce welfare"],
     },
     # axis: pro = invest in (public) transport ; con = cuts/criticism
-    "Transport": {
+    "Pro-Transport": {
         "keywords": ["transport", "rail", "railway", "railways", "train", "trains",
                      "bus", "buses", "road", "roads", "hs2", "cycling", "potholes",
                      "aviation", "fares", "public transport", "motorway"],
@@ -248,7 +255,7 @@ TOPICS = {
                 "war on motorists"],
     },
     # axis: pro = support / cut costs for business ; con = burden / decline
-    "Business & industry": {
+    "Pro-Business & industry": {
         "keywords": ["business", "businesses", "industry", "manufacturing",
                      "small business", "smes", "enterprise", "high street",
                      "retail", "steel", "exports", "productivity", "entrepreneur"],
@@ -261,7 +268,7 @@ TOPICS = {
                 "anti business", "taxes on business"],
     },
     # axis: pro = support farmers / food standards ; con = undercut / criticism
-    "Agriculture, food & rural": {
+    "Pro-Agriculture, food & rural": {
         "keywords": ["farming", "farmers", "farm", "agriculture", "rural",
                      "food", "food security", "countryside", "fishing",
                      "fisheries", "animal welfare", "land", "crops", "livestock"],
@@ -274,7 +281,7 @@ TOPICS = {
                 "neglect rural areas", "family farm tax"],
     },
     # axis: pro = advance equality/rights ; con = rollback / culture-war framing
-    "Equality & rights": {
+    "Pro-Equality & rights": {
         "keywords": ["equality", "discrimination", "human rights", "disability",
                      "race", "racism", "lgbt", "women", "gender", "disabled",
                      "inclusion", "diversity", "civil liberties"],
@@ -285,7 +292,7 @@ TOPICS = {
                 "undermine equality", "anti woke", "identity politics"],
     },
     # axis: pro = devolve / fund local ; con = cuts / centralisation
-    "Local government & devolution": {
+    "Pro-Local government & devolution": {
         "keywords": ["council", "councils", "local government", "devolution",
                      "devolved", "mayor", "local authority", "local authorities",
                      "town", "levelling up", "regional", "community", "communities"],
@@ -298,7 +305,7 @@ TOPICS = {
                 "cuts to local services"],
     },
     # axis: pro = invest in / lead on science & tech ; con = cuts / harms
-    "Science, technology & digital": {
+    "Pro-Science, technology & digital": {
         "keywords": ["science", "research", "technology", "innovation", "digital",
                      "broadband", "artificial intelligence", " ai ", "data",
                      "online safety", "cyber", "space", "startups", "r&d"],
@@ -309,7 +316,7 @@ TOPICS = {
                 "online harms", "poorly regulated ai", "underfund research"],
     },
     # axis: pro = democratic reform / standards ; con = sleaze / erosion
-    "Parliament, elections & constitution": {
+    "Pro-Parliament, elections & constitution": {
         "keywords": ["parliament", "democracy", "election", "elections", "voting",
                      "electoral", "constitution", "lords reform", "standards",
                      "sleaze", "lobbying", "voter id", "referendum", "franchise"],

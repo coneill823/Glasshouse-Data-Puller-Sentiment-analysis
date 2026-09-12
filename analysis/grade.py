@@ -69,52 +69,67 @@ INDEX = dict(INDEX)
 MAX_NGRAM = max((len(t.split()) for t in INDEX), default=1)
 
 
-def _ngram_counts(text: str) -> dict:
-    """Count 1..MAX_NGRAM word n-grams in text (lower-cased)."""
-    tokens = _WORD_RE.findall(text.lower())
-    counts: dict = {}
-    n_tokens = len(tokens)
-    for n in range(1, MAX_NGRAM + 1):
-        if n > n_tokens:
-            break
-        for i in range(n_tokens - n + 1):
-            g = tokens[i] if n == 1 else " ".join(tokens[i:i + n])
-            counts[g] = counts.get(g, 0) + 1
-    return counts
+# Negation cues: a matched stance/tone term is flipped if one of these appears
+# in the few tokens just before it ("not fund the NHS" -> con, not pro). This is
+# a pre-term window only, so it can't catch post-modified attacks
+# ("net zero is a disaster") — an inherent limit of lexicon scoring.
+NEGATIONS = {"not", "no", "never", "without", "cannot", "can't", "don't", "dont",
+             "doesn't", "doesnt", "isn't", "isnt", "aren't", "arent", "won't",
+             "wont", "wasn't", "weren't", "nor", "neither", "hardly", "barely",
+             "lacks", "lacking", "against", "oppose", "opposed", "reject"}
+_NEG_WINDOW = 3
 
 
 def score_text(text: str):
     """Return (topic_hits, tone_pos, tone_neg).
 
-    topic_hits[topic] = {"mentions", "pro", "con"} frequency counts.
-
-    Stance (pro/con) is only counted for a topic the statement is actually ABOUT
-    — i.e. one whose keywords appear. Otherwise generic stance words shared
-    across categories ("invest", "protect", "funding") would bleed a stance onto
-    unrelated topics. A topic must earn a keyword hit before its pro/con counts.
+    Sequential longest-match scan (so "climate change" counts once, not also as
+    "climate"), with pre-term negation flipping. Stance (pro/con) is only counted
+    for a topic the statement is actually ABOUT — a topic must earn a keyword hit
+    before its pro/con counts — so stance words shared across categories don't
+    bleed onto unrelated topics.
     """
-    counts = _ngram_counts(text)
+    tokens = _WORD_RE.findall(text.lower())
+    n = len(tokens)
     mentions: dict = defaultdict(int)
     pro: dict = defaultdict(int)
     con: dict = defaultdict(int)
     tone_pos = tone_neg = 0
-    for term, c in counts.items():
-        entry = INDEX.get(term)
-        if not entry:
+    i = 0
+    while i < n:
+        entry = None
+        step = 1
+        for L in range(min(MAX_NGRAM, n - i), 0, -1):  # longest match wins
+            term = tokens[i] if L == 1 else " ".join(tokens[i:i + L])
+            e = INDEX.get(term)
+            if e:
+                entry, step = e, L
+                break
+        if entry is None:
+            i += 1
             continue
+        neg = any(tokens[j] in NEGATIONS for j in range(max(0, i - _NEG_WINDOW), i))
         for tp in entry["kw"]:
-            mentions[tp] += c
+            mentions[tp] += 1
+        pro_side, con_side = (con, pro) if neg else (pro, con)
         for tp in entry["pro"]:
-            pro[tp] += c
+            pro_side[tp] += 1
         for tp in entry["con"]:
-            con[tp] += c
-        if entry["tone"] > 0:
-            tone_pos += c
-        elif entry["tone"] < 0:
-            tone_neg += c
+            con_side[tp] += 1
+        if entry["tone"]:
+            polarity = -entry["tone"] if neg else entry["tone"]
+            if polarity > 0:
+                tone_pos += 1
+            else:
+                tone_neg += 1
+        i += step
+    # A topic is "present" if a keyword OR a (distinctive) pro/con phrase fired.
+    # Pro/con phrases are topic-specific, so this doesn't bleed across topics, and
+    # it's needed because longest-match consumes keyword tokens inside a phrase
+    # (e.g. "homes" inside "build more homes").
     topic_hits: dict = {}
-    for tp in mentions:  # gate: only topics with a keyword hit
-        topic_hits[tp] = {"mentions": mentions[tp], "pro": pro.get(tp, 0),
+    for tp in set(mentions) | set(pro) | set(con):
+        topic_hits[tp] = {"mentions": mentions.get(tp, 0), "pro": pro.get(tp, 0),
                           "con": con.get(tp, 0)}
     return topic_hits, tone_pos, tone_neg
 
@@ -290,9 +305,22 @@ def grade(data_dir: Path, out_dir: Path, current_only: bool = False):
     _write_outputs(members, out_dir, current_only)
 
 
+# Stance scoring configuration.
+STANCE_SHRINK_K = 4    # pseudo-count: shrinks thin evidence toward 0 (1 hit != +-1)
+MIN_STANCE_HITS = 3    # min pro+con hits for a topic to qualify as top_pro/top_con
+VOTE_WEIGHT = 2.0      # votes weigh more than speech (unambiguous, negation-proof)
+SPEECH_WEIGHT = 1.0
+
+
 def _stance(pro: int, con: int):
+    """Shrunk stance in [-1, 1]: (pro - con) / (pro + con + K).
+
+    The +K pseudo-count pulls thin evidence toward 0, so a single hit gives a
+    small score rather than saturating at +-1; only strong, consistent evidence
+    approaches the extremes.
+    """
     total = pro + con
-    return round((pro - con) / total, 3) if total else 0.0
+    return round((pro - con) / (total + STANCE_SHRINK_K), 3) if total else 0.0
 
 
 def _write_outputs(members: dict, out_dir: Path, current_only: bool):
@@ -319,19 +347,25 @@ def _write_outputs(members: dict, out_dir: Path, current_only: bool):
                 continue
             n_members += 1
             topic_stances = {}
+            topic_evidence = {}
             for tp, h in sorted(m["topics"].items()):
+                sp_n = h["spoken_pro"] + h["spoken_con"]
+                vt_n = h["vote_pro"] + h["vote_con"]
                 sp = _stance(h["spoken_pro"], h["spoken_con"])
                 vt = _stance(h["vote_pro"], h["vote_con"])
-                # combined: average of the components that actually have signal
-                parts = []
-                if h["spoken_pro"] + h["spoken_con"]:
-                    parts.append(sp)
-                if h["vote_pro"] + h["vote_con"]:
-                    parts.append(vt)
-                combined = round(sum(parts) / len(parts), 3) if parts else 0.0
+                # combined: weighted average of the signals present (votes count more)
+                num = den = 0.0
+                if sp_n:
+                    num += SPEECH_WEIGHT * sp
+                    den += SPEECH_WEIGHT
+                if vt_n:
+                    num += VOTE_WEIGHT * vt
+                    den += VOTE_WEIGHT
+                combined = round(num / den, 3) if den else 0.0
                 topic_stances[tp] = combined
+                topic_evidence[tp] = sp_n + vt_n
                 # only emit rows where the member actually engaged the topic
-                if h["mentions"] or h["spoken_pro"] or h["spoken_con"] or h["vote_pro"] or h["vote_con"]:
+                if h["mentions"] or sp_n or vt_n:
                     tw.writerow([m["parliament"], m["name"], m["party"], m["constituency"],
                                  m["status"], tp, h["mentions"], h["spoken_pro"],
                                  h["spoken_con"], sp, h["vote_pro"], h["vote_con"], vt, combined])
@@ -339,8 +373,11 @@ def _write_outputs(members: dict, out_dir: Path, current_only: bool):
             tone = _stance(m["tone_pos"], m["tone_neg"])
             activity = m["n_questions"] + m["n_speeches"] + m["n_votes"]
             engaged = {t: s for t, s in topic_stances.items() if s != 0}
-            top_pro = max(engaged.items(), key=lambda kv: kv[1], default=("", 0))
-            top_con = min(engaged.items(), key=lambda kv: kv[1], default=("", 0))
+            # top pro/con only from well-evidenced topics, so a 1-hit blip can't win
+            confident = {t: s for t, s in engaged.items()
+                         if topic_evidence.get(t, 0) >= MIN_STANCE_HITS}
+            top_pro = max(confident.items(), key=lambda kv: kv[1], default=("", 0))
+            top_con = min(confident.items(), key=lambda kv: kv[1], default=("", 0))
             gw.writerow([m["parliament"], m["name"], m["party"], m["constituency"], m["status"],
                          m["n_questions"], m["n_speeches"], m["n_votes"], activity,
                          tone, len(engaged),
