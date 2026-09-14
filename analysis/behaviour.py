@@ -49,6 +49,23 @@ from analysis.topics import TOPICS
 # A party's "line" on a division only exists if enough of them voted and the
 # split isn't a tie — otherwise "rebelling against it" is meaningless.
 MIN_PARTY_VOTERS = 3
+
+# Groupings that are the ABSENCE of a party, not a party. They take no whip, so
+# there is no line for them to defy and "rebellion" against them is meaningless
+# — without this, independents score as huge rebels purely because other
+# independents (who never coordinate) voted differently.
+NON_PARTY = {
+    "independent", "independent labour", "independent conservative",
+    "non-affiliated", "nonaffiliated", "no party affiliation", "none",
+    "crossbench", "crossbencher", "bishops", "lord speaker",
+    "speaker", "the speaker", "deputy speaker", "presiding officer",
+    "deputy presiding officer", "unaffiliated", "other", "",
+}
+
+
+def _is_whipped_group(party: str) -> bool:
+    p = (party or "").strip().lower()
+    return bool(p) and p not in NON_PARTY and not p.startswith("independent")
 # Ideal-point estimation needs members who vote enough to place, and divisions
 # that actually divide the chamber (a unanimous vote separates nobody).
 MIN_VOTES_FOR_SCALING = 25
@@ -157,6 +174,18 @@ def analyse(data_dir: Path, out_dir: Path, current_only: bool = False):
                 m["parliament"] = rec.get("parliament", parl_slug)
             return key, m
 
+        def party_at_vote(rec, m):
+            """The member's party AT THE TIME OF THE VOTE, where the source says.
+
+            The roster carries a member's party *now*, which is wrong for anyone
+            who has since defected, resigned the whip or taken a peerage — their
+            old votes would be judged against a line they were never under.
+            UK and NI division records carry the contemporaneous party, so
+            prefer it; Scotland and the Senedd don't, so those fall back to the
+            roster and remain subject to this limitation.
+            """
+            return (rec.get("member_party") or "").strip() or (m["party"] or "").strip()
+
         # ---- salience: what they ask and speak about (#9) ----
         for dtype, counter in (("questions", "n_questions"),
                                ("plenary_business", "n_speeches")):
@@ -197,8 +226,8 @@ def analyse(data_dir: Path, out_dir: Path, current_only: bool = False):
                              or _VOTED_PREFIX_RE.sub("", rec.get("text", "") or ""),
                 }
             div_total[div][direction] += 1
-            party = (m["party"] or "").strip()
-            if party:
+            party = party_at_vote(rec, m)
+            if _is_whipped_group(party):
                 div_party[div][party][direction] += 1
 
         # Resolve the party line and the chamber result for each division.
@@ -231,7 +260,8 @@ def analyse(data_dir: Path, out_dir: Path, current_only: bool = False):
                 if not m["last_vote"] or date > m["last_vote"]:
                     m["last_vote"] = date
 
-            line = party_line.get((div, (m["party"] or "").strip()))
+            vparty = party_at_vote(rec, m)
+            line = party_line.get((div, vparty)) if _is_whipped_group(vparty) else None
             if line:
                 m["party_line_divisions"] += 1
                 if direction == line:
@@ -240,7 +270,7 @@ def analyse(data_dir: Path, out_dir: Path, current_only: bool = False):
                     m["rebellions"] += 1
                     rebellion_rows.append({
                         "parliament": m["parliament"], "member": m["name"],
-                        "party": m["party"], "date": date,
+                        "party": vparty, "date": date,
                         "division": div_meta.get(div, {}).get("title", ""),
                         "their_vote": direction, "party_voted": line,
                     })
@@ -268,7 +298,13 @@ def analyse(data_dir: Path, out_dir: Path, current_only: bool = False):
             m["divisions_eligible"] = max(hi - lo, m["votes_cast"])
 
         # ---- ideal points (#3) ----
-        scaling[parl_slug] = _ideal_points(vote_triples)
+        # Only members who sit together can be placed on one axis. Pooling every
+        # member ever pulled would scale people who never shared a division, and
+        # the leading dimension would partly separate ERAS rather than positions.
+        cohort = {k for k, m in members.items()
+                  if k.startswith(f"{parl_slug}:") and m["status"] == "current"}
+        scaling[parl_slug] = _ideal_points(
+            [t for t in vote_triples if t[0] in cohort])
 
     _write_outputs(members, rebellion_rows, scaling, out_dir, current_only)
 
