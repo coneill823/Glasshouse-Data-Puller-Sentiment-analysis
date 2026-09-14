@@ -195,6 +195,10 @@ def analyse(data_dir: Path, out_dir: Path, current_only: bool = False):
                 m["party"] = (info or {}).get("party") or rec.get("member_party", "")
                 m["constituency"] = (info or {}).get("constituency") or rec.get("member_constituency", "")
                 m["status"] = (info or {}).get("status", "")
+            # Set independently of the name: members seeded from the roster
+            # already have a name, and would otherwise never pick up the
+            # legislature's display name from the records.
+            if not m["parliament"]:
                 m["parliament"] = rec.get("parliament", parl_slug)
             return key, m
 
