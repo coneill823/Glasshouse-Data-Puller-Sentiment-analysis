@@ -1,0 +1,459 @@
+#!/usr/bin/env python3
+"""
+Bias-free behavioural metrics: what each member actually *did*, not what we
+think they meant.
+
+Every figure produced here is arithmetic over recorded acts. Nothing in this
+module contains a political judgement — there are no pro/con word lists, no
+"supportive side" of a division, no opinion about which end of an axis is good.
+That is deliberate: see `docs/METHODS.md`.
+
+Methods implemented
+    #2  Rebellion     — votes against the member's own party majority
+    #3  Ideal points  — unsupervised scaling of the member x division matrix
+    #4  Agreement     — how often they vote with their party / with the chamber
+    #9  Salience      — what they spend their time on (counts, not stances)
+    #10 Participation — divisions voted in vs divisions they could have voted in
+
+Reads the cumulative `*_master.csv` files under `data/<parliament>/…`.
+
+Usage:
+    python -m analysis.behaviour
+    python -m analysis.behaviour --data-dir data --out analysis/output
+    python -m analysis.behaviour --current-only
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import re
+import sys
+from collections import Counter, defaultdict
+from pathlib import Path
+
+try:
+    import pandas as pd
+except ImportError:  # pragma: no cover
+    pd = None
+
+try:
+    import numpy as np
+except ImportError:  # pragma: no cover
+    np = None
+
+from analysis.grade import (_is_gradeable_name, _norm_name, _slug, load_roster,
+                            _VOTED_PREFIX_RE)
+from analysis.topics import TOPICS
+
+# --- tunables ---------------------------------------------------------------
+# A party's "line" on a division only exists if enough of them voted and the
+# split isn't a tie — otherwise "rebelling against it" is meaningless.
+MIN_PARTY_VOTERS = 3
+# Ideal-point estimation needs members who vote enough to place, and divisions
+# that actually divide the chamber (a unanimous vote separates nobody).
+MIN_VOTES_FOR_SCALING = 25
+MIN_VOTERS_PER_DIVISION = 20
+MIN_MINORITY_SIDE = 3
+N_DIMENSIONS = 2
+
+
+# --- topic keywords only ----------------------------------------------------
+# Salience uses ONLY the keyword lists (does this statement mention housing?),
+# never the pro/con lists. Assigning a statement to a topic is categorisation;
+# deciding which side of it someone is on would be judgement, and is out of
+# scope for this module.
+def _build_keyword_index():
+    index = {}
+    for topic, spec in TOPICS.items():
+        clean = topic[4:] if topic.startswith("Pro-") else topic
+        for kw in spec.get("keywords", ()):
+            index.setdefault(kw.lower().strip(), set()).add(clean)
+    return index
+
+
+KEYWORDS = _build_keyword_index()
+MAX_KW_NGRAM = max((len(k.split()) for k in KEYWORDS), default=1)
+_WORD_RE = re.compile(r"[a-z0-9']+")
+
+
+def topics_mentioned(text: str) -> set:
+    """Topics whose keywords appear in the text. No stance, just presence."""
+    tokens = _WORD_RE.findall((text or "").lower())
+    found = set()
+    for i in range(len(tokens)):
+        for n in range(min(MAX_KW_NGRAM, len(tokens) - i), 0, -1):
+            hit = KEYWORDS.get(" ".join(tokens[i:i + n]))
+            if hit:
+                found |= hit
+                break
+    return found
+
+
+# --- accumulator ------------------------------------------------------------
+def _blank():
+    return {
+        "name": "", "party": "", "constituency": "", "status": "", "parliament": "",
+        "n_questions": 0, "n_speeches": 0,
+        "votes_cast": 0, "no_vote_recorded": 0,
+        "with_party": 0, "party_line_divisions": 0, "rebellions": 0,
+        "with_chamber": 0, "chamber_decided_divisions": 0,
+        "first_vote": "", "last_vote": "",
+        "topics": Counter(),
+    }
+
+
+def _read_csv(path: Path, chunksize=20000):
+    if not path.exists():
+        return
+    for chunk in pd.read_csv(path, dtype=str, keep_default_na=False,
+                             encoding="utf-8-sig", chunksize=chunksize):
+        yield from chunk.to_dict("records")
+
+
+def _division_key(rec: dict) -> str:
+    """Stable id for a division: the source's id, else date+title."""
+    did = (rec.get("metadata_division_id", "") or "").strip()
+    if did:
+        return did
+    return (rec.get("date", "")[:10] + "|" + (rec.get("title", "") or "")[:120]).strip()
+
+
+def analyse(data_dir: Path, out_dir: Path, current_only: bool = False):
+    if pd is None or np is None:
+        sys.exit("pandas and numpy are required: pip install pandas numpy")
+
+    members: dict = defaultdict(_blank)
+    parl_dirs = sorted([p for p in data_dir.iterdir() if p.is_dir()]) if data_dir.exists() else []
+    if not parl_dirs:
+        sys.exit(f"No parliament folders under {data_dir}/ — run the scraper first.")
+
+    rebellion_rows = []
+    scaling = {}   # parliament slug -> (member_keys, ideal points, variance)
+
+    for parl_dir in parl_dirs:
+        parl_slug = parl_dir.name
+        roster_by_id, roster_by_name = load_roster(parl_dir)
+
+        def resolve(rec):
+            """Canonical member key, matching grade.py so outputs join cleanly."""
+            info = roster_by_id.get((rec.get("member_id") or "").strip())
+            if info is None:
+                info = roster_by_name.get(_norm_name(rec.get("member_name", "")))
+            if info is None and not _is_gradeable_name(rec.get("member_name", "")):
+                return None, None
+            if info is not None:
+                key = f"{parl_slug}:{info['key']}"
+            else:
+                nm = _norm_name(rec.get("member_name", ""))
+                if not nm:
+                    return None, None
+                key = f"{parl_slug}:name:{nm}"
+            m = members[key]
+            if not m["name"]:
+                m["name"] = (info or {}).get("name") or rec.get("member_name", "")
+                m["party"] = (info or {}).get("party") or rec.get("member_party", "")
+                m["constituency"] = (info or {}).get("constituency") or rec.get("member_constituency", "")
+                m["status"] = (info or {}).get("status", "")
+                m["parliament"] = rec.get("parliament", parl_slug)
+            return key, m
+
+        # ---- salience: what they ask and speak about (#9) ----
+        for dtype, counter in (("questions", "n_questions"),
+                               ("plenary_business", "n_speeches")):
+            for rec in _read_csv(parl_dir / dtype / f"{dtype}_master.csv"):
+                text = rec.get("text", "") or ""
+                if not text:
+                    continue
+                _, m = resolve(rec)
+                if m is None:
+                    continue
+                m[counter] += 1
+                for t in topics_mentioned(text):
+                    m["topics"][t] += 1
+
+        # ---- votes: two passes so we know each division's party lines ----
+        vote_path = parl_dir / "votes_on_division" / "votes_on_division_master.csv"
+        if not vote_path.exists():
+            continue
+
+        # Pass 1 — tally each division by party and overall.
+        div_party = defaultdict(lambda: defaultdict(Counter))  # div -> party -> dir counts
+        div_total = defaultdict(Counter)                        # div -> dir counts
+        div_meta = {}
+        for rec in _read_csv(vote_path):
+            direction = (rec.get("metadata_vote_direction", "") or "").strip().lower()
+            key, m = resolve(rec)
+            if m is None:
+                continue
+            if direction not in ("aye", "no"):
+                if direction in ("no_vote", "novoterecorded", "not_recorded"):
+                    m["no_vote_recorded"] += 1
+                continue
+            div = _division_key(rec)
+            if div not in div_meta:
+                div_meta[div] = {
+                    "date": (rec.get("date", "") or "")[:10],
+                    "title": (rec.get("title", "") or "")
+                             or _VOTED_PREFIX_RE.sub("", rec.get("text", "") or ""),
+                }
+            div_total[div][direction] += 1
+            party = (m["party"] or "").strip()
+            if party:
+                div_party[div][party][direction] += 1
+
+        # Resolve the party line and the chamber result for each division.
+        party_line, chamber_line = {}, {}
+        for div, by_party in div_party.items():
+            for party, c in by_party.items():
+                if c["aye"] + c["no"] < MIN_PARTY_VOTERS or c["aye"] == c["no"]:
+                    continue  # too few, or genuinely split — no line to rebel against
+                party_line[(div, party)] = "aye" if c["aye"] > c["no"] else "no"
+        for div, c in div_total.items():
+            if c["aye"] != c["no"]:
+                chamber_line[div] = "aye" if c["aye"] > c["no"] else "no"
+
+        # Pass 2 — score each member's votes against both baselines (#2, #4, #10).
+        vote_triples = []      # (member_key, division_key, +1/-1) for scaling
+        for rec in _read_csv(vote_path):
+            direction = (rec.get("metadata_vote_direction", "") or "").strip().lower()
+            if direction not in ("aye", "no"):
+                continue
+            key, m = resolve(rec)
+            if m is None:
+                continue
+            div = _division_key(rec)
+            date = (rec.get("date", "") or "")[:10]
+
+            m["votes_cast"] += 1
+            if date:
+                if not m["first_vote"] or date < m["first_vote"]:
+                    m["first_vote"] = date
+                if not m["last_vote"] or date > m["last_vote"]:
+                    m["last_vote"] = date
+
+            line = party_line.get((div, (m["party"] or "").strip()))
+            if line:
+                m["party_line_divisions"] += 1
+                if direction == line:
+                    m["with_party"] += 1
+                else:
+                    m["rebellions"] += 1
+                    rebellion_rows.append({
+                        "parliament": m["parliament"], "member": m["name"],
+                        "party": m["party"], "date": date,
+                        "division": div_meta.get(div, {}).get("title", ""),
+                        "their_vote": direction, "party_voted": line,
+                    })
+
+            cline = chamber_line.get(div)
+            if cline:
+                m["chamber_decided_divisions"] += 1
+                if direction == cline:
+                    m["with_chamber"] += 1
+
+            vote_triples.append((key, div, 1 if direction == "aye" else -1))
+
+        # ---- participation denominator (#10) ----
+        # A member can only vote in divisions held while they sat. We don't have
+        # reliable term dates for every legislature, so eligibility is the
+        # divisions falling between their own first and last recorded vote.
+        # Stated plainly because it is an approximation, not a fact.
+        div_dates = sorted((meta["date"], d) for d, meta in div_meta.items() if meta["date"])
+        dates_only = [d for d, _ in div_dates]
+        for key, m in members.items():
+            if not key.startswith(f"{parl_slug}:") or not m["first_vote"]:
+                continue
+            lo = _bisect_left(dates_only, m["first_vote"])
+            hi = _bisect_right(dates_only, m["last_vote"])
+            m["divisions_eligible"] = max(hi - lo, m["votes_cast"])
+
+        # ---- ideal points (#3) ----
+        scaling[parl_slug] = _ideal_points(vote_triples)
+
+    _write_outputs(members, rebellion_rows, scaling, out_dir, current_only)
+
+
+def _bisect_left(sorted_list, value):
+    import bisect
+    return bisect.bisect_left(sorted_list, value)
+
+
+def _bisect_right(sorted_list, value):
+    import bisect
+    return bisect.bisect_right(sorted_list, value)
+
+
+def _ideal_points(triples):
+    """Unsupervised scaling of the member x division matrix (method #3).
+
+    No labels, no word lists, no human input of any kind — the dimensions fall
+    out of who votes with whom. Returns {member_key: (dim1, dim2)} plus the
+    share of variance each dimension explains, so we can report how much of the
+    voting record a single axis actually accounts for.
+
+    The SIGN of each dimension is mathematically arbitrary (SVD is only defined
+    up to sign). We fix it deterministically — largest party on the positive
+    side — purely so results are stable between runs. It carries no meaning.
+    """
+    if not triples:
+        return {}, []
+
+    members = sorted({k for k, _, _ in triples})
+    divisions = sorted({d for _, d, _ in triples})
+    m_idx = {k: i for i, k in enumerate(members)}
+    d_idx = {d: i for i, d in enumerate(divisions)}
+
+    M = np.zeros((len(members), len(divisions)), dtype=np.float32)
+    for k, d, v in triples:
+        M[m_idx[k], d_idx[d]] = v
+
+    # Keep members who vote enough to be placed, and divisions that divide the
+    # chamber — a 600-0 vote tells you nothing about who differs from whom.
+    voted = M != 0
+    keep_d = np.ones(len(divisions), dtype=bool)
+    for j in range(len(divisions)):
+        col = M[:, j]
+        ayes = int((col > 0).sum())
+        noes = int((col < 0).sum())
+        keep_d[j] = (ayes + noes) >= MIN_VOTERS_PER_DIVISION and min(ayes, noes) >= MIN_MINORITY_SIDE
+    keep_m = voted.sum(axis=1) >= MIN_VOTES_FOR_SCALING
+    if keep_m.sum() < 3 or keep_d.sum() < 3:
+        return {}, []
+
+    M = M[np.ix_(keep_m, keep_d)]
+    kept_members = [k for k, keep in zip(members, keep_m) if keep]
+
+    # Centre each division on its own mean over members who voted in it, so an
+    # absence reads as "no information" rather than as a vote in the middle.
+    for j in range(M.shape[1]):
+        col = M[:, j]
+        present = col != 0
+        if present.any():
+            col[present] -= col[present].mean()
+
+    U, S, _ = np.linalg.svd(M, full_matrices=False)
+    coords = U[:, :N_DIMENSIONS] * S[:N_DIMENSIONS]
+    var = (S ** 2) / (S ** 2).sum()
+    explained = [float(v) for v in var[:N_DIMENSIONS]]
+
+    # Scale each dimension to roughly [-1, 1] for display.
+    for j in range(coords.shape[1]):
+        peak = np.abs(coords[:, j]).max()
+        if peak:
+            coords[:, j] /= peak
+
+    return {k: (float(coords[i, 0]), float(coords[i, 1]))
+            for i, k in enumerate(kept_members)}, explained
+
+
+def _pct(n, d):
+    return round(100.0 * n / d, 1) if d else ""
+
+
+def _write_outputs(members, rebellion_rows, scaling, out_dir: Path, current_only: bool):
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Orient each parliament's first dimension so the largest party sits on the
+    # positive side. Arbitrary, deterministic, and meaningless — documented as
+    # such so nobody reads "positive" as "good" or "right-wing".
+    for parl_slug, (points, _explained) in scaling.items():
+        if not points:
+            continue
+        by_party = defaultdict(list)
+        for key, (d1, _d2) in points.items():
+            m = members.get(key)
+            if m and m["party"]:
+                by_party[m["party"]].append(d1)
+        if by_party:
+            biggest = max(by_party.items(), key=lambda kv: len(kv[1]))
+            if sum(biggest[1]) < 0:
+                scaling[parl_slug] = ({k: (-a, -b) for k, (a, b) in points.items()},
+                                      _explained)
+
+    rows = []
+    for key, m in sorted(members.items(), key=lambda kv: (kv[1]["parliament"], kv[1]["name"])):
+        if current_only and m["status"] != "current":
+            continue
+        if not m["name"]:
+            continue
+        parl_slug = key.split(":", 1)[0]
+        points = scaling.get(parl_slug, ({}, []))[0]
+        d1, d2 = points.get(key, ("", ""))
+        eligible = m.get("divisions_eligible", 0)
+        top = m["topics"].most_common(3)
+        spoken = m["n_questions"] + m["n_speeches"]
+        rows.append({
+            "parliament": m["parliament"], "member": m["name"], "party": m["party"],
+            "constituency": m["constituency"], "status": m["status"],
+            # participation (#10)
+            "votes_cast": m["votes_cast"],
+            "divisions_eligible": eligible,
+            "turnout_pct": _pct(m["votes_cast"], eligible),
+            "no_vote_recorded": m["no_vote_recorded"],
+            # agreement (#4) — both baselines, shown separately
+            "party_agreement_pct": _pct(m["with_party"], m["party_line_divisions"]),
+            "party_line_divisions": m["party_line_divisions"],
+            "chamber_agreement_pct": _pct(m["with_chamber"], m["chamber_decided_divisions"]),
+            "chamber_decided_divisions": m["chamber_decided_divisions"],
+            # rebellion (#2)
+            "rebellions": m["rebellions"],
+            "rebellion_rate_pct": _pct(m["rebellions"], m["party_line_divisions"]),
+            # scaling (#3)
+            "ideal_dim1": round(d1, 4) if d1 != "" else "",
+            "ideal_dim2": round(d2, 4) if d2 != "" else "",
+            # salience (#9)
+            "n_questions": m["n_questions"], "n_speeches": m["n_speeches"],
+            "top_topic_1": top[0][0] if len(top) > 0 else "",
+            "top_topic_2": top[1][0] if len(top) > 1 else "",
+            "top_topic_3": top[2][0] if len(top) > 2 else "",
+            "top_topic_1_share_pct": _pct(top[0][1], spoken) if top and spoken else "",
+        })
+
+    _dump(out_dir / "member_record.csv", rows)
+
+    sal = []
+    for key, m in members.items():
+        if current_only and m["status"] != "current":
+            continue
+        spoken = m["n_questions"] + m["n_speeches"]
+        for topic, n in sorted(m["topics"].items(), key=lambda kv: -kv[1]):
+            sal.append({"parliament": m["parliament"], "member": m["name"],
+                        "topic": topic, "statements": n,
+                        "share_of_statements_pct": _pct(n, spoken)})
+    _dump(out_dir / "member_salience.csv", sal)
+
+    rebellion_rows.sort(key=lambda r: (r["parliament"], r["member"], r["date"]))
+    _dump(out_dir / "member_rebellions.csv", rebellion_rows)
+
+    print(f"Wrote {len(rows)} members -> {out_dir}/member_record.csv")
+    print(f"      {len(rebellion_rows):,} rebellions -> {out_dir}/member_rebellions.csv")
+    print(f"      {len(sal):,} member-topic rows -> {out_dir}/member_salience.csv")
+    for parl_slug, (points, explained) in sorted(scaling.items()):
+        if explained:
+            pcts = ", ".join(f"dim{i+1} {v:.1%}" for i, v in enumerate(explained))
+            print(f"  scaling {parl_slug}: {len(points)} members placed ({pcts} of variance)")
+        else:
+            print(f"  scaling {parl_slug}: not enough division variety to place members")
+
+
+def _dump(path: Path, rows):
+    if not rows:
+        path.write_text("", encoding="utf-8")
+        return
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        w.writeheader()
+        w.writerows(rows)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Bias-free behavioural metrics.")
+    ap.add_argument("--data-dir", default="data")
+    ap.add_argument("--out", dest="out_dir", default="analysis/output")
+    ap.add_argument("--current-only", action="store_true")
+    a = ap.parse_args(argv)
+    analyse(Path(a.data_dir), Path(a.out_dir), current_only=a.current_only)
+
+
+if __name__ == "__main__":
+    main()
