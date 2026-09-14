@@ -79,6 +79,22 @@ N_DIMENSIONS = 2
 # leaving. Only losing a seat produces years of votes they had no part in.
 SERVICE_GAP_DAYS = 365
 MIN_MISSED_IN_GAP = 40
+# Members elected at a general election take their seats over a few weeks. Within
+# this window of the election they are measured from the election itself; a first
+# vote later than this means they arrived at a by-election.
+ELECTION_GRACE_DAYS = 60
+
+
+def _within_days(a: str, b: str, days: int) -> bool:
+    from datetime import date as _date
+
+    def parse(s):
+        try:
+            return _date(int(s[0:4]), int(s[5:7]), int(s[8:10]))
+        except (ValueError, IndexError):
+            return None
+    da, db = parse(a), parse(b)
+    return da is not None and db is not None and abs((da - db).days) <= days
 
 
 # --- topic keywords only ----------------------------------------------------
@@ -181,6 +197,25 @@ def analyse(data_dir: Path, out_dir: Path, current_only: bool = False):
                 m["status"] = (info or {}).get("status", "")
                 m["parliament"] = rec.get("parliament", parl_slug)
             return key, m
+
+        # Seed every sitting member from the roster. Without this a member only
+        # exists once they appear in some record, so anyone who never votes and
+        # never speaks — an abstentionist MP, a member newly sworn in — silently
+        # vanishes from a product whose whole job is "who represents my area".
+        seeded = set()
+        for info in list(roster_by_id.values()) + list(roster_by_name.values()):
+            if info["key"] in seeded or info.get("status") != "current":
+                continue
+            seeded.add(info["key"])
+            m = members[f"{parl_slug}:{info['key']}"]
+            if not m["name"]:
+                m["name"] = info.get("name", "")
+                m["party"] = info.get("party", "")
+                m["constituency"] = info.get("constituency", "")
+                m["status"] = info.get("status", "")
+                # Display name of the legislature is only known once a record
+                # arrives; filled in below from whatever the records say.
+                m["parliament"] = ""
 
         def party_at_vote(rec, m):
             """The member's party AT THE TIME OF THE VOTE, where the source says.
@@ -303,12 +338,49 @@ def analyse(data_dir: Path, out_dir: Path, current_only: bool = False):
         # figure a voter wants: how their present representative is doing now.
         dates_only = sorted(meta["date"] for meta in div_meta.values() if meta["date"])
         last_division = dates_only[-1] if dates_only else ""
+
+        # Where does the current term begin? An election puts a large cohort into
+        # the chamber on the same day, so the most common spell-start month among
+        # sitting members IS the election — no hardcoded dates, no judgement.
+        # Without this, a 2024 intake member is judged over 582 divisions and a
+        # long-serving one over 2,367, yet both sit against the same median.
+        starts = Counter()
         for key, m in members.items():
-            if not key.startswith(f"{parl_slug}:") or not m["vote_dates"]:
+            if key.startswith(f"{parl_slug}:") and m["status"] == "current" and m["vote_dates"]:
+                spells = _service_spells(sorted(m["vote_dates"]), dates_only)
+                m["_spells"] = spells
+                starts[spells[-1][0][:7]] += 1
+        term_start = ""
+        if starts:
+            top_month = starts.most_common(1)[0][0]
+            term_start = min(m["_spells"][-1][0] for m in members.values()
+                             if m.get("_spells") and m["_spells"][-1][0][:7] == top_month)
+
+        for key, m in members.items():
+            if not key.startswith(f"{parl_slug}:"):
                 continue
-            spells = _service_spells(sorted(m["vote_dates"]), dates_only)
+            if not m["vote_dates"]:
+                # Never voted. For a sitting member that is itself the finding —
+                # abstentionist parties, for instance — so show 0 of the term,
+                # not a blank.
+                if m["status"] == "current" and term_start and m["name"]:
+                    lo = _bisect_left(dates_only, term_start)
+                    m["divisions_eligible"] = len(dates_only) - lo
+                    m["term_votes"] = 0
+                    m["spells"] = 0
+                    m["spell_start"] = term_start
+                continue
+            spells = m.get("_spells") or _service_spells(sorted(m["vote_dates"]), dates_only)
             m["spells"] = len(spells)
             start, end = spells[-1]
+            # Measure over the current term, so every member is compared on the
+            # same window. Anyone whose first vote falls within the settling-in
+            # period after the election is measured from the election itself —
+            # divisions they missed in their first weeks are still missed. Only a
+            # genuine later arrival (a by-election) starts their window later.
+            if term_start and m["status"] == "current":
+                if start < term_start or _within_days(start, term_start, ELECTION_GRACE_DAYS):
+                    start = term_start
             # A sitting member is eligible for everything up to the latest
             # division; one who has left, only up to their own last vote — so
             # real recent absence still shows, but departure isn't punished.
@@ -320,6 +392,14 @@ def analyse(data_dir: Path, out_dir: Path, current_only: bool = False):
                                   if start <= d <= window_end)
             m["divisions_eligible"] = max(m["divisions_eligible"], m["term_votes"])
             m["spell_start"] = start
+
+        # Fill the legislature's display name onto members seeded from the roster
+        # that never appeared in a record.
+        display = next((m["parliament"] for k, m in members.items()
+                        if k.startswith(f"{parl_slug}:") and m["parliament"]), parl_slug)
+        for key, m in members.items():
+            if key.startswith(f"{parl_slug}:") and not m["parliament"]:
+                m["parliament"] = display
 
         # ---- ideal points (#3) ----
         # Only members who sit together can be placed on one axis. Pooling every
