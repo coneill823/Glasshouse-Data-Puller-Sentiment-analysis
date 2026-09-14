@@ -73,6 +73,13 @@ MIN_VOTERS_PER_DIVISION = 20
 MIN_MINORITY_SIDE = 3
 N_DIMENSIONS = 2
 
+# What separates two spells of service: a stretch that is both long AND full of
+# divisions the member sat out. Both conditions are needed — a recess is long but
+# holds no divisions, and a quiet backbencher misses divisions without ever
+# leaving. Only losing a seat produces years of votes they had no part in.
+SERVICE_GAP_DAYS = 365
+MIN_MISSED_IN_GAP = 40
+
 
 # --- topic keywords only ----------------------------------------------------
 # Salience uses ONLY the keyword lists (does this statement mention housing?),
@@ -115,6 +122,7 @@ def _blank():
         "with_party": 0, "party_line_divisions": 0, "rebellions": 0,
         "with_chamber": 0, "chamber_decided_divisions": 0,
         "first_vote": "", "last_vote": "",
+        "vote_dates": Counter(),   # date -> votes cast that day
         "topics": Counter(),
     }
 
@@ -255,6 +263,7 @@ def analyse(data_dir: Path, out_dir: Path, current_only: bool = False):
 
             m["votes_cast"] += 1
             if date:
+                m["vote_dates"][date] += 1
                 if not m["first_vote"] or date < m["first_vote"]:
                     m["first_vote"] = date
                 if not m["last_vote"] or date > m["last_vote"]:
@@ -284,18 +293,33 @@ def analyse(data_dir: Path, out_dir: Path, current_only: bool = False):
             vote_triples.append((key, div, 1 if direction == "aye" else -1))
 
         # ---- participation denominator (#10) ----
-        # A member can only vote in divisions held while they sat. We don't have
-        # reliable term dates for every legislature, so eligibility is the
-        # divisions falling between their own first and last recorded vote.
-        # Stated plainly because it is an approximation, not a fact.
-        div_dates = sorted((meta["date"], d) for d, meta in div_meta.items() if meta["date"])
-        dates_only = [d for d, _ in div_dates]
+        # A member can only vote in divisions held while they actually sat, and
+        # plenty of them sit in more than one spell — elected, defeated, elected
+        # again years later. Spanning first-to-last vote would charge a returning
+        # member for every division held while they were out of the chamber
+        # (it credited 44% of sitting UK MPs with divisions from parliaments they
+        # were not in). So split the record into spells at long voteless gaps and
+        # measure attendance over the CURRENT spell only — which is also the
+        # figure a voter wants: how their present representative is doing now.
+        dates_only = sorted(meta["date"] for meta in div_meta.values() if meta["date"])
+        last_division = dates_only[-1] if dates_only else ""
         for key, m in members.items():
-            if not key.startswith(f"{parl_slug}:") or not m["first_vote"]:
+            if not key.startswith(f"{parl_slug}:") or not m["vote_dates"]:
                 continue
-            lo = _bisect_left(dates_only, m["first_vote"])
-            hi = _bisect_right(dates_only, m["last_vote"])
-            m["divisions_eligible"] = max(hi - lo, m["votes_cast"])
+            spells = _service_spells(sorted(m["vote_dates"]), dates_only)
+            m["spells"] = len(spells)
+            start, end = spells[-1]
+            # A sitting member is eligible for everything up to the latest
+            # division; one who has left, only up to their own last vote — so
+            # real recent absence still shows, but departure isn't punished.
+            window_end = last_division if m["status"] == "current" else end
+            lo = _bisect_left(dates_only, start)
+            hi = _bisect_right(dates_only, window_end)
+            m["divisions_eligible"] = max(hi - lo, 0)
+            m["term_votes"] = sum(n for d, n in m["vote_dates"].items()
+                                  if start <= d <= window_end)
+            m["divisions_eligible"] = max(m["divisions_eligible"], m["term_votes"])
+            m["spell_start"] = start
 
         # ---- ideal points (#3) ----
         # Only members who sit together can be placed on one axis. Pooling every
@@ -307,6 +331,43 @@ def analyse(data_dir: Path, out_dir: Path, current_only: bool = False):
             [t for t in vote_triples if t[0] in cohort])
 
     _write_outputs(members, rebellion_rows, scaling, out_dir, current_only)
+
+
+def _service_spells(dates, division_dates=()):
+    """Split a member's sorted vote dates into spells of service.
+
+    A break is a gap that is BOTH longer than SERVICE_GAP_DAYS and contains at
+    least MIN_MISSED_IN_GAP divisions the member took no part in. Requiring both
+    is what separates "lost their seat for a term" from "it was the summer" or
+    "they are a quiet backbencher".
+
+    `division_dates` is the sorted list of every division date in that
+    legislature. Returns [(start, end), ...]; the last is the current spell.
+    """
+    from datetime import date as _date
+
+    def parse(s):
+        try:
+            return _date(int(s[0:4]), int(s[5:7]), int(s[8:10]))
+        except (ValueError, IndexError):
+            return None
+
+    clean = [s for s in dates if parse(s)]
+    if not clean:
+        return [(dates[0], dates[-1])] if dates else []
+
+    spells, start, prev_s = [], clean[0], clean[0]
+    for s in clean[1:]:
+        days = (parse(s) - parse(prev_s)).days
+        if days > SERVICE_GAP_DAYS:
+            missed = (_bisect_left(division_dates, s)
+                      - _bisect_right(division_dates, prev_s))
+            if missed >= MIN_MISSED_IN_GAP:
+                spells.append((start, prev_s))
+                start = s
+        prev_s = s
+    spells.append((start, prev_s))
+    return spells
 
 
 def _bisect_left(sorted_list, value):
@@ -421,10 +482,14 @@ def _write_outputs(members, rebellion_rows, scaling, out_dir: Path, current_only
         rows.append({
             "parliament": m["parliament"], "member": m["name"], "party": m["party"],
             "constituency": m["constituency"], "status": m["status"],
-            # participation (#10)
+            # participation (#10) — turnout is over the CURRENT spell of service,
+            # so a returning member isn't charged for their years out
             "votes_cast": m["votes_cast"],
+            "spells_served": m.get("spells", 1 if m["votes_cast"] else 0),
+            "current_spell_from": m.get("spell_start", ""),
+            "term_votes": m.get("term_votes", 0),
             "divisions_eligible": eligible,
-            "turnout_pct": _pct(m["votes_cast"], eligible),
+            "turnout_pct": _pct(m.get("term_votes", 0), eligible),
             "no_vote_recorded": m["no_vote_recorded"],
             # agreement (#4) — both baselines, shown separately
             "party_agreement_pct": _pct(m["with_party"], m["party_line_divisions"]),

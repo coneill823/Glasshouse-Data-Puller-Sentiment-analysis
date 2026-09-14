@@ -75,10 +75,13 @@ def build(in_dir: Path, out_path: Path, current_only: bool = True) -> dict:
                 "party": r.get("party", ""),
                 "area": r["constituency"],
                 "parliament": r["parliament"],
-                # participation (#10)
+                # participation (#10) — turnout covers the current spell only
                 "votesCast": _i(r.get("votes_cast")),
+                "termVotes": _i(r.get("term_votes")),
                 "eligible": _i(r.get("divisions_eligible")),
                 "turnout": _f(r.get("turnout_pct")),
+                "spells": _i(r.get("spells_served"), 1),
+                "spellFrom": r.get("current_spell_from", ""),
                 # agreement (#4) — both baselines
                 "partyAgreement": _f(r.get("party_agreement_pct")),
                 "partyLineDivisions": _i(r.get("party_line_divisions")),

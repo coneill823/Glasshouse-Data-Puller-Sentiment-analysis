@@ -206,11 +206,13 @@
       four legislatures. Party agreement is shown for completeness, but it separates almost
       nobody — voting is whipped, and that is the finding, not a flaw in the measurement.
       What people choose to spend their time on varies far more than how they vote.</p>
-    <p>Two honest limits. Attendance is approximated as divisions held between a member's first
-      and last recorded vote, which understates absence for anyone with a genuine gap — leave,
-      illness, a suspension. And sorting a speech into a subject uses keyword lists we wrote:
-      that is categorisation rather than political judgement, but it is the one place a human
-      list still touches these numbers. <span id="stamp"></span></p>
+    <p>Two honest limits. <b>Turnout covers a member's current spell in the chamber only.</b>
+      Plenty of them served, lost their seat and returned years later; counting the whole span
+      would charge them for divisions held when they were not members at all. Genuine absence
+      still shows — illness, leave, a suspension — because the count runs to the most recent
+      division, not to their own last vote. And sorting a speech into a subject uses keyword
+      lists we wrote: that is categorisation rather than political judgement, but it is the one
+      place a human list still touches these numbers. <span id="stamp"></span></p>
   </div>
 </main>
 
@@ -361,8 +363,11 @@
     var s1=el("section");
     s1.appendChild(el("h4",null,"Voting record"));
     s1.appendChild(metric("Turnout",num(m.turnout),bm.turnout,"%",
-      "Voted in "+fmt(num(m.votesCast))+" of "+fmt(num(m.eligible))+
-      " divisions held while they sat. Chamber median "+(bm.turnout||"—")+"%."));
+      "Voted in "+fmt(num(m.termVotes))+" of "+fmt(num(m.eligible))+
+      " divisions since "+(m.spellFrom||"they took their seat")+
+      (m.spells>1 ? " (their current spell — they have served "+m.spells+
+                    " separate times, and the earlier ones are not counted here)" : "")+
+      ". Chamber median "+(bm.turnout||"—")+"%."));
     s1.appendChild(metric("With their party",num(m.partyAgreement),bm.partyAgreement,"%",
       "Voted with their own party's majority on "+(num(m.partyAgreement)===null?"—":
       m.partyAgreement+"%")+" of "+fmt(num(m.partyLineDivisions))+
