@@ -1,4 +1,8 @@
-<title>Glasshouse Grades</title>
+<!-- Declared here, not only in a wrapper: served from a folder or opened as a
+     local file there is no charset header, and Môn / Sinéad decode as mojibake
+     without it. The browser's encoding prescan reads the first 1024 bytes. -->
+<meta charset="utf-8">
+<title>Glasshouse Record</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -6,8 +10,10 @@
   :root{
     --paper:#F2F4F7; --surface:#FFFFFF; --surface-2:#E9ECF1;
     --ink:#11151C; --ink-2:#39414F; --muted:#67707F; --line:#D8DDE5;
-    --accent:#3E5C8A; --accent-ink:#FFFFFF;
-    --pro:#2F7D6A; --con:#B25540; --track:#DDE2E9;
+    --accent:#2F5FA8; --accent-ink:#FFFFFF;
+    /* one hue for every magnitude bar; a neutral tick for the chamber median.
+       No good/bad colour anywhere — the data carries no such judgement. */
+    --data:#2F5FA8; --track:#DDE2E9; --ref:#67707F;
     --radius:10px; --gutter:clamp(16px,4vw,40px);
     --f-display:"Fraunces",Georgia,"Times New Roman",serif;
     --f-body:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
@@ -18,131 +24,155 @@
       --paper:#11151C; --surface:#171C26; --surface-2:#1F2632;
       --ink:#EEF1F6; --ink-2:#C2C9D6; --muted:#8F98A8; --line:#2A3240;
       --accent:#8FA8D8; --accent-ink:#11151C;
-      --pro:#59B49B; --con:#E08769; --track:#2A3240;
+      --data:#5A8AE0; --track:#2A3240; --ref:#8F98A8;
     }
   }
   :root[data-theme="dark"]{
     --paper:#11151C; --surface:#171C26; --surface-2:#1F2632;
     --ink:#EEF1F6; --ink-2:#C2C9D6; --muted:#8F98A8; --line:#2A3240;
     --accent:#8FA8D8; --accent-ink:#11151C;
-    --pro:#59B49B; --con:#E08769; --track:#2A3240;
+    --data:#5A8AE0; --track:#2A3240; --ref:#8F98A8;
   }
 
   *{box-sizing:border-box}
-  body{
-    margin:0; background:var(--paper); color:var(--ink);
-    font-family:var(--f-body); font-size:16px; line-height:1.55;
-    -webkit-font-smoothing:antialiased;
-  }
-  .wrap{max-width:1120px; margin:0 auto; padding-inline:var(--gutter); padding-block:0}
-  h1,h2,h3{font-family:var(--f-display); text-wrap:balance; margin:0}
+  body{margin:0; background:var(--paper); color:var(--ink);
+       font-family:var(--f-body); font-size:16px; line-height:1.55;
+       -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1120px; margin:0 auto; padding-inline:var(--gutter)}
+  h1,h2{font-family:var(--f-display); text-wrap:balance; margin:0}
+  h3,h4{margin:0}
   a{color:var(--accent)}
   :focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:4px}
 
-  /* ---- header ---- */
   header{border-bottom:1px solid var(--line); background:var(--surface)}
-  .head{display:flex; flex-wrap:wrap; gap:20px 32px; align-items:flex-end;
+  .head{display:flex; flex-wrap:wrap; gap:18px 32px; align-items:flex-end;
         justify-content:space-between; padding-block:28px 24px}
   h1{font-size:clamp(28px,4.4vw,40px); font-weight:700; letter-spacing:-.01em}
-  .tagline{color:var(--ink-2); max-width:52ch; margin-top:6px; font-size:15px}
-  .counts{display:flex; flex-wrap:wrap; gap:10px 22px; font-family:var(--f-mono); font-size:12.5px;
-          color:var(--muted); font-variant-numeric:tabular-nums}
+  .tagline{color:var(--ink-2); max-width:54ch; margin:6px 0 0; font-size:15px}
+  .counts{display:flex; flex-wrap:wrap; gap:10px 22px; font-family:var(--f-mono);
+          font-size:12.5px; color:var(--muted)}
   .counts b{display:block; font-family:var(--f-body); font-size:20px; font-weight:700;
             color:var(--ink); line-height:1.2}
 
-  /* ---- search ---- */
   .searchbar{padding-block:22px 10px}
-  .field{position:relative; max-width:620px}
+  .field{max-width:620px}
   .field label{display:block; font-family:var(--f-mono); font-size:11.5px;
-               letter-spacing:.09em; text-transform:uppercase; color:var(--muted); margin-bottom:7px}
-  input[type="search"]{
-    width:100%; padding:13px 15px; font:inherit; font-size:16px; color:var(--ink);
-    background:var(--surface); border:1.5px solid var(--line); border-radius:var(--radius);
-  }
+    letter-spacing:.09em; text-transform:uppercase; color:var(--muted); margin-bottom:7px}
+  input[type="search"]{width:100%; padding:13px 15px; font:inherit; font-size:16px;
+    color:var(--ink); background:var(--surface); border:1.5px solid var(--line);
+    border-radius:var(--radius)}
   input[type="search"]::placeholder{color:var(--muted)}
   input[type="search"]:focus{border-color:var(--accent); outline:none;
     box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
   .hits{list-style:none; margin:10px 0 0; padding:0; display:flex; flex-wrap:wrap; gap:8px}
-  .hits li{margin:0}
-  .hit{
-    display:inline-flex; gap:8px; align-items:baseline; cursor:pointer;
+  .hit{display:inline-flex; gap:8px; align-items:baseline; cursor:pointer;
     padding:7px 12px; border:1px solid var(--line); border-radius:999px;
-    background:var(--surface); color:var(--ink); font:inherit; font-size:13.5px;
-  }
+    background:var(--surface); color:var(--ink); font:inherit; font-size:13.5px}
   .hit:hover{border-color:var(--accent); color:var(--accent)}
-  .hit[aria-current="true"]{background:var(--accent); border-color:var(--accent); color:var(--accent-ink)}
+  .hit[aria-current="true"]{background:var(--accent); border-color:var(--accent);
+    color:var(--accent-ink)}
   .hit .legis{font-family:var(--f-mono); font-size:11px; color:var(--muted)}
-  .hit[aria-current="true"] .legis{color:var(--accent-ink); opacity:.8}
+  .hit[aria-current="true"] .legis{color:var(--accent-ink); opacity:.85}
   .nohits{color:var(--muted); font-size:14px; margin-top:12px}
 
-  /* ---- area panel ---- */
   main{padding-block:26px 56px}
-  .area-head{display:flex; flex-wrap:wrap; align-items:baseline; gap:10px 14px; margin-bottom:20px}
+  .area-head{display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 14px; margin-bottom:18px}
   .area-head h2{font-size:clamp(21px,3vw,27px); font-weight:600}
   .area-head .legis{font-family:var(--f-mono); font-size:12px; color:var(--muted)}
 
   .cards{display:grid; gap:18px; justify-content:start;
-         grid-template-columns:repeat(auto-fit,minmax(330px,520px))}
-  .card{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
-        padding:20px; display:flex; flex-direction:column; gap:16px}
+  /* auto-fit counts repetitions from the MAX track size when it is definite,
+     so this cap is what decides how many columns fit, not the 320px floor. */
+         grid-template-columns:repeat(auto-fit,minmax(320px,500px))}
+  .card{background:var(--surface); border:1px solid var(--line);
+        border-radius:var(--radius); padding:20px; display:flex;
+        flex-direction:column; gap:18px}
   .who{display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 10px}
-  .who h3{font-size:20px; font-weight:600}
+  .who h3{font-family:var(--f-display); font-size:20px; font-weight:600}
   .role{font-family:var(--f-mono); font-size:11px; letter-spacing:.08em;
-        padding:3px 7px; border-radius:4px; background:var(--surface-2); color:var(--ink-2)}
+    padding:3px 7px; border-radius:4px; background:var(--surface-2); color:var(--ink-2)}
   .party{font-size:13.5px; color:var(--ink-2)}
 
-  .stats{display:flex; flex-wrap:wrap; gap:14px 20px; font-family:var(--f-mono);
-         font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums;
-         border-block:1px solid var(--line); padding-block:11px}
-  .stats b{display:block; font-family:var(--f-body); font-size:15px; font-weight:600; color:var(--ink)}
+  /* hero figures — body face, no tabular-nums on large standalone numbers */
+  .tiles{display:flex; flex-wrap:wrap; gap:14px 26px;
+         border-block:1px solid var(--line); padding-block:13px}
+  .tile b{display:block; font-family:var(--f-body); font-size:23px; font-weight:700;
+          color:var(--ink); line-height:1.15}
+  .tile span{font-family:var(--f-mono); font-size:11.5px; color:var(--muted)}
 
-  .lead{display:flex; flex-wrap:wrap; gap:8px}
-  .tag{font-size:12.5px; padding:4px 9px; border-radius:999px; border:1px solid}
-  .tag.pro{color:var(--pro); border-color:color-mix(in srgb,var(--pro) 42%,transparent);
-           background:color-mix(in srgb,var(--pro) 10%,transparent)}
-  .tag.con{color:var(--con); border-color:color-mix(in srgb,var(--con) 42%,transparent);
-           background:color-mix(in srgb,var(--con) 10%,transparent)}
+  section h4{font-family:var(--f-mono); font-size:11px; letter-spacing:.09em;
+    text-transform:uppercase; color:var(--muted); margin-bottom:10px}
 
-  /* diverging stance bars */
-  .bars{display:grid; gap:7px}
-  .barrow{display:grid; grid-template-columns:minmax(0,152px) minmax(0,1fr) auto;
-          gap:12px; align-items:center}
-  .barlabel{font-size:13px; color:var(--ink-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-  .track{position:relative; height:11px; background:var(--track); border-radius:3px}
-  .track::after{content:""; position:absolute; left:50%; top:-2px; bottom:-2px; width:1px;
-                background:var(--line)}
-  .fill{position:absolute; top:0; bottom:0; border-radius:3px}
-  .val{font-family:var(--f-mono); font-size:11.5px; color:var(--muted);
-       font-variant-numeric:tabular-nums; min-width:44px; text-align:right}
+  /* bullet bars: value + chamber-median reference tick */
+  .metric{display:grid; grid-template-columns:minmax(0,132px) minmax(0,1fr) 58px;
+          gap:12px; align-items:center; margin-bottom:8px}
+  .mlabel{font-size:13px; color:var(--ink-2)}
+  .mtrack{position:relative; height:10px; background:var(--track); border-radius:3px}
+  .mfill{position:absolute; left:0; top:0; bottom:0; background:var(--data);
+         border-radius:3px}
+  .mref{position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--ref);
+        border-radius:1px}
+  .mval{font-family:var(--f-mono); font-size:12px; color:var(--ink);
+        font-variant-numeric:tabular-nums; text-align:right}
+  .mnote{font-family:var(--f-mono); font-size:11px; color:var(--muted); margin-top:4px}
+  .mnote i{display:inline-block; width:2px; height:9px; background:var(--ref);
+           vertical-align:-1px; margin-right:5px}
+
+  /* ranked salience bars — one flat hue, never a value ramp */
+  .topic{display:grid; grid-template-columns:minmax(0,152px) minmax(0,1fr) 62px;
+         gap:12px; align-items:center; margin-bottom:7px; cursor:default}
+  /* wrap rather than truncate — a clipped category name is unreadable, and the
+     value beside it is no help if you can't tell which subject it belongs to */
+  .tlabel{font-size:13px; color:var(--ink-2); line-height:1.25}
+  .ttrack{position:relative; height:10px; background:var(--track); border-radius:3px}
+  .tfill{position:absolute; left:0; top:0; bottom:0; background:var(--data);
+         border-radius:3px}
+  .tval{font-family:var(--f-mono); font-size:12px; color:var(--ink);
+        font-variant-numeric:tabular-nums; text-align:right}
+
   .more{align-self:flex-start; background:none; border:none; padding:0; cursor:pointer;
         font:inherit; font-size:13px; color:var(--accent); text-decoration:underline}
+  .receipts{width:100%; border-collapse:collapse; font-size:12.5px; margin-top:4px}
+  .receipts th{text-align:left; font-family:var(--f-mono); font-size:10.5px;
+    letter-spacing:.07em; text-transform:uppercase; color:var(--muted);
+    font-weight:400; padding:5px 8px 5px 0; border-bottom:1px solid var(--line)}
+  .receipts td{padding:6px 8px 6px 0; border-bottom:1px solid var(--line);
+               color:var(--ink-2); vertical-align:top}
+  .receipts td:first-child{font-family:var(--f-mono); font-size:11.5px;
+    font-variant-numeric:tabular-nums; white-space:nowrap; color:var(--muted)}
+  .receipts td:last-child{font-family:var(--f-mono); font-size:11.5px; white-space:nowrap}
+  .rwrap{overflow-x:auto}
+  .empty{color:var(--muted); font-size:13px}
 
-  /* ---- method note ---- */
+  #tip{position:fixed; z-index:20; pointer-events:none; opacity:0; transition:opacity .12s;
+    background:var(--ink); color:var(--paper); font-size:12.5px; line-height:1.4;
+    padding:7px 10px; border-radius:6px; max-width:270px}
+  #tip.on{opacity:1}
+
   .note{margin-top:38px; padding-top:22px; border-top:1px solid var(--line);
-        color:var(--muted); font-size:13.5px; max-width:72ch}
-  .note h4{font-family:var(--f-display); font-size:16px; color:var(--ink-2); margin:0 0 8px}
-  .note p{margin:0 0 9px}
-  .scale{display:inline-flex; align-items:center; gap:7px; font-family:var(--f-mono); font-size:11.5px}
-  .swatch{width:22px; height:9px; border-radius:2px; display:inline-block}
+        color:var(--muted); font-size:13.5px; max-width:74ch}
+  .note h4{font-family:var(--f-display); font-size:16px; color:var(--ink-2);
+           margin:0 0 8px; text-transform:none; letter-spacing:0}
+  .note p{margin:0 0 10px}
 
   @media (max-width:560px){
-    .barrow{grid-template-columns:minmax(0,112px) minmax(0,1fr) auto; gap:9px}
-    .val{min-width:40px}
+    .metric,.topic{grid-template-columns:minmax(0,104px) minmax(0,1fr) 52px; gap:9px}
   }
-  @media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important}}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
 <header>
   <div class="wrap head">
     <div>
-      <h1>Glasshouse Grades</h1>
-      <p class="tagline">Find the representatives for your area and see where they stand — graded from
-        what they say in parliament and how they vote on divisions.</p>
+      <h1>Glasshouse Record</h1>
+      <p class="tagline">What the representatives for your area actually did — how often they
+        turned up to vote, when they broke with their party, and what they spend their time on.
+        Counted from the record, not interpreted.</p>
     </div>
     <div class="counts">
       <div><b id="c-reps">—</b>representatives</div>
       <div><b id="c-areas">—</b>areas</div>
-      <div><b id="c-topics">—</b>topics</div>
+      <div><b id="c-legis">—</b>legislatures</div>
     </div>
   </div>
 </header>
@@ -165,177 +195,262 @@
   <div class="cards" id="cards"></div>
 
   <div class="note">
-    <h4>How these grades are made</h4>
-    <p>Every question, speech and division vote from each representative is scored against word
-      lists for 20 policy topics. A topic only scores when the statement is actually about it, and
-      votes count double, because how someone votes is unambiguous where wording is not.</p>
-    <p>A score runs from &minus;1 to +1 and is always read as <em>pro that topic</em>:
-      <span class="scale"><span class="swatch" style="background:var(--pro)"></span> pro</span>
-      &nbsp;
-      <span class="scale"><span class="swatch" style="background:var(--con)"></span> against</span>.
-      Scores are shrunk toward zero when there is little evidence, so a single remark cannot look
-      like a conviction. A few topics need their axis in mind: <em>Crime &amp; justice</em> means
-      pro-law-and-order, <em>Immigration &amp; asylum</em> means pro-welcoming, and
-      <em>Economy &amp; finance</em> means pro-public-spending.</p>
-    <p>This is transparent word-list scoring, not a judgement of a person. It cannot read sarcasm,
-      and it can misread a topic attacked in wording it otherwise supports — treat it as a
-      starting point and check the record itself. <span id="stamp"></span></p>
+    <h4>What these numbers are, and what they are not</h4>
+    <p>Every figure here is arithmetic over recorded acts. There are no word lists, no opinion
+      about which side of a vote is the good one, and no score for whether someone is “pro” or
+      “anti” anything. <b>Turnout</b> is divisions they voted in. <b>Broke with party</b> counts
+      the divisions where they voted against their own party's majority — each one listed, so you
+      can check it. <b>Works on</b> counts which subjects their questions and speeches mention.</p>
+    <p>The most important thing the data shows is how little room there is between members:
+      the typical representative votes with their party on <b>99–100%</b> of divisions in all
+      four legislatures. Party agreement is shown for completeness, but it separates almost
+      nobody — voting is whipped, and that is the finding, not a flaw in the measurement.
+      What people choose to spend their time on varies far more than how they vote.</p>
+    <p>Two honest limits. Attendance is approximated as divisions held between a member's first
+      and last recorded vote, which understates absence for anyone with a genuine gap — leave,
+      illness, a suspension. And sorting a speech into a subject uses keyword lists we wrote:
+      that is categorisation rather than political judgement, but it is the one place a human
+      list still touches these numbers. <span id="stamp"></span></p>
   </div>
 </main>
+
+<div id="tip" role="tooltip"></div>
 
 <script id="app-data" type="application/json">null</script>
 <script>
 (function(){
-  var ROLE = {
-    "UK Parliament":"MP", "Scottish Parliament":"MSP",
-    "Welsh Parliament (Senedd)":"MS", "NI Assembly":"MLA"
-  };
-  var SHORT = {
-    "UK Parliament":"House of Commons", "Scottish Parliament":"Scottish Parliament",
-    "Welsh Parliament (Senedd)":"Senedd Cymru", "NI Assembly":"NI Assembly"
-  };
-  var DATA=null, AREAS=[], byArea={}, selected=null, expanded={};
+  var ROLE={"UK Parliament":"MP","Scottish Parliament":"MSP",
+            "Welsh Parliament (Senedd)":"MS","NI Assembly":"MLA"};
+  var CHAMBER={"UK Parliament":"House of Commons","Scottish Parliament":"Scottish Parliament",
+               "Welsh Parliament (Senedd)":"Senedd Cymru","NI Assembly":"NI Assembly"};
+  var DATA=null, AREAS=[], byArea={}, selected=null, open={};
   var elHits=document.getElementById("hits"), elNo=document.getElementById("nohits"),
       elCards=document.getElementById("cards"), elName=document.getElementById("area-name"),
-      elLegis=document.getElementById("area-legis"), elSearch=document.getElementById("area-search");
+      elLegis=document.getElementById("area-legis"), elSearch=document.getElementById("area-search"),
+      tip=document.getElementById("tip");
 
   function keyOf(m){ return m.parliament+"||"+m.area; }
+  function num(v){ return (v===null||v===undefined||v==="") ? null : v; }
+  function fmt(v,suffix){ return v===null ? "—" : v.toLocaleString()+(suffix||""); }
 
   function init(data){
     DATA=data;
-    document.getElementById("c-reps").textContent = data.members.length.toLocaleString();
     data.members.forEach(function(m){
-      var k=keyOf(m); if(!byArea[k]){ byArea[k]={area:m.area,parliament:m.parliament,members:[]}; AREAS.push(byArea[k]); }
+      var k=keyOf(m);
+      if(!byArea[k]){ byArea[k]={area:m.area,parliament:m.parliament,members:[]}; AREAS.push(byArea[k]); }
       byArea[k].members.push(m);
     });
     AREAS.sort(function(a,b){ return a.area.localeCompare(b.area); });
-    document.getElementById("c-areas").textContent = AREAS.length.toLocaleString();
-    document.getElementById("c-topics").textContent = data.topics.length;
+    document.getElementById("c-reps").textContent=data.members.length.toLocaleString();
+    document.getElementById("c-areas").textContent=AREAS.length.toLocaleString();
+    document.getElementById("c-legis").textContent=Object.keys(data.benchmarks||{}).length;
     var stamp=document.getElementById("stamp");
-    if(stamp && data.generated) stamp.textContent="Data pulled up to "+data.generated+".";
-    // open in a working state: a real area, not an empty shell
-    var start = AREAS.find(function(a){ return a.parliament==="UK Parliament"; }) || AREAS[0];
-    select(start); render("");
+    if(stamp&&data.generated) stamp.textContent="Record current to "+data.generated+".";
+    var start=AREAS.find(function(a){ return a.parliament==="UK Parliament"; })||AREAS[0];
+    if(start){ select(start); render(""); }
   }
 
   function matches(q){
     q=q.trim().toLowerCase();
     if(!q) return AREAS.slice(0,14);
-    var direct = AREAS.filter(function(a){ return a.area.toLowerCase().indexOf(q)>-1; });
-    var seen={}; direct.forEach(function(a){ seen[a.area+a.parliament]=1; });
+    var out=AREAS.filter(function(a){ return a.area.toLowerCase().indexOf(q)>-1; });
+    var seen={}; out.forEach(function(a){ seen[a.area+a.parliament]=1; });
     DATA.members.forEach(function(m){
       if(m.name.toLowerCase().indexOf(q)>-1){
         var a=byArea[keyOf(m)];
-        if(a && !seen[a.area+a.parliament]){ seen[a.area+a.parliament]=1; direct.push(a); }
+        if(a&&!seen[a.area+a.parliament]){ seen[a.area+a.parliament]=1; out.push(a); }
       }
     });
-    return direct.slice(0,40);
+    return out.slice(0,40);
   }
 
   function render(q){
-    var list=matches(q);
-    elHits.innerHTML="";
+    var list=matches(q); elHits.innerHTML="";
     list.forEach(function(a){
-      var li=document.createElement("li");
-      var b=document.createElement("button");
+      var li=document.createElement("li"), b=document.createElement("button");
       b.className="hit"; b.type="button";
-      b.setAttribute("aria-current", selected&&selected.area===a.area&&selected.parliament===a.parliament ? "true":"false");
-      b.innerHTML='<span></span><span class="legis"></span>';
-      b.firstChild.textContent=a.area;
-      b.lastChild.textContent=ROLE[a.parliament]||"";
+      b.setAttribute("aria-current", selected&&selected.area===a.area&&
+        selected.parliament===a.parliament ? "true":"false");
+      var n=document.createElement("span"); n.textContent=a.area;
+      var r=document.createElement("span"); r.className="legis"; r.textContent=ROLE[a.parliament]||"";
+      b.append(n,r);
       b.addEventListener("click",function(){ select(a); render(elSearch.value); });
       li.appendChild(b); elHits.appendChild(li);
     });
-    elNo.hidden = list.length>0;
+    elNo.hidden=list.length>0;
   }
 
   function select(a){
-    selected=a; expanded={};
+    selected=a; open={};
     elName.textContent=a.area;
-    elLegis.textContent=(SHORT[a.parliament]||a.parliament)+" · "+a.members.length+
-      " sitting "+(ROLE[a.parliament]||"member")+(a.members.length===1?"":"s");
-    drawCards();
+    elLegis.textContent=(CHAMBER[a.parliament]||a.parliament)+" · "+a.members.length+" sitting "+
+      (ROLE[a.parliament]||"member")+(a.members.length===1?"":"s");
+    draw();
   }
 
-  function drawCards(){
+  function draw(){
     elCards.innerHTML="";
-    selected.members.slice().sort(function(x,y){ return y.activity-x.activity; })
-      .forEach(function(m){ elCards.appendChild(card(m)); });
+    selected.members.slice().sort(function(x,y){
+      return (y.votesCast||0)-(x.votesCast||0);
+    }).forEach(function(m){ elCards.appendChild(card(m)); });
+  }
+
+  function el(tag,cls,text){
+    var e=document.createElement(tag);
+    if(cls) e.className=cls;
+    if(text!==undefined) e.textContent=text;
+    return e;
+  }
+
+  function tile(value,label){
+    var d=el("div","tile"); d.appendChild(el("b",null,value));
+    d.appendChild(el("span",null,label)); return d;
+  }
+
+  /* one bullet bar: the member's value, with the chamber median as a reference tick */
+  function metric(label,value,median,suffix,explain){
+    var row=el("div","metric");
+    row.appendChild(el("div","mlabel",label));
+    var track=el("div","mtrack");
+    if(value!==null){
+      var fill=el("div","mfill"); fill.style.width=Math.max(0,Math.min(value,100))+"%";
+      track.appendChild(fill);
+    }
+    if(median!==null&&median!==undefined){
+      var ref=el("div","mref"); ref.style.left=Math.max(0,Math.min(median,100))+"%";
+      track.appendChild(ref);
+    }
+    row.appendChild(track);
+    row.appendChild(el("div","mval", value===null?"—":value.toFixed(1)+(suffix||"")));
+    if(explain) bindTip(row,explain);
+    return row;
+  }
+
+  function bindTip(node,html){
+    node.addEventListener("mouseenter",function(e){
+      tip.textContent=html; tip.classList.add("on"); moveTip(e);
+    });
+    node.addEventListener("mousemove",moveTip);
+    node.addEventListener("mouseleave",function(){ tip.classList.remove("on"); });
+  }
+  function moveTip(e){
+    var pad=14, w=tip.offsetWidth, h=tip.offsetHeight;
+    var x=Math.min(e.clientX+pad, window.innerWidth-w-8);
+    var y=e.clientY-h-pad; if(y<8) y=e.clientY+pad;
+    tip.style.left=x+"px"; tip.style.top=y+"px";
   }
 
   function card(m){
-    var el=document.createElement("article"); el.className="card";
+    var bm=(DATA.benchmarks||{})[m.parliament]||{};
+    var c=el("article","card");
     var role=ROLE[m.parliament]||"Member";
 
-    var who=document.createElement("div"); who.className="who";
-    var h=document.createElement("h3"); h.textContent=m.name;
-    var r=document.createElement("span"); r.className="role"; r.textContent=role;
-    var p=document.createElement("span"); p.className="party"; p.textContent=m.party||"—";
-    who.append(h,r,p); el.appendChild(who);
+    var who=el("div","who");
+    who.appendChild(el("h3",null,m.name));
+    who.appendChild(el("span","role",role));
+    who.appendChild(el("span","party",m.party||"—"));
+    c.appendChild(who);
 
-    var lead=document.createElement("div"); lead.className="lead";
-    if(m.topPro){ var t1=document.createElement("span"); t1.className="tag pro";
-      t1.textContent="Most pro · "+m.topPro; lead.appendChild(t1); }
-    if(m.topCon){ var t2=document.createElement("span"); t2.className="tag con";
-      t2.textContent="Most against · "+m.topCon; lead.appendChild(t2); }
-    if(lead.children.length) el.appendChild(lead);
+    var tiles=el("div","tiles");
+    tiles.appendChild(tile(fmt(num(m.votesCast)),"votes cast"));
+    tiles.appendChild(tile(fmt(num(m.rebellions)),"times broke with party"));
+    tiles.appendChild(tile(fmt(num(m.questions)+num(m.speeches)),"questions & speeches"));
+    c.appendChild(tiles);
 
-    var s=document.createElement("div"); s.className="stats";
-    s.innerHTML =
-      '<div><b>'+m.questions.toLocaleString()+'</b>questions</div>'+
-      '<div><b>'+m.speeches.toLocaleString()+'</b>speeches</div>'+
-      '<div><b>'+m.votes.toLocaleString()+'</b>votes cast</div>'+
-      '<div><b>'+(m.tone>0?"+":"")+m.tone.toFixed(2)+'</b>tone</div>';
-    el.appendChild(s);
+    // --- voting record -----------------------------------------------------
+    var s1=el("section");
+    s1.appendChild(el("h4",null,"Voting record"));
+    s1.appendChild(metric("Turnout",num(m.turnout),bm.turnout,"%",
+      "Voted in "+fmt(num(m.votesCast))+" of "+fmt(num(m.eligible))+
+      " divisions held while they sat. Chamber median "+(bm.turnout||"—")+"%."));
+    s1.appendChild(metric("With their party",num(m.partyAgreement),bm.partyAgreement,"%",
+      "Voted with their own party's majority on "+(num(m.partyAgreement)===null?"—":
+      m.partyAgreement+"%")+" of "+fmt(num(m.partyLineDivisions))+
+      " whipped divisions. Almost every member sits at 99–100%."));
+    s1.appendChild(metric("With the result",num(m.chamberAgreement),bm.chamberAgreement,"%",
+      "How often they were on the winning side. This mostly reflects being in "+
+      "government or opposition, not an individual choice."));
+    var note=el("div","mnote"); note.appendChild(el("i"));
+    note.appendChild(document.createTextNode(" chamber median"));
+    s1.appendChild(note);
+    c.appendChild(s1);
 
-    var rows=Object.keys(m.topics).map(function(k){
-      return {topic:k, stance:m.topics[k][0], ev:m.topics[k][1]};
-    }).filter(function(r){ return r.ev>0; })
-      .sort(function(a,b){ return Math.abs(b.stance)-Math.abs(a.stance) || b.ev-a.ev; });
-
-    var bars=document.createElement("div"); bars.className="bars";
-    var limit = expanded[m.name] ? rows.length : Math.min(6, rows.length);
-    rows.slice(0,limit).forEach(function(r){ bars.appendChild(barRow(r)); });
-    el.appendChild(bars);
-
-    if(rows.length>6){
-      var btn=document.createElement("button"); btn.className="more"; btn.type="button";
-      btn.textContent = expanded[m.name] ? "Show fewer topics" : "Show all "+rows.length+" topics";
-      btn.addEventListener("click",function(){ expanded[m.name]=!expanded[m.name]; drawCards(); });
-      el.appendChild(btn);
+    // --- salience ----------------------------------------------------------
+    var s2=el("section");
+    s2.appendChild(el("h4",null,"What they work on"));
+    var topics=(m.topics||[]).filter(function(t){ return t[1]>0; });
+    if(topics.length){
+      var peak=topics[0][1];
+      var lim=open["t"+m.name]?topics.length:Math.min(5,topics.length);
+      topics.slice(0,lim).forEach(function(t){
+        var row=el("div","topic");
+        row.appendChild(el("div","tlabel",t[0]));
+        var track=el("div","ttrack"), fill=el("div","tfill");
+        fill.style.width=(peak?Math.max(2,100*t[1]/peak):0)+"%";
+        track.appendChild(fill); row.appendChild(track);
+        row.appendChild(el("div","tval",t[2].toFixed(1)+"%"));
+        bindTip(row,t[0]+" — mentioned in "+t[1].toLocaleString()+
+          " of their questions and speeches ("+t[2].toFixed(1)+"%).");
+        s2.appendChild(row);
+      });
+      if(topics.length>5){
+        var b=el("button","more",open["t"+m.name]?"Show fewer subjects":
+          "Show all "+topics.length+" subjects");
+        b.type="button";
+        b.addEventListener("click",function(){ open["t"+m.name]=!open["t"+m.name]; draw(); });
+        s2.appendChild(b);
+      }
+    } else {
+      s2.appendChild(el("p","empty","No questions or speeches recorded."));
     }
-    if(!rows.length){
-      var none=document.createElement("p"); none.className="val";
-      none.style.textAlign="left"; none.textContent="No topic stance recorded yet.";
-      el.appendChild(none);
-    }
-    return el;
-  }
+    c.appendChild(s2);
 
-  function barRow(r){
-    var row=document.createElement("div"); row.className="barrow";
-    var lab=document.createElement("div"); lab.className="barlabel";
-    lab.textContent=r.topic; lab.title=r.topic+" — evidence: "+r.ev+" hits";
-    var track=document.createElement("div"); track.className="track";
-    var fill=document.createElement("div"); fill.className="fill";
-    var pct=Math.min(Math.abs(r.stance),1)*50;
-    if(r.stance>=0){ fill.style.left="50%"; fill.style.width=pct+"%"; fill.style.background="var(--pro)"; }
-    else{ fill.style.right="50%"; fill.style.width=pct+"%"; fill.style.background="var(--con)"; }
-    track.appendChild(fill);
-    var val=document.createElement("div"); val.className="val";
-    val.textContent=(r.stance>0?"+":"")+r.stance.toFixed(2);
-    row.append(lab,track,val); return row;
+    // --- receipts ----------------------------------------------------------
+    var s3=el("section");
+    s3.appendChild(el("h4",null,"When they broke with their party"));
+    var rec=m.receipts||[];
+    if(!num(m.rebellions)){
+      s3.appendChild(el("p","empty",
+        num(m.partyLineDivisions) ? "Never — voted the party line every time."
+                                  : "Sits without a party whip, so there is no party line."));
+    } else {
+      var shown=open["r"+m.name]?rec.length:Math.min(3,rec.length);
+      var wrap=el("div","rwrap"), t=el("table","receipts");
+      t.innerHTML="<thead><tr><th>Date</th><th>Division</th><th>Vote</th></tr></thead>";
+      var tb=document.createElement("tbody");
+      rec.slice(0,shown).forEach(function(r){
+        var tr=document.createElement("tr");
+        tr.appendChild(el("td",null,r[0]));
+        tr.appendChild(el("td",null,r[1]||"(untitled division)"));
+        tr.appendChild(el("td",null,r[2]+" · party "+r[3]));
+        tb.appendChild(tr);
+      });
+      t.appendChild(tb); wrap.appendChild(t); s3.appendChild(wrap);
+      if(rec.length>3){
+        var rb=el("button","more",open["r"+m.name]?"Show fewer":
+          "Show all "+rec.length+" listed");
+        rb.type="button";
+        rb.addEventListener("click",function(){ open["r"+m.name]=!open["r"+m.name]; draw(); });
+        s3.appendChild(rb);
+      }
+      if(m.rebellions>rec.length){
+        s3.appendChild(el("p","empty","Showing the "+rec.length+" most recent of "+
+          m.rebellions.toLocaleString()+"."));
+      }
+    }
+    c.appendChild(s3);
+    return c;
   }
 
   elSearch.addEventListener("input",function(){ render(elSearch.value); });
 
   var inline=document.getElementById("app-data").textContent.trim();
   var parsed=null; try{ parsed=JSON.parse(inline); }catch(e){}
-  if(parsed && parsed.members){ init(parsed); }
+  if(parsed&&parsed.members){ init(parsed); }
   else{
     fetch("data.json").then(function(r){ return r.json(); }).then(init).catch(function(){
       elName.textContent="Data not loaded";
-      elLegis.textContent="Run: python -m analysis.export_app_data";
+      elLegis.textContent="Run: python -m analysis.behaviour && python -m analysis.export_app_data";
     });
   }
 })();
