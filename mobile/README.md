@@ -2,13 +2,14 @@
 
 The Glasshouse app, written in Flutter: one codebase that builds for Android,
 iPhone and iPad. It does what the website does — find your representatives,
-see their record, take the quiz, see how your answers line up with how MPs
-voted — and works without a connection once installed.
+see their record, take the quiz, see how your answers line up with how each
+of them voted, in each parliament — and works without a connection once
+installed.
 
 <p>
   <img src="store/screenshots/phone-1-representatives.png" width="24%" alt="Your representatives and their voting record">
   <img src="store/screenshots/phone-2-quiz.png" width="24%" alt="A quiz statement with five answers">
-  <img src="store/screenshots/phone-3-match.png" width="24%" alt="Your match with your MP">
+  <img src="store/screenshots/phone-3-match.png" width="24%" alt="Everyone who represents you, in each parliament, with a match">
   <img src="store/screenshots/phone-4-compass.png" width="24%" alt="The compass of how MPs voted">
 </p>
 
