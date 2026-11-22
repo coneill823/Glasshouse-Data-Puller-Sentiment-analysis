@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Behind the app icon. -->
+    <color name="ic_launcher_background">#2F5FA8</color>
+    <!-- Shown for the moment before the app draws: the app's own background,
+         so there is no flash of white. -->
+    <color name="launch_background">#F2F4F7</color>
+</resources>

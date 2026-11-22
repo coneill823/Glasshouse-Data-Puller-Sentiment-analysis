@@ -10,6 +10,7 @@ Build everything the app needs, in one command.
                                                     -> analysis/output/*.csv
     4. merge into one file per representative       -> app/data.json
     5. the app as a single self-contained page      -> dist/glasshouse.html
+       and the copy the phone app ships with        -> mobile/assets/data/
 
 Step 3 is the only slow one and the only one that needs the scrapers to have
 run (`python main.py`). Without the corpus the build still succeeds: the
@@ -20,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import shutil
 import time
 from pathlib import Path
 
@@ -29,6 +31,25 @@ ROOT = Path(__file__).resolve().parent.parent
 # Legislature folders whose VOTES come from mySociety, so behaviour.py need not
 # read them. Their questions and speeches are still read.
 VOTES_FROM_MYSOCIETY = ("uk_parliament", "scottish_parliament", "welsh_parliament_senedd")
+
+
+def sync_mobile(app_dir: Path = ROOT / "app",
+                mobile_dir: Path = ROOT / "mobile" / "assets" / "data") -> list:
+    """Give the phone app the same two files the website uses.
+
+    The app ships with a copy so that it works from the first launch, with or
+    without a connection. Returns the names of the files that changed.
+    """
+    if not mobile_dir.is_dir():
+        return []
+    changed = []
+    for name in ("data.json", "quiz.json"):
+        source, target = app_dir / name, mobile_dir / name
+        if source.exists() and (not target.exists()
+                                or source.read_bytes() != target.read_bytes()):
+            shutil.copyfile(source, target)
+            changed.append(name)
+    return changed
 
 
 def _scraped_legislatures(data_dir: Path) -> list:
@@ -74,13 +95,16 @@ def main(argv=None):
     print("[4/5] one record per representative")
     export_app_data.build(cache, out_dir, Path("app/data.json"), fetch=False)
 
-    print("[5/5] single-file app")
+    print("[5/5] single-file app, and the phone app's copy of the data")
     spec = importlib.util.spec_from_file_location("build_standalone",
                                                   ROOT / "app" / "build_standalone.py")
     standalone = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(standalone)
     standalone.build(ROOT / "app" / "index.html", ROOT / "app",
                      ROOT / "dist" / "glasshouse.html")
+    changed = sync_mobile()
+    if changed:
+        print(f"Updated mobile/assets/data/ ({', '.join(changed)}).")
     print(f"Done in {time.time() - t0:.0f}s. Serve it with: "
           f"python -m http.server 8000 --directory app")
 

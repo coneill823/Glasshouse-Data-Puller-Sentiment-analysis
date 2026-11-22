@@ -1,0 +1,1055 @@
+{
+ "_about": "A frozen slice of app/quiz.json. `expected` was computed by Python (see the generator in the commit that added this file); the Dart port must reproduce it exactly.",
+ "quiz": {
+  "termStart": "2024-07-05",
+  "votesAsOf": "2026-11-22",
+  "statements": [
+   {
+    "id": 20020,
+    "name": "English Football Regulator",
+    "text": "creating a new regulator for English Football",
+    "sourceText": "creating a new regulator for English Football",
+    "detail": "Votes on Football Governance Bill (2024-25) - learn more about this legislation",
+    "link": "https://bills.parliament.uk/bills/3832",
+    "group": "Business and the Economy",
+    "freeVote": false,
+    "econ": 0,
+    "social": 0,
+    "termVotes": 3,
+    "divisions": [
+     {
+      "key": "pw-2025-04-28-178-commons",
+      "date": "2025-04-28",
+      "number": 178,
+      "title": "Football Governance Bills [Lords]: Reasoned Amendment to Second Reading",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2025-04-28-179-commons",
+      "date": "2025-04-28",
+      "number": 179,
+      "title": "Football Governance Bills [Lords]: Second Reading",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2025-07-08-257-commons",
+      "date": "2025-07-08",
+      "number": 257,
+      "title": "Football Governance Bill [HL]: Third Reading",
+      "alignment": "agree"
+     }
+    ]
+   },
+   {
+    "id": 837,
+    "name": "An Elected House of Lords",
+    "text": "a wholly elected House of Lords",
+    "sourceText": "a wholly elected House of Lords",
+    "detail": "The House of Lords is the upper house of the UK Parliament. There have been votes on moving away from a position where members of the House of Lords are either appointed or have inherited their seats to a system where members are elected.",
+    "link": "",
+    "group": "Constitutional Reform",
+    "freeVote": false,
+    "econ": 0,
+    "social": 0,
+    "termVotes": 1,
+    "divisions": [
+     {
+      "key": "pw-2007-03-07-69-commons",
+      "date": "2007-03-07",
+      "number": 69,
+      "title": "House of Lords Reform — Composition Option 6 (80 per Cent. Elected)",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2007-03-07-70-commons",
+      "date": "2007-03-07",
+      "number": 70,
+      "title": "House of Lords Reform — Composition Option 7 (100 per Cent. Elected)",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2012-07-10-47-commons",
+      "date": "2012-07-10",
+      "number": 47,
+      "title": "House of Lords Reform Bill — Second Reading",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2024-11-12-40-commons",
+      "date": "2024-11-12",
+      "number": 40,
+      "title": "House of Lords (Hereditary Peers) Bill Committee: New Clause 7",
+      "alignment": "agree"
+     }
+    ]
+   },
+   {
+    "id": 1084,
+    "name": "Proportional Representation When Electing MPs",
+    "text": "a more proportional system for electing MPs",
+    "sourceText": "a more proportional system for electing MPs",
+    "detail": "There have been votes in Parliament on whether the system used to elect MPs to the House of Commons should change to a one where the proportion of seats won by a political party better reflects the proportion of the vote they win.",
+    "link": "",
+    "group": "Constitutional Reform",
+    "freeVote": false,
+    "econ": 0,
+    "social": 0,
+    "termVotes": 1,
+    "divisions": [
+     {
+      "key": "pw-2010-10-12-68-commons",
+      "date": "2010-10-12",
+      "number": 68,
+      "title": "Parliamentary Voting System and Constituencies Bill — Part 3 — Question for referendum on the system for electing MPs",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-12-16-152-commons",
+      "date": "2015-12-16",
+      "number": 152,
+      "title": "Representation of the People (Proportional Representation) (House of Commons) Bill — Leave to Bring In",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2016-07-20-50-commons",
+      "date": "2016-07-20",
+      "number": 50,
+      "title": "Electoral Reform (Proportional Representation and Reduction of Voting Age)",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2024-12-03-52-commons",
+      "date": "2024-12-03",
+      "number": 52,
+      "title": "Elections (proportional representation): Ten Minute Rule Motion",
+      "alignment": "agree"
+     }
+    ]
+   },
+   {
+    "id": 20002,
+    "name": "Windfall oil and gas tax",
+    "text": "increasing windfall tax on oil and gas companies",
+    "sourceText": "increasing windfall tax on oil and gas companies",
+    "detail": "increasing windfall tax on oil and gas companies",
+    "link": "",
+    "group": "Environmental Issues",
+    "freeVote": false,
+    "econ": -1,
+    "social": 0,
+    "termVotes": 4,
+    "divisions": [
+     {
+      "key": "pw-2024-11-06-31-commons",
+      "date": "2024-11-06",
+      "number": 31,
+      "title": "Budget Resolution No. 12: Energy (oil and gas) profits levy (increase in rate)",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2024-11-06-32-commons",
+      "date": "2024-11-06",
+      "number": 32,
+      "title": "Budget Resolution No. 13: Energy (oil and gas) profits levy (relief for investment expenditure)",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2024-11-06-33-commons",
+      "date": "2024-11-06",
+      "number": 33,
+      "title": "Budget Resolution No. 14: Energy (oil and gas) profits levy (period for which levy has effect)",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2025-03-03-112-commons",
+      "date": "2025-03-03",
+      "number": 112,
+      "title": "Finance Bill: Third Reading",
+      "alignment": "agree"
+     }
+    ]
+   },
+   {
+    "id": 1087,
+    "name": "Asylum",
+    "text": "a stricter asylum system",
+    "sourceText": "a stricter asylum system",
+    "detail": "The asylum system is intended to protect people fleeing persecution in their own countries. Parliament has voted on subjects including: routes via which people may enter the United Kingdom to seek asylum; the circumstances in which those seeking asylum may work; support for those seeking asylum and if to allow those claiming asylum to be removed to other countries while their claim is assessed.",
+    "link": "",
+    "group": "Home Affairs",
+    "freeVote": false,
+    "econ": 0,
+    "social": 1,
+    "termVotes": 2,
+    "divisions": [
+     {
+      "key": "pw-2002-06-11-263-commons",
+      "date": "2002-06-11",
+      "number": 263,
+      "title": "Nationality, Immigration and Asylum Bill — Only allow destitute asylum seekers and those under residence restrictions to live in accommodation centres for a maximum of 10 weeks — rejected",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2002-06-11-264-commons",
+      "date": "2002-06-11",
+      "number": 264,
+      "title": "Nationality, Immigration and Asylum Bill — Do not allow appeals against rejected asylum claims from within the UK if the claim is unfounded",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2002-06-12-268-commons",
+      "date": "2002-06-12",
+      "number": 268,
+      "title": "Nationality, Immigration and Asylum Bill — Allow the withdrawal of support from immigrants and asylum seekers in certain circumstances",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2002-06-12-270-commons",
+      "date": "2002-06-12",
+      "number": 270,
+      "title": "Nationality, Immigration and Asylum Bill — Do not penalise those who bring passengers to the UK without the necessary authority — rejected",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2002-06-12-272-commons",
+      "date": "2002-06-12",
+      "number": 272,
+      "title": "Nationality, Immigration and Asylum Bill — Third Reading",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2003-12-17-16-commons",
+      "date": "2003-12-17",
+      "number": 16,
+      "title": "Asylum and Immigration (Treatment of Claimants, etc.) Bill — Decline to give a Second Reading — rejected",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2003-12-17-17-commons",
+      "date": "2003-12-17",
+      "number": 17,
+      "title": "Asylum and Immigration (Treatment of Claimants, etc.) Bill — Second Reading",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2004-03-01-61-commons",
+      "date": "2004-03-01",
+      "number": 61,
+      "title": "Asylum and Immigration (Treatment of Claimants, Etc.) Bill — Burden of proof on prosecution rather than defendant in cases where immigrants to not have travel documents — rejected",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2004-03-01-62-commons",
+      "date": "2004-03-01",
+      "number": 62,
+      "title": "Asylum and Immigration (Treatment of Claimants, Etc.) Bill — Give support to failed asylum seekers and their families — rejected",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2004-03-01-63-commons",
+      "date": "2004-03-01",
+      "number": 63,
+      "title": "Asylum and Immigration (Treatment of Claimants, Etc.) Bill — Asylum appeals should be referred to a higher court — rejected",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2004-03-01-65-commons",
+      "date": "2004-03-01",
+      "number": 65,
+      "title": "Asylum and Immigration (Treatment of Claimants, Etc.) Bill — Give support to asylum seekers even when they make a late claim — rejected",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2004-03-01-67-commons",
+      "date": "2004-03-01",
+      "number": 67,
+      "title": "Asylum and Immigration (Treatment of Claimants, Etc.) Bill — Third Reading",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2005-11-16-102-commons",
+      "date": "2005-11-16",
+      "number": 102,
+      "title": "Immigration, Asylum and Nationality Bill — Third Reading",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-12-01-135-commons",
+      "date": "2015-12-01",
+      "number": 135,
+      "title": "Immigration Bill — Support for Failed Asylum Seekers and Illegal Migrants",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2015-12-14-148-commons",
+      "date": "2015-12-14",
+      "number": 148,
+      "title": "European Union Documents — Relocation of Migrants in need of International Protection",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2016-04-25-250-commons",
+      "date": "2016-04-25",
+      "number": 250,
+      "title": "Immigration Bill — Asylum Seekers: Permission to Work after Six Months",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2020-01-08-7-commons",
+      "date": "2020-01-08",
+      "number": 7,
+      "title": "European Union (Withdrawal Agreement) Bill — Clause 37 — Arrangements with EU About Unaccompanied Children Seeking Asylum",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2020-01-22-23-commons",
+      "date": "2020-01-22",
+      "number": 23,
+      "title": "European Union (Withdrawal Agreement) Bill — Clause 37 — Arrangements with EU about Unaccompanied Children Seeking Asylum",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2020-06-30-64-commons",
+      "date": "2020-06-30",
+      "number": 64,
+      "title": "Immigration and Social Security Co-ordination (EU Withdrawal) Bill — New Clause 29 — Family Reunion and Settlement",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2020-10-19-145-commons",
+      "date": "2020-10-19",
+      "number": 145,
+      "title": "Immigration and Social Security Co-ordination (EU Withdrawal) Bill — New Clause — Leave to Enter: Family Unity and Claims for Asylum",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2021-07-20-57-commons",
+      "date": "2021-07-20",
+      "number": 57,
+      "title": "Nationality and Borders Bill — Decline Second Reading",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2021-07-20-58-commons",
+      "date": "2021-07-20",
+      "number": 58,
+      "title": "Nationality and Borders Bill — Second Reading",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2021-12-07-138-commons",
+      "date": "2021-12-07",
+      "number": 138,
+      "title": "Nationality and Borders Bill — Clause 39 — Illegal Entry and Similar Offences — Exemptions",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2021-12-08-143-commons",
+      "date": "2021-12-08",
+      "number": 143,
+      "title": "Nationality and Borders Bill — Third Reading",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2022-03-22-220-commons",
+      "date": "2022-03-22",
+      "number": 220,
+      "title": "Nationality and Borders Bill — Clause 11 — Differential Treatment of Refugees",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2022-03-22-221-commons",
+      "date": "2022-03-22",
+      "number": 221,
+      "title": "Nationality and Borders Bill — After Clause 12 — Changes to the Immigration Act 1971 — Asylum Seekers' — Employment",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2022-03-22-222-commons",
+      "date": "2022-03-22",
+      "number": 222,
+      "title": "Nationality and Borders Bill — Clause 28 — Removal of Asylum Seeker to Safe Country",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2022-03-22-223-commons",
+      "date": "2022-03-22",
+      "number": 223,
+      "title": "Nationality and Borders Bill — After Clause 37 — Immigration Rules: Entry to Seek Asylum and Join Family",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2022-03-22-225-commons",
+      "date": "2022-03-22",
+      "number": 225,
+      "title": "Nationality and Borders Bill — Clause 39 — Illegal Entry and Similar Offences",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2022-03-22-227-commons",
+      "date": "2022-03-22",
+      "number": 227,
+      "title": "Nationality and Borders Bill — Clause 58 — Late Compliance with Slavery or Trafficking Information Notice: Damage to Credibility",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2022-03-22-228-commons",
+      "date": "2022-03-22",
+      "number": 228,
+      "title": "Nationality and Borders Bill — Clause 62 — Identified Potential Victims etc: Disqualification from Protection",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2022-04-20-249-commons",
+      "date": "2022-04-20",
+      "number": 249,
+      "title": "Nationality and Borders Bill — After Clause 12 — Changes to the Immigration Act 1971 — Asylum Applicants — Right to Work",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2022-04-20-251-commons",
+      "date": "2022-04-20",
+      "number": 251,
+      "title": "Nationality and Borders Bill — Schedule 3 — Removal of Asylum Seeker to Safe Country",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2022-04-20-252-commons",
+      "date": "2022-04-20",
+      "number": 252,
+      "title": "Nationality and Borders Bill — After Clause 37 — Immigration Rules: Entry to seek Asylum And Join Family",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2022-04-20-254-commons",
+      "date": "2022-04-20",
+      "number": 254,
+      "title": "Nationality and Borders Bill — Clause 39 — Illegal Entry and Similar Offences",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2022-04-20-255-commons",
+      "date": "2022-04-20",
+      "number": 255,
+      "title": "Nationality and Borders Bill — Clause 40 — Offence of Assisting an Asylum Seeker",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2022-04-26-266-commons",
+      "date": "2022-04-26",
+      "number": 266,
+      "title": "Nationality and Borders Bill — Before Clause 11 — Compliance with the Refugee Convention — Direct Travel and Prompt Presentation Assessments",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2024-01-17-60-commons",
+      "date": "2024-01-17",
+      "number": 60,
+      "title": "Safety of Rwanda (Asylum and Immigration) Bill Committee: Third reading",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2026-04-28-514-commons",
+      "date": "2026-04-28",
+      "number": 514,
+      "title": "Draft Asylum Seekers (Reception Conditions) (Amendment) Regulations 2026",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2026-04-28-515-commons",
+      "date": "2026-04-28",
+      "number": 515,
+      "title": "Draft Immigration and Asylum (Provision of Accommodation to Failed Asylum-Seekers) (Amendment) Regulations 2026",
+      "alignment": "agree"
+     }
+    ]
+   },
+   {
+    "id": 20010,
+    "name": "Renters rights",
+    "text": "more rights for tenants and regulation on landlords",
+    "sourceText": "more rights for tenants and regulation on landlords",
+    "detail": "more rights for tenants and regulation on landlords",
+    "link": "",
+    "group": "Housing",
+    "freeVote": false,
+    "econ": -1,
+    "social": 0,
+    "termVotes": 2,
+    "divisions": [
+     {
+      "key": "pw-2024-10-09-18-commons",
+      "date": "2024-10-09",
+      "number": 18,
+      "title": "Renters' Rights Bill: Reasoned Amendment to Second Reading",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2025-01-14-79-commons",
+      "date": "2025-01-14",
+      "number": 79,
+      "title": "Renters' Rights Bill: Third Reading",
+      "alignment": "agree"
+     }
+    ]
+   },
+   {
+    "id": 20004,
+    "name": "Minimum detention requirements",
+    "text": "reducing (for some kinds of offenders) the minimum detention requirement before release to reduce pressure on prison capacity",
+    "sourceText": "reducing (for some kinds of offenders) the minimum detention requirement before release to reduce pressure on prison capacity",
+    "detail": "Votes on reducing the minimum required detention period before being considered for release to reduce pressure on prison capacity.",
+    "link": "",
+    "group": "Justice",
+    "freeVote": false,
+    "econ": 0,
+    "social": -1,
+    "termVotes": 3,
+    "divisions": [
+     {
+      "key": "pw-2024-07-25-5-commons",
+      "date": "2024-07-25",
+      "number": 5,
+      "title": "The draft Criminal Justice Act 2003 (Requisite and Minimum Custodial Periods) Order 2024",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2024-12-10-62-commons",
+      "date": "2024-12-10",
+      "number": 62,
+      "title": "Draft Home Detention Curfew and Requisite and Minimum Custodial Periods (Amdt) Order 2024",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2025-07-02-250-commons",
+      "date": "2025-07-02",
+      "number": 250,
+      "title": "Draft Criminal Justice Act 2003 (Suitability for Fixed Term Recall) Order 2025",
+      "alignment": "agree"
+     }
+    ]
+   },
+   {
+    "id": 20019,
+    "name": "Proscribing Palestine Action",
+    "text": "proscribing Palestine Action, Maniacs Murder Cult, and Russian Imperial Movement as terrorist groups",
+    "sourceText": "proscribing Palestine Action, Maniacs Murder Cult, and Russian Imperial Movement as terrorist groups",
+    "detail": "Vote on proscribing a set of groups under the Terrorism Act 2000 in 2025.",
+    "link": "",
+    "group": "Justice",
+    "freeVote": false,
+    "econ": 0,
+    "social": 1,
+    "termVotes": 1,
+    "divisions": [
+     {
+      "key": "pw-2025-07-02-252-commons",
+      "date": "2025-07-02",
+      "number": 252,
+      "title": "Terrorism Act 2000 (Proscribed Organisations) (Amendment) Order 2025",
+      "alignment": "agree"
+     }
+    ]
+   },
+   {
+    "id": 20007,
+    "name": "Great British Energy",
+    "text": "creating a publicly owned energy investment company (Great British Energy)",
+    "sourceText": "creating a publically owned energy investment company (Great British Energy)",
+    "detail": "",
+    "link": "",
+    "group": "Miscellaneous Topics",
+    "freeVote": false,
+    "econ": -1,
+    "social": 0,
+    "termVotes": 1,
+    "divisions": [
+     {
+      "key": "pw-2024-10-29-27-commons",
+      "date": "2024-10-29",
+      "number": 27,
+      "title": "Great British Energy Bill: Third Reading",
+      "alignment": "agree"
+     }
+    ]
+   },
+   {
+    "id": 20008,
+    "name": "Employment rights",
+    "text": "shifting the balance of employment rights towards employees",
+    "sourceText": "shifting the balance of employment rights towards employees",
+    "detail": "Votes that affect employment rights - giving employees more rights.",
+    "link": "",
+    "group": "Social Issues",
+    "freeVote": false,
+    "econ": -1,
+    "social": 0,
+    "termVotes": 3,
+    "divisions": [
+     {
+      "key": "pw-2024-10-21-22-commons",
+      "date": "2024-10-21",
+      "number": 22,
+      "title": "Employment Rights Bill: Reasoned Amendment to Second Reading",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2024-10-21-23-commons",
+      "date": "2024-10-21",
+      "number": 23,
+      "title": "Employment Rights Bill: Second Reading",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2025-03-12-123-commons",
+      "date": "2025-03-12",
+      "number": 123,
+      "title": "Employment Rights Bill: Third Reading",
+      "alignment": "agree"
+     }
+    ]
+   }
+  ],
+  "members": [
+   {
+    "id": 13904,
+    "name": "Paul Maskey",
+    "party": "Sinn Féin",
+    "area": "Belfast West",
+    "pos": [
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ],
+    "votes": [
+     "xxx",
+     "..xx",
+     ".xxx",
+     "xxxx",
+     ".............xxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     "xx",
+     "xxx",
+     "x",
+     "x",
+     "xxx"
+    ]
+   },
+   {
+    "id": 10576,
+    "name": "Graham Stringer",
+    "party": "Labour",
+    "area": "Blackley and Middleton South",
+    "pos": [
+     1.0,
+     -1.0,
+     -1.0,
+     1.0,
+     -0.103,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "votes": [
+     "fff",
+     "aaax",
+     "xaaa",
+     "ffff",
+     "ffffxffffffffxxxaaxaaaaaaaaaaaaxxxxxaaxf",
+     "ff",
+     "xff",
+     "f",
+     "f",
+     "ffx"
+    ]
+   },
+   {
+    "id": 26379,
+    "name": "Carla Denyer",
+    "party": "Green",
+    "area": "Bristol Central",
+    "pos": [
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     -1.0,
+     1.0,
+     1.0,
+     -1.0,
+     1.0,
+     1.0
+    ],
+    "votes": [
+     "xxf",
+     "...f",
+     "...f",
+     "ffff",
+     "......................................aa",
+     "ff",
+     "fff",
+     "a",
+     "f",
+     "fff"
+    ]
+   },
+   {
+    "id": 26352,
+    "name": "Nigel Farage",
+    "party": "Reform UK",
+    "area": "Clacton",
+    "pos": [
+     null,
+     1.0,
+     null,
+     -1.0,
+     null,
+     -1.0,
+     -1.0,
+     1.0,
+     -1.0,
+     -1.0
+    ],
+    "votes": [
+     "xxx",
+     "...f",
+     "...x",
+     "xxxa",
+     "......................................xx",
+     "ax",
+     "xxa",
+     "f",
+     "a",
+     "aaa"
+    ]
+   },
+   {
+    "id": 26575,
+    "name": "Martin Rhodes",
+    "party": "Labour",
+    "area": "Glasgow North",
+    "pos": [
+     1.0,
+     -1.0,
+     null,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "votes": [
+     "fff",
+     "...a",
+     "...x",
+     "ffff",
+     "......................................ff",
+     "ff",
+     "fff",
+     "f",
+     "f",
+     "fff"
+    ]
+   },
+   {
+    "id": 10162,
+    "name": "David Davis",
+    "party": "Conservative",
+    "area": "Goole and Pocklington",
+    "pos": [
+     null,
+     0.0,
+     -1.0,
+     -1.0,
+     0.444,
+     -1.0,
+     -1.0,
+     null,
+     null,
+     -1.0
+    ],
+    "votes": [
+     "xxx",
+     "xfax",
+     "xaxx",
+     "axxa",
+     "xffxfxxxfxxxxxaxffxafffffxaxfxxaaxxxxfxx",
+     "aa",
+     "axx",
+     "x",
+     "x",
+     "aaa"
+    ]
+   },
+   {
+    "id": 10001,
+    "name": "Diane Abbott",
+    "party": "Labour",
+    "area": "Hackney North and Stoke Newington",
+    "pos": [
+     1.0,
+     1.0,
+     null,
+     1.0,
+     -0.789,
+     1.0,
+     1.0,
+     -1.0,
+     null,
+     1.0
+    ],
+    "votes": [
+     "ffx",
+     "fffx",
+     "xxxx",
+     "xxxf",
+     "xafxxaafaaxxxaxxaaaaaaaaxxxxxaaxxxxxxaxx",
+     "xf",
+     "xff",
+     "a",
+     "x",
+     "xxf"
+    ]
+   },
+   {
+    "id": 10155,
+    "name": "Edward Davey",
+    "party": "Liberal Democrat",
+    "area": "Kingston and Surbiton",
+    "pos": [
+     null,
+     1.0,
+     -1.0,
+     0.5,
+     -0.941,
+     1.0,
+     0.0,
+     null,
+     null,
+     null
+    ],
+    "votes": [
+     "xxx",
+     "ffff",
+     "a..x",
+     "fffa",
+     "faaaaaaaaaaaa...axaaaaaaaaaaaaaaaaaaxaax",
+     "ff",
+     "xfa",
+     "x",
+     "x",
+     "xxx"
+    ]
+   },
+   {
+    "id": 25693,
+    "name": "Kemi Badenoch",
+    "party": "Conservative",
+    "area": "North West Essex",
+    "pos": [
+     -1.0,
+     null,
+     null,
+     -1.0,
+     1.0,
+     -1.0,
+     -1.0,
+     null,
+     null,
+     null
+    ],
+    "votes": [
+     "aax",
+     "...x",
+     "...x",
+     "aaax",
+     "................fffxfffxffffffffffffffxx",
+     "aa",
+     "aaa",
+     "x",
+     "x",
+     "xxx"
+    ]
+   }
+  ]
+ },
+ "answers": {
+  "20020": {
+   "v": 1,
+   "skipped": false,
+   "imp": false
+  },
+  "837": {
+   "v": 0.5,
+   "skipped": false,
+   "imp": false
+  },
+  "1084": {
+   "v": -1,
+   "skipped": false,
+   "imp": true
+  },
+  "20002": {
+   "v": null,
+   "skipped": true,
+   "imp": false
+  },
+  "1087": {
+   "v": -0.5,
+   "skipped": false,
+   "imp": false
+  },
+  "20010": {
+   "v": 1,
+   "skipped": false,
+   "imp": false
+  },
+  "20004": {
+   "v": 0,
+   "skipped": false,
+   "imp": false
+  },
+  "20019": {
+   "v": -1,
+   "skipped": false,
+   "imp": true
+  },
+  "20007": {
+   "v": 0.5,
+   "skipped": false,
+   "imp": false
+  }
+ },
+ "expected": {
+  "answered": 8,
+  "order": [
+   6,
+   3,
+   1,
+   4,
+   5,
+   0,
+   7,
+   8,
+   2,
+   9
+  ],
+  "you": [
+   -0.75,
+   -0.5,
+   2.0,
+   3.0
+  ],
+  "members": {
+   "13904": {
+    "name": "Paul Maskey",
+    "pct": null,
+    "overlap": 0,
+    "compass": [
+     null,
+     null,
+     0.0,
+     0.0
+    ]
+   },
+   "10576": {
+    "name": "Graham Stringer",
+    "pct": 63.015,
+    "overlap": 8,
+    "compass": [
+     -1.0,
+     -0.03433333333333333,
+     4.0,
+     3.0
+    ]
+   },
+   "26379": {
+    "name": "Carla Denyer",
+    "pct": 67.5,
+    "overlap": 8,
+    "compass": [
+     -1.0,
+     -1.0,
+     4.0,
+     3.0
+    ]
+   },
+   "26352": {
+    "name": "Nigel Farage",
+    "pct": 25.0,
+    "overlap": 5,
+    "compass": [
+     1.0,
+     1.0,
+     4.0,
+     2.0
+    ]
+   },
+   "26575": {
+    "name": "Martin Rhodes",
+    "pct": 46.875,
+    "overlap": 7,
+    "compass": [
+     -1.0,
+     0.3333333333333333,
+     4.0,
+     3.0
+    ]
+   },
+   "10162": {
+    "name": "David Davis",
+    "pct": 62.96666666666667,
+    "overlap": 5,
+    "compass": [
+     1.0,
+     0.722,
+     3.0,
+     2.0
+    ]
+   },
+   "10001": {
+    "name": "Diane Abbott",
+    "pct": 87.22142857142858,
+    "overlap": 6,
+    "compass": [
+     -1.0,
+     -0.9296666666666668,
+     3.0,
+     3.0
+    ]
+   },
+   "10155": {
+    "name": "Edward Davey",
+    "pct": 92.15833333333335,
+    "overlap": 5,
+    "compass": [
+     -0.75,
+     -0.4705,
+     2.0,
+     2.0
+    ]
+   },
+   "25693": {
+    "name": "Kemi Badenoch",
+    "pct": 18.75,
+    "overlap": 4,
+    "compass": [
+     1.0,
+     1.0,
+     2.0,
+     2.0
+    ]
+   }
+  }
+ }
+}

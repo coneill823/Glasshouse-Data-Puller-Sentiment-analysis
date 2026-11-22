@@ -18,6 +18,11 @@ python -m http.server 8000 --directory app      # then open http://localhost:800
 That is enough to run the app with today's votes. It also writes
 `dist/glasshouse.html`, the whole app as one file you can open or upload.
 
+There are two apps over the same data: the website in `app/`, and the Android
+and iPhone app in `mobile/`, written in Flutter. [mobile/README.md](mobile/README.md)
+covers running it, installing a test build on your phone, and releasing it on
+Google Play and the App Store.
+
 ## How the data flows
 
 ```
@@ -44,12 +49,14 @@ python main.py --parliament scotland --only questions,plenary_business
 
 | Path | What it is |
 |---|---|
-| `app/` | The app: one page, no build step. See [app/README.md](app/README.md) |
+| `app/` | The website: one page, no build step. See [app/README.md](app/README.md) |
+| `mobile/` | The Android and iPhone app. See [mobile/README.md](mobile/README.md) |
 | `analysis/` | Turns raw data into what the app shows. See [analysis/README.md](analysis/README.md) |
 | `analysis/quiz_editorial.json` | Every editorial decision we make, in one file |
 | `scrapers/`, `main.py`, `config.py` | Collecting from the four legislatures' own sites |
 | `tests/` | `python -m unittest discover -s tests -t .` |
 | `docs/METHODS.md` | Every way to assess a representative, and which we use |
+| `docs/PRIVACY.md` | A draft privacy policy for the website and the apps |
 
 ## Tests
 
@@ -57,8 +64,9 @@ python main.py --parliament scotland --only questions,plenary_business
 python -m unittest discover -s tests -t .
 ```
 
-No network, under a second. Each test in `tests/test_behaviour.py` and
-`tests/test_record.py` pins a bug that was found on real data.
+No network, a couple of seconds. Each test in `tests/test_behaviour.py` and
+`tests/test_record.py` pins a bug that was found on real data. The phone app
+has its own suite: `cd mobile && flutter test`.
 
 ## Credits
 

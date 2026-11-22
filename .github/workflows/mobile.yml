@@ -1,0 +1,80 @@
+name: mobile
+
+# Checks the phone app, then builds it for Android and for iPhone. The Android
+# build is kept as a download: open a run on the Actions tab and take
+# "glasshouse-android" from the bottom of the page.
+on:
+  push:
+    paths:
+      - "mobile/**"
+      - ".github/workflows/mobile.yml"
+  pull_request:
+    paths:
+      - "mobile/**"
+      - ".github/workflows/mobile.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The version the app was written and tested with. Raise it deliberately.
+  FLUTTER_VERSION: "3.50.1"
+
+defaults:
+  run:
+    working-directory: mobile
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      # Includes the checks that the app's arithmetic matches the website's,
+      # and that no screen overflows on a small phone with large text.
+      - run: flutter test
+
+  android:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      # With no release key in the repository this is signed with the debug
+      # key: it installs on any Android phone, but Google Play will not take it.
+      - run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: glasshouse-android
+          path: mobile/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+  ios:
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      # Proves the iPhone app compiles. Signing it for the App Store needs an
+      # Apple developer account, which only the owner has: see mobile/README.md.
+      - run: flutter build ios --release --no-codesign

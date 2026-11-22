@@ -1,0 +1,163 @@
+# Glasshouse for Android and iPhone
+
+The Glasshouse app, written in Flutter: one codebase that builds for Android,
+iPhone and iPad. It does what the website does — find your representatives,
+see their record, take the quiz, see how your answers line up with how MPs
+voted — and works without a connection once installed.
+
+<p>
+  <img src="store/screenshots/phone-1-representatives.png" width="24%" alt="Your representatives and their voting record">
+  <img src="store/screenshots/phone-2-quiz.png" width="24%" alt="A quiz statement with five answers">
+  <img src="store/screenshots/phone-3-match.png" width="24%" alt="Your match with your MP">
+  <img src="store/screenshots/phone-4-compass.png" width="24%" alt="The compass of how MPs voted">
+</p>
+
+## Try it on an Android phone
+
+Every change to the app is built automatically. On GitHub open **Actions →
+mobile**, pick the latest run with a green tick, and download
+**glasshouse-android** from the bottom of the page. Unzip it, copy
+`app-release.apk` to your phone and open it; Android will ask you to allow
+installing from that source.
+
+That build is for trying the app out. It is signed with a throwaway key, so
+Google Play will not accept it — see [Releasing](#releasing-on-google-play).
+
+## Work on it
+
+Install [Flutter](https://docs.flutter.dev/get-started/install) 3.50 or newer, then:
+
+```sh
+cd mobile
+flutter pub get
+flutter run            # on a connected phone or an emulator
+flutter test           # 66 tests, about fifteen seconds
+flutter analyze
+```
+
+| Where | What |
+| --- | --- |
+| `lib/core/` | Data, scoring, postcode lookup, saved answers. No screens. |
+| `lib/ui/` | The four screens, the compass, the full-record page. |
+| `lib/theme.dart` | Colours and type, light and dark. |
+| `assets/data/` | The two data files the app ships with. |
+| `test/` | Unit tests and tests that drive the whole app. |
+| `tool/make_icons.py` | Redraws the app icon at every size. |
+
+### The same numbers as the website
+
+The match percentage, the compass and the order the statements are asked in
+are computed by `lib/core/scoring.dart`, a port of the arithmetic in
+`app/index.html`. `test/scoring_test.dart` checks the port against results
+computed by the Python build on a frozen slice of real MPs, so the app and the
+website cannot quietly drift apart. If you change how anything is scored,
+change it in all three places and regenerate `test/fixtures/quiz_slice.json`.
+
+### Keeping the data fresh
+
+`python -m analysis.build` (in the repository root) rebuilds the data and
+copies it into `mobile/assets/data/`. That copy is what a new install starts
+with.
+
+Votes change daily and a shop release takes days, so the app also looks for
+newer data itself: at most twice a day it downloads `app/data.json` and
+`app/quiz.json` from this repository's default branch, checks the two files
+belong together, and uses them from the next launch. So to update every
+installed copy, run the build and push — no new release is needed. The address
+is `kRemoteBase` in `lib/core/repository.dart`; set it to an empty string to
+turn this off.
+
+## Before you publish
+
+These are yours to decide or do; none of them can be done from here.
+
+- **The app's permanent ID.** It is `io.github.coneill823.glasshouse` on both
+  platforms. Neither shop lets you change it after the first upload. To use
+  your own domain instead (say `uk.co.example.glasshouse`), change it in
+  `android/app/build.gradle.kts` (`namespace` and `applicationId`), move
+  `android/app/src/main/kotlin/io/github/coneill823/glasshouse/MainActivity.kt`
+  to the matching folder and fix its `package` line, and replace it in
+  `ios/Runner.xcodeproj/project.pbxproj`.
+- **A privacy policy at a public address.** Both shops require one.
+  [`docs/PRIVACY.md`](../docs/PRIVACY.md) is a draft that describes exactly
+  what this app does; add your name and contact details and publish it on your
+  website.
+- **Say it is independent.** Google Play requires apps that present government
+  information to name their sources and state that they do not represent a
+  government body. The About screen already does; put the same sentence and
+  the source links in the shop description.
+- **mySociety's terms.** The votes are CC BY 4.0, which permits this with the
+  credit the app already gives. I found no explicit licence for their policy
+  groupings — the mapping of votes to quiz statements — so ask them before
+  launch (see `docs/METHODS.md`).
+- **Shop listing.** A name, descriptions, a category and a support email.
+  [`store/listing.md`](store/listing.md) is a draft of the wording, and
+  [`store/`](store/) holds the icons, the Play banner and screenshots at the
+  sizes each shop asks for. `python3 tool/make_icons.py` and
+  `node tool/screenshots.js` remake them.
+
+## Releasing on Google Play
+
+1. Open a [Play Console](https://play.google.com/console) developer account
+   (a one-off US$25, plus identity checks). Personal accounts opened since
+   late 2023 must run a closed test with a set number of testers for two weeks
+   before they may publish to everyone; the Console tells you the current rule.
+2. Make the key that will sign your uploads. Keep the file and its passwords
+   somewhere safe and backed up, and never commit them:
+   ```sh
+   keytool -genkey -v -keystore ~/glasshouse-upload.jks \
+     -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+   ```
+3. Tell the build where it is, in a new file `mobile/android/key.properties`
+   (already ignored by git):
+   ```properties
+   storePassword=the password you chose
+   keyPassword=the password you chose
+   keyAlias=upload
+   storeFile=/home/you/glasshouse-upload.jks
+   ```
+4. Build the bundle Play wants:
+   ```sh
+   flutter build appbundle --release
+   ```
+   It is written to `build/app/outputs/bundle/release/app-release.aab`.
+5. In the Console create the app, accept Play App Signing, and upload the
+   bundle to **Internal testing** first. Fill in the content rating, target
+   audience (adults) and Data safety forms. For Data safety, the facts are:
+   the app has no accounts, adverts or analytics; quiz answers stay on the
+   device; the one thing that leaves it is a postcode the user types, sent
+   over HTTPS to postcodes.io to find their constituency, and only if they
+   search by postcode.
+6. For every later upload, raise the version in `pubspec.yaml`. In
+   `version: 1.0.0+1` the part after `+` must go up each time.
+
+## Releasing on the App Store
+
+Signing and uploading an iPhone app needs Apple's tools, which only run on a
+Mac. If you do not have one, a hosted Mac build service does the same job
+(Codemagic is built around Flutter; GitHub's macOS runners also work).
+
+1. Join the [Apple Developer Program](https://developer.apple.com/programs/)
+   (US$99 a year).
+2. In [App Store Connect](https://appstoreconnect.apple.com) create the app
+   with the bundle ID above.
+3. On the Mac, open `ios/Runner.xcworkspace` in Xcode, select **Runner →
+   Signing & Capabilities**, and choose your team.
+4. Build and upload:
+   ```sh
+   flutter build ipa --release
+   ```
+   then send `build/ios/ipa/*.ipa` with Apple's Transporter app.
+5. Try it through TestFlight, complete the privacy questions with the same
+   facts as above, and submit for review.
+
+Each push already proves the iPhone app compiles: the **ios** job in the
+**mobile** workflow builds it unsigned.
+
+## What it does not do yet
+
+- A Welsh postcode finds your MP but not your Senedd constituency; search for
+  that by name. (No open postcode service returns the 2026 Senedd seats yet.)
+- The quiz covers the House of Commons only, for the reason given on the About
+  screen.
+- English only.

@@ -1,0 +1,48 @@
+name: glasshouse
+description: "Find your representatives, see what they did, and see how their votes match your views."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.14.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  material_ui: ^1.1.0
+
+  cupertino_icons: ^1.0.8
+  http: ^1.6.0
+  shared_preferences: ^2.5.6
+  url_launcher: ^6.3.3
+  path_provider: ^2.1.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+
+flutter:
+
+  uses-material-design: true
+
+  assets:
+    - assets/data/
+    - assets/fonts/OFL-Fraunces.txt
+    - assets/fonts/OFL-PublicSans.txt
+    - assets/fonts/OFL-IBMPlexMono.txt
+
+  fonts:
+    - family: Fraunces
+      fonts:
+        - asset: assets/fonts/Fraunces-Variable.ttf
+    - family: PublicSans
+      fonts:
+        - asset: assets/fonts/PublicSans-Variable.ttf
+    - family: IBMPlexMono
+      fonts:
+        - asset: assets/fonts/IBMPlexMono-Regular.ttf
+        - asset: assets/fonts/IBMPlexMono-Medium.ttf
+          weight: 500
