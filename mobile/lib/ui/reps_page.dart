@@ -3,12 +3,15 @@ library;
 
 import 'package:material_ui/material_ui.dart';
 
+import '../core/app_state.dart';
 import '../core/models.dart';
 import '../core/place.dart';
 import '../core/postcode.dart';
 import '../core/text.dart';
 import '../theme.dart';
+import 'local.dart';
 import 'member.dart';
+import 'quiz_page.dart' show rolePlural;
 import 'scope.dart';
 import 'widgets.dart';
 
@@ -29,6 +32,11 @@ class _RepsPageState extends State<RepsPage> {
   final GlobalKey _placeKey = GlobalKey();
 
   List<Area> _hits = const [];
+
+  /// People found by name who are not in a seat: former members, peers, and
+  /// candidates in an election that has not happened yet.
+  List<Member> _people = const [];
+  List<({Candidate candidate, Ballot ballot})> _standing = const [];
   String _message = '';
   bool _busy = false;
 
@@ -40,18 +48,26 @@ class _RepsPageState extends State<RepsPage> {
     super.dispose();
   }
 
+  void _nothingFound() {
+    _hits = const [];
+    _people = const [];
+    _standing = const [];
+  }
+
   void _onChanged(String q) {
     final data = AppScope.read(context).data;
     setState(() {
       if (looksLikePostcode(q)) {
-        _hits = const [];
+        _nothingFound();
         _message = 'Tap Find to look up ${q.trim().toUpperCase()}.';
       } else if (looksLikePartPostcode(q)) {
-        _hits = const [];
+        _nothingFound();
         _message = 'Type the whole postcode, then tap Find.';
       } else {
         _hits = data.search(q);
-        _message = norm(q).length >= 2 && _hits.isEmpty
+        _people = data.searchOthers(q, limit: 6);
+        _standing = data.searchCandidates(q, limit: 4);
+        _message = norm(q).length >= 2 && _hits.isEmpty && _people.isEmpty && _standing.isEmpty
             ? 'No constituency or representative matches that.'
             : '';
       }
@@ -69,10 +85,12 @@ class _RepsPageState extends State<RepsPage> {
       setState(() => _message = 'That is only part of a postcode. Type all of it, like G12 8QQ.');
       return;
     }
-    final found = AppScope.read(context).data.search(q);
-    if (found.length == 1) {
+    final data = AppScope.read(context).data;
+    final found = data.search(q);
+    final people = data.searchOthers(q, limit: 6).length + data.searchCandidates(q, limit: 4).length;
+    if (found.length == 1 && people == 0) {
       _choose(found.first);
-    } else if (found.isEmpty) {
+    } else if (found.isEmpty && people == 0) {
       setState(() => _message = 'No constituency or representative matches that. Try a postcode.');
     } else {
       _focus.unfocus();
@@ -84,7 +102,7 @@ class _RepsPageState extends State<RepsPage> {
     final postcodes = AppScope.postcodesOf(context);
     setState(() {
       _busy = true;
-      _hits = const [];
+      _nothingFound();
       _message = 'Looking up ${raw.replaceAll(RegExp(r'\s+'), '').toUpperCase()}…';
     });
     try {
@@ -108,7 +126,7 @@ class _RepsPageState extends State<RepsPage> {
   void _choose(Area area) {
     AppScope.read(context).setPlace(Place.area(area));
     setState(() {
-      _hits = const [];
+      _nothingFound();
       _message = '';
     });
     _reveal();
@@ -117,7 +135,7 @@ class _RepsPageState extends State<RepsPage> {
   void _clear() {
     _query.clear();
     setState(() {
-      _hits = const [];
+      _nothingFound();
       _message = '';
     });
   }
@@ -153,7 +171,7 @@ class _RepsPageState extends State<RepsPage> {
           lede: 'Find your representatives and see their record: how often they vote, when they '
               'have broken with their party, and what they spend their time on.',
         ),
-        Text('Postcode, constituency, or a representative\'s name',
+        Text('Postcode, constituency, or a politician\'s name',
             style: GlassText.body(13, weight: 600, color: c.ink2)),
         const SizedBox(height: 6),
         Row(
@@ -205,6 +223,15 @@ class _RepsPageState extends State<RepsPage> {
                   '${_hits.length >= 36 ? ' or more' : ''}. Keep typing to narrow it down.'),
             ),
         ],
+        if (_people.isNotEmpty || _standing.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Text(
+            _hits.isEmpty ? 'People' : 'People not in a seat now',
+            style: GlassText.body(13, weight: 600, color: c.ink2),
+          ),
+          const SizedBox(height: 6),
+          _PeopleHits(_people, _standing),
+        ],
         Semantics(
           liveRegion: true,
           child: _message.isEmpty
@@ -237,6 +264,12 @@ class _RepsPageState extends State<RepsPage> {
         ],
         const SizedBox(height: 20),
         const _QuizPrompt(),
+        if (!shown.isExample) ...[
+          const SizedBox(height: 24),
+          ElectionsHere(shown.place),
+          const SizedBox(height: 24),
+          CouncillorsHere(shown.place),
+        ],
       ],
     );
   }
@@ -281,6 +314,89 @@ class _Hits extends StatelessWidget {
                         '${data.roleOf(areas[i].parliament)}${areas[i].isRegion ? ' · region' : ''}',
                         style: GlassText.mono(11, weight: 500, color: c.muted),
                       ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// People who match what has been typed but hold no seat to list them under.
+class _PeopleHits extends StatelessWidget {
+  const _PeopleHits(this.people, this.standing);
+
+  final List<Member> people;
+  final List<({Candidate candidate, Ballot ballot})> standing;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.glass;
+    final data = AppScope.of(context).data;
+    final rows = <({String name, String what, String detail, VoidCallback open})>[
+      for (final m in people)
+        (
+          name: m.name,
+          what: m.isPeer ? 'Peer' : 'Former ${data.roleOf(m.parliament)}',
+          detail: [
+            if (m.party.isNotEmpty) m.party,
+            if (m.area.isNotEmpty) m.area,
+            if (m.isFormer && m.until.isNotEmpty) 'until ${m.until}',
+          ].join(' · '),
+          open: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => MemberPage(m)),
+              ),
+        ),
+      for (final s in standing)
+        (
+          name: s.candidate.name,
+          what: 'Candidate',
+          detail: '${s.candidate.party} · ${ballotWhere(s.ballot)} · '
+              '${longDate(s.ballot.date)}',
+          open: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => BallotPage(s.ballot, highlight: s.candidate.name),
+                ),
+              ),
+        ),
+    ];
+    return Material(
+      color: c.surface,
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: c.line),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          for (final (i, row) in rows.indexed) ...[
+            if (i > 0) Divider(color: c.line),
+            InkWell(
+              onTap: row.open,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 48),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(row.name,
+                                style: GlassText.body(15, weight: 600, color: c.ink, height: 1.3)),
+                            if (row.detail.isNotEmpty)
+                              Text(row.detail,
+                                  style: GlassText.body(12.5, color: c.muted, height: 1.35)),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(row.what, style: GlassText.mono(11, weight: 500, color: c.muted)),
                     ],
                   ),
                 ),
@@ -357,22 +473,31 @@ class _QuizPrompt extends StatelessWidget {
     final quiz = state.quiz;
     if (quiz == null) return const SizedBox.shrink();
     final n = state.answeredCount;
-    final ready = state.canShowMatch;
+    final ready = state.hasAnyMatch;
+    // Each parliament the visitor is represented in has questions of its own.
+    final waiting = [
+      for (final s in state.sections)
+        if (s.id != kEarlierSection &&
+            state.hasRepsIn(s.set) &&
+            !state.canShowMatchFor(s.set) &&
+            (ready || s.isDevolved))
+          s,
+    ];
     return Panel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             ready
-                ? 'You have answered $n statements'
-                : 'Do your MP\'s votes match your views?',
+                ? 'You have answered $n question${n == 1 ? '' : 's'}'
+                : 'Do their votes match your views?',
             style: GlassText.display(20, color: c.ink),
           ),
           const SizedBox(height: 6),
           Text(
             ready
-                ? 'See how every MP\'s votes line up with what you said.'
-                : '${quiz.statements.length} statements, each one something MPs have actually '
+                ? 'See how the votes of the people who represent you line up with what you said.'
+                : '${quiz.commons.coreCount} statements, each one something MPs have actually '
                     'voted on. Your answers never leave this device.',
             style: GlassText.body(14, color: c.ink2),
           ),
@@ -385,6 +510,26 @@ class _QuizPrompt extends StatelessWidget {
                     ? 'Continue the quiz'
                     : 'Take the quiz'),
           ),
+          for (final s in waiting) ...[
+            const SizedBox(height: 12),
+            Text(
+              s.isDevolved
+                  ? 'Your ${rolePlural(state, s.set)} are matched on the ${s.title}\'s own '
+                      'votes, which are different questions.'
+                  : 'Your MP is matched on what the House of Commons has voted on.',
+              style: GlassText.body(14, color: c.ink2),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: () {
+                state.openSection(s.id);
+                state.go(1);
+              },
+              child: Text(s.isDevolved
+                  ? 'Answer the ${s.title} questions'
+                  : 'Answer the House of Commons statements'),
+            ),
+          ],
         ],
       ),
     );

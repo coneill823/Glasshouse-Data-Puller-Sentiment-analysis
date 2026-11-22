@@ -30,7 +30,12 @@ def membership(mid, pid, post, party, start, end=None, reason="general_election"
 def register():
     persons = [person(1, "Ann", "Able"), person(3, "Cy", "Cole"), person(4, "Dee", "Dunn"),
                person(2, "Katy", lordname="Clark", lordofname="Kilwinning",
-                      honorific_prefix="Baroness")]
+                      honorific_prefix="Baroness"),
+               # known by a place alone, and recorded with stray spaces
+               person(5, "Arthur Charles Valerian", lordname="", lordofname="Wellington",
+                      honorific_prefix="Duke"),
+               person(6, "Jonathan ", lordname="", lordofname="Portsmouth",
+                      honorific_prefix="Bishop", surname="Frost ")]
     posts = [
         {"id": f"{PW}/cons/1", "organization_id": "house-of-commons",
          "area": {"name": "Alpha"}, "identifiers": [{"scheme": "gss", "identifier": "E14000001"}]},
@@ -110,6 +115,11 @@ class Register(unittest.TestCase):
         self.assertIn("Katy Clark", self.current("scotland"))
         self.assertEqual(self.people.name(2, self.now, as_peer=True),
                          "Baroness Clark of Kilwinning")
+
+    def test_a_duke_or_a_bishop_is_named_by_their_title_not_their_first_name(self):
+        self.assertEqual(self.people.name(5, self.now, as_peer=True), "Duke of Wellington")
+        self.assertEqual(self.people.name(6, self.now, as_peer=True), "Bishop of Portsmouth")
+        self.assertEqual(self.people.name(6, self.now), "Jonathan Frost")
 
     def test_redirect_records_are_ignored(self):
         self.assertNotIn(99, self.people.memberships)

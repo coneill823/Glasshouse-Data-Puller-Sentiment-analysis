@@ -91,7 +91,7 @@ class Compass extends StatelessWidget {
     final c = context.glass;
     final quiz = state.quiz!;
     final you = state.ownCompass;
-    final focusPoint = focus == null ? null : state.compass[focus!.id];
+    final focusPoint = focus == null ? null : state.compassOf(focus!);
 
     final said = StringBuffer('Compass of how MPs voted. Across is economic, left to right. '
         'Up is social, from liberal at the bottom to authoritarian at the top.');

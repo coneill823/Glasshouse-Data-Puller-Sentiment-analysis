@@ -229,11 +229,16 @@ class People:
                 best = n
         best = best or next((n for n in reversed(p.get("other_names", []))
                              if n.get("note") == "Main"), {})
-        if best.get("lordname") and as_peer:
-            title = f"{best.get('honorific_prefix', 'Lord')} {best['lordname']}"
-            return f"{title} of {best['lordofname']}" if best.get("lordofname") else title
-        surname = best.get("family_name") or best.get("lordname")
-        return " ".join(x for x in (best.get("given_name"), surname) if x)
+        lord, of = (best.get("lordname") or "").strip(), (best.get("lordofname") or "").strip()
+        if as_peer and (lord or of):
+            prefix = (best.get("honorific_prefix") or "Lord").strip()
+            if not lord:
+                # Dukes, earls and bishops are known by place alone:
+                # "Duke of Wellington", "Bishop of Durham".
+                return f"{prefix} of {of}"
+            return f"{prefix} {lord} of {of}" if of else f"{prefix} {lord}"
+        surname = best.get("family_name") or best.get("surname") or lord
+        return " ".join(x.strip() for x in (best.get("given_name"), surname) if x and x.strip())
 
     def identifiers(self, person_id: int) -> dict:
         p = self.persons.get(int(person_id)) or {}

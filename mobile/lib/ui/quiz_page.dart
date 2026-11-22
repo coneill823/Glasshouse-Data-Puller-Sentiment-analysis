@@ -1,4 +1,4 @@
-/// One statement at a time, five ways to answer.
+/// The quiz: a list of its parts, and one statement at a time within a part.
 library;
 
 import 'dart:async';
@@ -13,6 +13,9 @@ import '../core/text.dart';
 import '../theme.dart';
 import 'scope.dart';
 import 'widgets.dart';
+
+/// "MLAs", "MSPs": the people a part of the quiz matches you with.
+String rolePlural(AppState state, QuizSet set) => '${state.data.roleOf(set.parliament)}s';
 
 class QuizPage extends StatefulWidget {
   const QuizPage({super.key});
@@ -40,7 +43,7 @@ class _QuizPageState extends State<QuizPage> {
     final asked = state.current.id;
     state.answer(value);
     _moveOn = Timer(_pause, () {
-      if (mounted && state.current.id == asked) _next(state);
+      if (mounted && state.started && state.current.id == asked) _next(state);
     });
   }
 
@@ -48,7 +51,7 @@ class _QuizPageState extends State<QuizPage> {
     _moveOn?.cancel();
     if (state.step(1)) {
       _toTop();
-    } else if (state.canShowMatch) {
+    } else if (state.canShowMatchFor(state.section.set)) {
       state.go(2);
     }
   }
@@ -70,18 +73,18 @@ class _QuizPageState extends State<QuizPage> {
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
-    final quiz = state.quiz;
-    if (quiz == null) {
+    if (state.quiz == null || state.sections.isEmpty) {
       return const PageScroll(children: [
         PageHeading('Where do you stand?', lede: 'The quiz is missing from this copy of the app.'),
       ]);
     }
-    if (!state.started) return _Intro(quiz);
+    if (!state.started) return const _Parts();
 
     final c = context.glass;
+    final section = state.section;
     final statement = state.current;
     final given = state.answerFor(statement);
-    final total = state.order.length;
+    final total = section.order.length;
     final still = reducedMotion(context);
 
     return Column(
@@ -90,13 +93,26 @@ class _QuizPageState extends State<QuizPage> {
           child: PageScroll(
             controller: _scroll,
             children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () {
+                    _moveOn?.cancel();
+                    state.leaveSection();
+                  },
+                  style: TextButton.styleFrom(padding: const EdgeInsets.only(right: 10)),
+                  icon: const Icon(Icons.arrow_back, size: 18),
+                  label: Text(section.title),
+                ),
+              ),
+              const SizedBox(height: 4),
               Wrap(
                 alignment: WrapAlignment.spaceBetween,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 spacing: 12,
                 runSpacing: 6,
                 children: [
-                  Eyebrow('Statement ${state.at + 1} of $total'),
+                  Eyebrow('${section.isDevolved ? 'Vote' : 'Statement'} ${state.at + 1} of $total'),
                   if (statement.group.isNotEmpty) Tag(statement.group),
                 ],
               ),
@@ -110,7 +126,7 @@ class _QuizPageState extends State<QuizPage> {
                   alignment: Alignment.topLeft,
                   children: [...previous, ?current],
                 ),
-                child: _Asked(statement, key: ValueKey(statement.id)),
+                child: _Asked(statement, lead: section.lead, key: ValueKey(statement.id)),
               ),
               const SizedBox(height: 20),
               for (final (label, value) in kAnswerScale) ...[
@@ -135,62 +151,122 @@ class _QuizPageState extends State<QuizPage> {
               Divider(color: c.line),
               Disclosure(
                 key: ValueKey('votes-${statement.id}'),
-                title: Text('What did MPs vote on?',
-                    style: GlassText.body(14.5, weight: 600, color: c.accent)),
-                builder: (_) => _Evidence(statement),
+                title: Text(
+                  section.isDevolved ? 'What exactly was voted on?' : 'What did MPs vote on?',
+                  style: GlassText.body(14.5, weight: 600, color: c.accent),
+                ),
+                builder: (_) => section.isDevolved ? _OneVote(statement) : _Evidence(statement),
               ),
             ],
           ),
         ),
         _Actions(
-          answered: state.answeredCount,
+          answered: state.answeredInSet(section.set),
           onBack: state.at == 0 ? null : () => _back(state),
           onNext: state.atLast ? null : () => _next(state),
-          onMatch: state.canShowMatch ? () => state.go(2) : null,
+          onMatch: state.canShowMatchFor(section.set) ? () => state.go(2) : null,
         ),
       ],
     );
   }
 }
 
-class _Intro extends StatelessWidget {
-  const _Intro(this.quiz);
-
-  final QuizData quiz;
+/// The parts of the quiz, and how far through each the visitor is.
+class _Parts extends StatelessWidget {
+  const _Parts();
 
   @override
   Widget build(BuildContext context) {
-    final state = AppScope.read(context);
-    final since = quiz.termStart.length >= 4 ? quiz.termStart.substring(0, 4) : 'the election';
+    final state = AppScope.of(context);
+    final offered = state.offered;
+    final mine = [for (final s in offered) if (s.isDevolved && state.hasRepsIn(s.set)) s];
     return PageScroll(
       children: [
         PageHeading(
           'Where do you stand?',
-          lede: '${quiz.statements.length} statements, all of them voted on by MPs since $since. '
-              'The quiz covers the House of Commons.',
+          lede: mine.isEmpty
+              ? 'Each part compares your views with how one parliament\'s members actually voted.'
+              : 'You are represented in more than one parliament. Each has its own part, '
+                  'because each votes on different things.',
         ),
-        Panel(
+        const Panel(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Prose('Every statement is something MPs have **actually voted on** in this '
-                  'parliament. Say how you feel about each one, and we compare your answers with '
-                  'how each MP used their vote — not with what they have said.'),
-              const SizedBox(height: 12),
-              const Note('Your answers stay on this device. Nothing you choose is sent or stored '
-                  'anywhere else. You can skip any statement and stop whenever you like; more '
-                  'answers make the match more reliable.'),
-              const SizedBox(height: 16),
-              FilledButton(onPressed: state.start, child: const Text('Start the quiz')),
+              Prose('Everything here is something members have **actually voted on**. Say how '
+                  'you feel, and we compare your answers with how each of them used their '
+                  'vote — not with what they have said.'),
+              SizedBox(height: 10),
+              Note('Your answers stay on this device. Nothing you choose is sent or stored '
+                  'anywhere else. Skip anything, stop whenever you like; more answers make a '
+                  'match more reliable.'),
             ],
           ),
         ),
+        for (final s in offered) ...[
+          const SizedBox(height: 12),
+          _Part(s),
+        ],
       ],
     );
   }
 }
 
-/// How far through the statements you are.
+class _Part extends StatelessWidget {
+  const _Part(this.section);
+
+  final QuizSection section;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.glass;
+    final state = AppScope.of(context);
+    final done = state.answeredIn(section);
+    final total = section.order.length;
+    final yours = section.isDevolved && state.hasRepsIn(section.set);
+    return Panel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: Text(section.title, style: GlassText.display(20, color: c.ink))),
+              if (yours) ...[
+                const SizedBox(width: 10),
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Tag('Your ${rolePlural(state, section.set)}'),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(section.blurb, style: GlassText.body(14, color: c.ink2)),
+          const SizedBox(height: 12),
+          _Progress(total == 0 ? 0 : done / total),
+          const SizedBox(height: 6),
+          Text('$done of $total answered', style: GlassText.mono(12, color: c.muted)),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: done == 0
+                ? FilledButton(
+                    onPressed: () => state.openSection(section.id),
+                    child: const Text('Start'),
+                  )
+                : OutlinedButton(
+                    onPressed: () => state.openSection(section.id),
+                    child: Text(done >= total ? 'Review my answers' : 'Continue'),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// How far through you are.
 class _Progress extends StatelessWidget {
   const _Progress(this.fraction);
 
@@ -223,22 +299,30 @@ class _Progress extends StatelessWidget {
 
 /// The statement itself.
 class _Asked extends StatelessWidget {
-  const _Asked(this.statement, {super.key});
+  const _Asked(this.statement, {required this.lead, super.key});
 
   final Statement statement;
+  final String lead;
 
   @override
   Widget build(BuildContext context) {
     final c = context.glass;
     final length = statement.text.length;
     final size = length > 150 ? 19.0 : length > 90 ? 21.0 : 24.0;
+    // A devolved question is a single motion: show what it actually said,
+    // because its title alone can be read either way.
+    final motion = statement.result.isNotEmpty ? statement.detail : '';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('I support…', style: GlassText.body(14, color: c.muted)),
+        Text(lead, style: GlassText.body(14, color: c.muted)),
         const SizedBox(height: 4),
         Text('${statement.text}.',
             style: GlassText.display(size, weight: 500, height: 1.26, color: c.ink)),
+        if (motion.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _Motion(motion),
+        ],
         if (statement.freeVote) ...[
           const SizedBox(height: 12),
           const Align(
@@ -247,6 +331,50 @@ class _Asked extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+/// The words of a motion, as it was put. Long ones open in full on request.
+class _Motion extends StatefulWidget {
+  const _Motion(this.text);
+
+  final String text;
+
+  @override
+  State<_Motion> createState() => _MotionState();
+}
+
+class _MotionState extends State<_Motion> {
+  static const int _short = 260;
+  bool _all = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.glass;
+    final long = widget.text.length > _short + 60;
+    final shown = !long || _all
+        ? widget.text
+        : '${widget.text.substring(0, widget.text.lastIndexOf(' ', _short))}…';
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(left: BorderSide(color: c.edge, width: 2)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.only(left: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(shown, style: GlassText.body(14, color: c.ink2)),
+            if (long)
+              TextButton(
+                onPressed: () => setState(() => _all = !_all),
+                style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                child: Text(_all ? 'Show less' : 'Read the whole motion'),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -331,7 +459,7 @@ class _Important extends StatelessWidget {
   }
 }
 
-/// The votes a statement rests on.
+/// The votes a Commons statement rests on.
 class _Evidence extends StatelessWidget {
   const _Evidence(this.statement);
 
@@ -354,8 +482,11 @@ class _Evidence extends StatelessWidget {
           const SizedBox(height: 8),
         ],
         Text(
-          '$all vote${all == 1 ? '' : 's'} in all, ${st.termVotes} in this parliament. '
-          'The most recent:',
+          st.termVotes > 0
+              ? '$all vote${all == 1 ? '' : 's'} in all, ${st.termVotes} in this parliament. '
+                  'The most recent:'
+              : '$all vote${all == 1 ? '' : 's'}, the last in '
+                  '${st.divisions.last.date.substring(0, 4)}. The most recent:',
           style: GlassText.body(14, color: c.ink2),
         ),
         for (final d in st.divisions.reversed.take(3)) ...[
@@ -370,6 +501,44 @@ class _Evidence extends StatelessWidget {
           const SizedBox(height: 10),
           ExtLink('The legislation on Parliament\'s website', st.link, size: 14),
         ],
+      ],
+    );
+  }
+}
+
+/// The single vote a devolved question is.
+class _OneVote extends StatelessWidget {
+  const _OneVote(this.statement);
+
+  final Statement statement;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.glass;
+    final st = statement;
+    final vote = st.divisions.first;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'One vote, on ${vote.date}'
+          '${st.result.length == 2 ? ': ${st.result[0]} for, ${st.result[1]} against' : ''}. '
+          'Agreeing means you would have voted for it.',
+          style: GlassText.body(14, color: c.ink2),
+        ),
+        if (st.detail.isEmpty) ...[
+          const SizedBox(height: 8),
+          const Note('The record gives its title, not its wording. Follow the link before '
+              'answering if the title could be read either way.'),
+        ],
+        if (vote.url.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          ExtLink('The vote, and what was said about it', vote.url, size: 14),
+        ],
+        const SizedBox(height: 6),
+        const Note('One vote is thinner evidence than the Commons statements, which pool '
+            'several. Members sometimes vote against something they sympathise with because '
+            'of how it is worded or who proposed it.'),
       ],
     );
   }

@@ -45,6 +45,10 @@ Map<String, dynamic> _decode(String source) {
 /// together — the quiz refers to members by the ids in the data file.
 @visibleForTesting
 bool usablePair(Map<String, dynamic> data, Map<String, dynamic> quiz) {
+  // Version 2 added the devolved quizzes, earlier statements, former members
+  // and elections. An older pair would load, but with those parts missing.
+  if (data['schema'] is! num || quiz['schema'] is! num) return false;
+  if ((data['schema'] as num) < 2 || (quiz['schema'] as num) < 2) return false;
   final members = data['members'];
   final statements = quiz['statements'];
   final quizMembers = quiz['members'];

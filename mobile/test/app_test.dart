@@ -1,7 +1,6 @@
 // The whole app, driven the way a person would use it: real data, a fake
 // postcode service, and answers kept in memory.
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glasshouse/core/app_state.dart';
@@ -10,16 +9,24 @@ import 'package:glasshouse/core/place.dart';
 import 'package:glasshouse/core/postcode.dart';
 import 'package:glasshouse/main.dart';
 import 'package:glasshouse/ui/compass.dart';
+import 'package:glasshouse/ui/local.dart';
+import 'package:glasshouse/ui/match_page.dart';
 import 'package:glasshouse/ui/member.dart';
 import 'package:glasshouse/ui/widgets.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
 
-final AppData data = AppData.fromJson(
-    jsonDecode(File('assets/data/data.json').readAsStringSync()) as Map<String, dynamic>);
-final QuizData quiz = QuizData.fromJson(
-    jsonDecode(File('assets/data/quiz.json').readAsStringSync()) as Map<String, dynamic>);
+import 'support.dart';
+
+// The real data, plus an invented ward with an election and a council (see
+// support.dart), so nothing here depends on what is in the register today.
+final AppData data = localData;
+final QuizData quiz = bundledQuiz;
+
+const String kAssembly = 'NI Assembly';
+final QuizSet assembly = quiz.chambers[kAssembly]!;
+final int commonsCount = quiz.commons.coreCount;
 
 Area seat(String name, [String parliament = kUkParliament]) =>
     data.areas.firstWhere((a) => a.parliament == parliament && a.area == name);
@@ -38,6 +45,30 @@ http.Client fakePostcodes() => MockClient((request) async {
         result = {
           'scottish_parliamentary_constituency': 'Glasgow Kelvin and Maryhill',
           'scottish_parliamentary_region': 'Glasgow',
+        };
+      } else if (path == '/postcodes/BT71NN') {
+        // One MP at Westminster, several MLAs at Stormont.
+        result = {
+          'postcode': 'BT7 1NN',
+          'country': 'Northern Ireland',
+          'parliamentary_constituency_2024': 'Belfast South and Mid Down',
+          'codes': {
+            'parliamentary_constituency_2024':
+                seat('Belfast South and Mid Down').members.first.gss,
+          },
+        };
+      } else if (path == '/postcodes/TE51ST') {
+        // The invented ward: an election coming, and a council that was read.
+        result = {
+          'postcode': 'TE5 1ST',
+          'country': 'England',
+          'admin_ward': 'Ward Two',
+          'codes': {
+            'parliamentary_constituency_2024': seat('Islington North').members.first.gss,
+            'admin_ward': kTestWard,
+            'admin_district': kTestDistrict,
+            'admin_county': kTestCounty,
+          },
         };
       }
       return result == null
@@ -93,12 +124,41 @@ Future<void> answer(WidgetTester tester, String label) async {
   await tester.pumpAndSettle();
 }
 
+/// Looks a postcode up the way a person would.
+Future<void> lookUp(WidgetTester tester, String postcode) async {
+  await tester.enterText(find.byType(TextField), postcode);
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Find'));
+  await tester.pumpAndSettle();
+}
+
+/// Answers every question of one part of the quiz, without the tapping.
+void answerPart(String id, {int? first, double Function(int i)? value}) {
+  state.openSection(id);
+  final n = first ?? state.section.order.length;
+  for (var i = 0; i < n; i++) {
+    state.answer(value?.call(i) ?? (i.isEven ? 1 : -1));
+    state.step(1);
+  }
+}
+
+/// Something on the match screen, not on a screen kept behind it.
+Finder onMatch(Finder finder) => find.descendant(of: find.byType(MatchPage), matching: finder);
+
+/// The text of one part's Start, Continue or Review button on the quiz screen.
+Finder partButton(String title) => find.descendant(
+    of: find.ancestor(of: find.text(title), matching: find.byType(Panel)),
+    matching: find.byWidgetPredicate((w) => w is FilledButton || w is OutlinedButton));
+
 void main() {
   testWidgets('opens on an example and says that it is one', (tester) async {
     await open(tester);
     expect(find.text('Who represents you?'), findsOneWidget);
     expect(find.text('AN EXAMPLE — SEARCH ABOVE FOR YOURS'), findsOneWidget);
     expect(find.byType(MemberCard), findsOneWidget);
+    // An example is not somewhere you live: nothing local is claimed for it.
+    expect(find.byType(ElectionsHere, skipOffstage: false), findsNothing);
+    expect(find.byType(CouncillorsHere, skipOffstage: false), findsNothing);
   });
 
   testWidgets('typing a name finds a constituency and choosing it shows who sits for it',
@@ -182,8 +242,13 @@ void main() {
     await open(tester);
     await tab(tester, 'Quiz');
     expect(find.text('Where do you stand?'), findsOneWidget);
-    await press(tester, find.text('Start the quiz'));
-    expect(find.text('STATEMENT 1 OF ${quiz.statements.length}'), findsOneWidget);
+    // One part for each parliament, and one for earlier ones.
+    for (final title in ['House of Commons', 'Earlier parliaments', 'Northern Ireland Assembly']) {
+      expect(find.text(title, skipOffstage: false), findsOneWidget);
+    }
+    await press(tester, partButton('House of Commons'));
+    expect(find.text('STATEMENT 1 OF $commonsCount'), findsOneWidget);
+    expect(find.text('I support…'), findsOneWidget);
 
     FilledButton seeMatch() =>
         tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'See my match'));
@@ -217,6 +282,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('How your views line up with how they voted'), findsOneWidget);
     expect(find.text('YOUR CLOSEST MATCH IN THE HOUSE'), findsOneWidget);
+    expect(find.text('Find my representatives'), findsOneWidget); // no place chosen yet
     final best = state.ranked().first;
     expect(find.text('${best.match.pct!.round()}%'), findsWidgets);
     expect(find.byType(Compass, skipOffstage: false), findsOneWidget);
@@ -295,7 +361,8 @@ void main() {
     await tester.tap(find.text('Clear answers'));
     await tester.pumpAndSettle();
     expect(state.answeredCount, 0);
-    expect(find.text('Start the quiz'), findsOneWidget);
+    expect(find.text('Where do you stand?'), findsOneWidget); // back at the list of parts
+    expect(find.text('0 of $commonsCount answered'), findsOneWidget);
   });
 
   testWidgets('the match screen asks for answers before it shows anything', (tester) async {
@@ -304,7 +371,8 @@ void main() {
     expect(find.text('You have answered 0 so far.'), findsOneWidget);
     await tester.tap(find.text('Take the quiz'));
     await tester.pumpAndSettle();
-    expect(find.text('STATEMENT 1 OF ${quiz.statements.length}'), findsOneWidget);
+    expect(find.text('Where do you stand?'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Start'), findsWidgets);
   });
 
   testWidgets('what was saved is there when the app is opened again', (tester) async {
@@ -323,7 +391,7 @@ void main() {
     expect(find.text('Islington North'), findsWidgets);
     expect(state.answeredCount, 7);
     await tab(tester, 'Quiz');
-    expect(find.text('STATEMENT 8 OF ${quiz.statements.length}'), findsOneWidget);
+    expect(find.text('STATEMENT 8 OF $commonsCount'), findsOneWidget);
   });
 
   testWidgets('About says where the figures come from and what leaves the device',
@@ -335,6 +403,341 @@ void main() {
         skipOffstage: false), findsOneWidget);
     expect(find.textContaining('not affiliated with', findRichText: true, skipOffstage: false),
         findsOneWidget);
+    // What was added is explained, with its limits and whose data it is.
+    for (final heading in [
+      'The Scottish Parliament, the Senedd and the Assembly',
+      'When a match is shown',
+      'People who do not represent you now',
+      'What is missing',
+    ]) {
+      expect(find.text(heading, skipOffstage: false), findsOneWidget);
+    }
+    for (final said in ['One vote is thinner evidence', 'none is given a score',
+        'do not record who voted which way', 'Democracy Club (CC BY 4.0)']) {
+      expect(find.textContaining(said, findRichText: true, skipOffstage: false), findsWidgets);
+    }
+  });
+
+  group('a parliament of your own', () {
+    testWidgets('a Belfast postcode finds the MP and every MLA, and offers the Assembly\'s questions',
+        (tester) async {
+      await open(tester);
+      await lookUp(tester, 'BT7 1NN');
+      final mlas = state.repsIn(assembly);
+      expect(mlas.length, greaterThan(3));
+      expect(find.byType(MemberCard), findsNWidgets(mlas.length + 1));
+
+      await press(tester, find.text('Answer the Northern Ireland Assembly questions'));
+      expect((state.tab, state.sectionId), (1, kAssembly));
+      expect(find.text('VOTE 1 OF ${assembly.statements.length}'), findsOneWidget);
+      expect(find.text('I would have voted for…'), findsOneWidget);
+
+      // What exactly was voted on is one tap away, with the result.
+      await press(tester, find.text('What exactly was voted on?'));
+      expect(find.textContaining('One vote, on '), findsOneWidget);
+      expect(find.textContaining('Agreeing means you would have voted for it'), findsOneWidget);
+
+      // Back to the list: the Assembly's part is marked as being about your MLAs.
+      await press(tester, find.widgetWithText(TextButton, 'Northern Ireland Assembly'));
+      expect(find.text('Where do you stand?'), findsOneWidget);
+      expect(find.text('Your MLAs'), findsOneWidget);
+    });
+
+    testWidgets('answering the Assembly\'s votes gives every MLA a match, not only the MP',
+        (tester) async {
+      await open(tester);
+      await lookUp(tester, 'BT7 1NN');
+      answerPart(kAssembly);
+      await tester.pumpAndSettle();
+      await tab(tester, 'Match');
+
+      expect(find.text('YOUR REPRESENTATIVES · BT7 1NN'), findsOneWidget);
+      final mlas = state.repsIn(assembly);
+      final matched = [
+        for (final m in mlas)
+          if (state.isShown(state.matchOf(m, assembly), assembly)) m,
+      ];
+      expect(matched.length, greaterThan(2));
+      for (final m in mlas) {
+        expect(find.text(m.name), findsWidgets, reason: m.name);
+      }
+      for (final m in matched) {
+        final pct = '${state.matchOf(m, assembly).pct!.round()}%';
+        expect(find.text(pct), findsWidgets, reason: m.name);
+      }
+      // Anyone without a figure says why, rather than showing nothing.
+      if (matched.length < mlas.length) {
+        expect(find.textContaining('has not voted on these'), findsWidgets);
+      }
+      // The MP is not forgotten: Westminster has its own questions, and it says so.
+      expect(find.textContaining('Answer at least 5 of its statements'),
+          findsOneWidget);
+
+      // The Assembly's results: about your closest MLA, vote by vote.
+      expect(find.text('YOUR MLA'), findsOneWidget);
+      expect(find.text('MLAS WHO VOTED MOST LIKE YOU'), findsOneWidget);
+      expect(find.textContaining('VOTE BY VOTE · '), findsOneWidget);
+      expect(find.byType(Compass), findsNothing); // the compass is Commons only
+
+      // Choosing another of your MLAs from the summary makes the results about them.
+      final focus = state.focusIn(assembly, state.ranked(assembly))!;
+      final another = matched.firstWhere((m) => m.id != focus.id);
+      await press(tester, onMatch(find.text(another.name)));
+      expect(state.focusIn(assembly, state.ranked(assembly))!.id, another.id);
+      expect(find.text('YOUR MLA'), findsOneWidget);
+
+      // And someone else's MLA, from the list of the closest.
+      final mine = {for (final m in mlas) m.id};
+      final stranger = state.ranked(assembly).take(6).firstWhere((r) => !mine.contains(r.member.id));
+      await press(tester, onMatch(find.text(stranger.member.name)));
+      expect(find.text('SELECTED MLA'), findsOneWidget);
+
+      // Each row opens onto the vote itself.
+      final rows = find.byWidgetPredicate(
+          (w) => w is Disclosure && w.key.toString().contains('cmp-${stranger.member.id}-'),
+          );
+      expect(rows, findsNWidgets(assembly.statements.length));
+      await press(tester, find.descendant(of: rows.first, matching: find.byType(InkWell)));
+      expect(find.byType(ExtLink), findsWidgets);
+    });
+
+    testWidgets('with only Westminster answered, the match screen says what is missing and how to add it',
+        (tester) async {
+      await open(tester);
+      await lookUp(tester, 'BT7 1NN');
+      answerPart(kCommonsSection, first: 8);
+      await tester.pumpAndSettle();
+      await tab(tester, 'Match');
+      expect(find.text('YOUR MP'), findsOneWidget);
+      expect(find.textContaining('It votes on different things from Westminster'), findsOneWidget);
+      expect(find.textContaining('${state.repsIn(assembly).length} MLAs compare'), findsOneWidget);
+      await press(tester, find.text('Answer its ${assembly.statements.length} questions'));
+      expect((state.tab, state.sectionId, state.started), (1, kAssembly, true));
+      expect(find.text('VOTE 1 OF ${assembly.statements.length}'), findsOneWidget);
+    });
+
+    testWidgets('an MLA\'s own card carries their match and leads to their results',
+        (tester) async {
+      await open(tester);
+      await lookUp(tester, 'BT7 1NN');
+      answerPart(kAssembly);
+      await tester.pumpAndSettle();
+      final mla = state.repsIn(assembly).lastWhere(
+          (m) => state.isShown(state.matchOf(m, assembly), assembly));
+      final pct = state.matchOf(mla, assembly).pct!.round();
+      final card = find.ancestor(
+          of: find.text(mla.name),
+          matching: find.byType(MemberCard));
+      await press(tester, find.descendant(
+          of: card, matching: find.text('$pct% match with your answers')));
+      expect(state.tab, 2);
+      expect(state.focusIn(assembly, state.ranked(assembly))!.id, mla.id);
+      expect(find.text('YOUR MLA'), findsOneWidget);
+      // The MP's card has no figure: nothing was answered about Westminster.
+      await tab(tester, 'Reps');
+      final mp = state.repsIn(quiz.commons).single;
+      final mpCard = find.ancestor(
+          of: find.text(mp.name),
+          matching: find.byType(MemberCard));
+      expect(find.descendant(of: mpCard, matching: find.textContaining('% match')),
+          findsNothing);
+    });
+
+    testWidgets('an MLA\'s full record shows how they voted in the quiz\'s votes', (tester) async {
+      await open(tester);
+      state.setPlace(Place.area(seat('Belfast South', kAssembly)));
+      await tester.pumpAndSettle();
+      final voter = state.repsIn(assembly).firstWhere((m) => m.pos.any((p) => p != null));
+      final card = find.ancestor(
+          of: find.text(voter.name),
+          matching: find.byType(MemberCard));
+      await press(tester,
+          find.descendant(of: card, matching: find.text('Full record')));
+      expect(find.text('Northern Ireland Assembly'), findsOneWidget);
+      await press(tester, find.textContaining('of the quiz\'s votes'));
+      expect(find.byType(AxisBar), findsWidgets);
+      expect(find.textContaining('(1 vote)'), findsWidgets);
+    });
+  });
+
+  testWidgets('an MP who voted on under half of it is shown as a partial picture, not hidden',
+      (tester) async {
+    await open(tester);
+    final core = quiz.commons.coreCount;
+    final mp = quiz.members.firstWhere((m) {
+      final voted = m.pos.take(core).where((p) => p != null).length;
+      return voted >= 7 && voted * 3 < core;
+    });
+    state.setPlace(Place.area(data.areaByKey[data.memberById[mp.id]!.areaKey]!));
+    answerPart(kCommonsSection);
+    await tester.pumpAndSettle();
+    final r = state.matchOf(mp);
+    expect((state.isShown(r), state.isEnough(r)), (true, false));
+
+    // Their card carries the figure, and so does the match screen, with its basis.
+    await tab(tester, 'Reps');
+    await press(tester, find.text('${r.pct!.round()}% match with your answers'));
+    expect(find.text('YOUR MP'), findsOneWidget);
+    expect(onMatch(find.text('${r.pct!.round()}%')), findsWidgets);
+    expect(find.textContaining('voted on ${r.overlap} of ${r.eligible} statements they could have'),
+        findsOneWidget);
+    expect(find.textContaining('so this is a partial picture'), findsOneWidget);
+    expect(find.textContaining('are ranked or averaged here'), findsOneWidget);
+  });
+
+  group('people who hold no seat', () {
+    testWidgets('a former MP is found by name and shown by what they did', (tester) async {
+      await open(tester);
+      final former = data.others.firstWhere((m) =>
+          m.isFormer && m.parliament == kUkParliament && data.recordsOf(m.id).length == 1 &&
+          data.search(m.name).isEmpty);
+      await tester.enterText(find.byType(TextField), former.name);
+      await tester.pumpAndSettle();
+      expect(find.text('Former MP'), findsWidgets);
+      await press(tester, find.widgetWithText(InkWell, former.name));
+      expect(find.text(former.name), findsOneWidget);
+      expect(find.textContaining('No longer sits in the House of Commons'), findsOneWidget);
+      expect(find.textContaining('${former.since}–${former.until}'), findsOneWidget);
+      expect(find.byType(MetricBar), findsWidgets);
+      // Not measured against a chamber they are no longer in, nor shown a
+      // count of speeches nobody collected.
+      final page = find.byType(MemberPage);
+      expect(find.descendant(of: page, matching: find.byType(MedianKey)), findsNothing);
+      expect(find.descendant(of: page, matching: find.text('questions & speeches')), findsNothing);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.text('Who represents you?'), findsOneWidget);
+    });
+
+    testWidgets('a former MP can still be matched with your answers', (tester) async {
+      await open(tester);
+      answerPart(kEarlierSection, first: 40);
+      await tester.pumpAndSettle();
+      final former = quiz.commons.former.firstWhere((m) =>
+          state.isShown(state.matchOf(m)) && data.recordIn(m.id, kUkParliament) != null &&
+          data.search(m.name).isEmpty);
+      await tester.enterText(find.byType(TextField), former.name);
+      await tester.pumpAndSettle();
+      await press(tester, find.widgetWithText(InkWell, former.name));
+      final pct = state.matchOf(former).pct!.round();
+      await press(tester, find.text('$pct% match with your answers'));
+      expect(state.tab, 2);
+      expect(find.text('FORMER MP'), findsOneWidget);
+      expect(find.text(former.name), findsWidgets);
+    });
+
+    testWidgets('a peer is found by name, and is not described as if elected or whipped',
+        (tester) async {
+      await open(tester);
+      final peer = data.others.firstWhere(
+          (m) => m.isPeer && m.party == 'Crossbench' && m.rebellions > 0 && (m.termVotes ?? 0) > 0);
+      await tester.enterText(find.byType(TextField), peer.name);
+      await tester.pumpAndSettle();
+      expect(find.text('Peer'), findsWidgets);
+      await press(tester, find.widgetWithText(InkWell, peer.name));
+      expect(find.text('House of Lords'), findsOneWidget);
+      expect(find.textContaining('Nobody votes for a member of the House of Lords'), findsOneWidget);
+      final page = find.byType(MemberPage);
+      expect(find.descendant(of: page, matching: find.text('With their group')), findsOneWidget);
+      expect(find.descendant(of: page, matching: find.text('With their party')), findsNothing);
+      expect(find.descendant(of: page, matching: find.byType(MedianKey)), findsOneWidget);
+      expect(find.textContaining('% match'), findsNothing); // no quiz for the Lords
+    });
+
+    testWidgets('someone who moved from one chamber to another has both records, linked',
+        (tester) async {
+      await open(tester);
+      final moved = data.others.firstWhere((m) => m.isFormer && data.memberById.containsKey(m.id));
+      final now = data.memberById[moved.id]!;
+      state.setPlace(Place.area(data.areaByKey[now.areaKey]!));
+      await tester.pumpAndSettle();
+      final card = find.ancestor(
+          of: find.text(now.name),
+          matching: find.byType(MemberCard));
+      await press(tester,
+          find.descendant(of: card, matching: find.text('Full record')));
+      final house = data.chamber(moved.parliament)!.house;
+      await press(tester, find.text('Used to sit in the $house'));
+      expect(find.textContaining('No longer sits in the $house'), findsOneWidget);
+    });
+  });
+
+  group('who can I vote for', () {
+    testWidgets('a postcode shows the elections coming up there and who is standing',
+        (tester) async {
+      await open(tester);
+      await lookUp(tester, 'TE5 1ST');
+      expect(find.text('Elections coming up here'), findsOneWidget);
+      expect(find.byType(BallotCard), findsNWidgets(2));
+      for (final shown in ['Ward One, Testshire', 'THURSDAY 7 MAY 2099', 'Pat Example',
+          'Independent · no record in office', 'North Division, Testshire County', 'Cancelled']) {
+        expect(find.text(shown), findsWidgets, reason: shown);
+      }
+      expect(find.text('Council by-election · 1 seat · 2 standing so far'),
+          findsOneWidget);
+      expect(find.text('Council election · 2 seats · no candidates announced yet',
+          ), findsOneWidget);
+      // Standing is not an act in office, and the screen says so.
+      expect(find.textContaining('Nobody here is scored for standing'),
+          findsWidgets);
+      expect(find.textContaining('% match'), findsNothing);
+
+      // Someone who has held a seat before links to what they did in it.
+      await press(tester, find.textContaining('has a record: see it'));
+      expect(find.textContaining('No longer sits in'), findsOneWidget);
+    });
+
+    testWidgets('a candidate is found by name and shown on their ballot', (tester) async {
+      await open(tester);
+      await tester.enterText(find.byType(TextField), 'pat exam');
+      await tester.pumpAndSettle();
+      expect(find.text('Candidate'), findsOneWidget);
+      expect(find.text('Independent · Ward One, Testshire · 7 May 2099'), findsOneWidget);
+      await press(tester, find.widgetWithText(InkWell, 'Pat Example'));
+      expect(find.text('Council by-election'), findsOneWidget);
+      expect(find.byType(BallotCard), findsOneWidget);
+      expect(find.textContaining('Democracy Club'), findsOneWidget);
+    });
+
+    testWidgets('a place chosen by name says what a postcode would add', (tester) async {
+      await open(tester);
+      final islington = seat('Islington North');
+      state.setPlace(Place.area(islington));
+      await tester.pumpAndSettle();
+      if (data.ballotsFor(state.place!.codes).isEmpty) {
+        expect(find.textContaining('Search by postcode to see elections for your council ward',
+            ), findsOneWidget);
+      }
+      expect(find.textContaining('Search by postcode to find your ward'),
+          findsOneWidget);
+    });
+  });
+
+  group('councillors', () {
+    testWidgets('where a council has been read, a postcode shows its councillors and their attendance',
+        (tester) async {
+      await open(tester);
+      await lookUp(tester, 'TE5 1ST');
+      expect(find.text('Your councillors'), findsOneWidget);
+      for (final shown in ['TESTSHIRE COUNCIL', 'Riverside',
+          'The electoral area that Ward Two ward is part of.', '15 of 20',
+          'Attendance not recorded']) {
+        expect(find.text(shown), findsOneWidget, reason: shown);
+      }
+      expect(find.textContaining('Sam Sample', findRichText: true), findsOneWidget);
+      // What attendance is, and why there is no match.
+      expect(find.textContaining('absence is not always a choice'), findsOneWidget);
+      expect(find.textContaining('There is no match with your answers'),
+          findsOneWidget);
+    });
+
+    testWidgets('everywhere else it says plainly that they are not here yet', (tester) async {
+      await open(tester);
+      await lookUp(tester, 'G12 8QQ');
+      expect(find.textContaining('Not here yet.'), findsOneWidget);
+      expect(find.textContaining('Almost no council records how each councillor voted',
+          ), findsOneWidget);
+    });
   });
 
   // Nothing may overflow or be cut off on the smallest phones, with the text
@@ -348,40 +751,100 @@ void main() {
   ]) {
     testWidgets('every screen lays out on $name', (tester) async {
       await open(tester, size: size, textScale: scale, brightness: brightness);
-      await tester.enterText(find.byType(TextField), 'g12 8qq');
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Find'));
-      await tester.pumpAndSettle();
+      await lookUp(tester, 'g12 8qq');
       await tester.dragUntilVisible(find.byType(MemberCard).last,
           find.byType(SingleChildScrollView).first, const Offset(0, -400));
 
-      state.start();
-      for (var i = 0; i < quiz.statements.length; i++) {
-        state.answer(const [1.0, 0.5, 0.0, -0.5, -1.0][i % 5]);
-        if (i % 4 == 0) state.setImportant(true);
-        state.step(1);
+      // Every part of the quiz answered in full, with some marked important.
+      for (final part in state.sections) {
+        answerPart(part.id, value: (i) => const [1.0, 0.5, 0.0, -0.5, -1.0][i % 5]);
+        for (var i = 0; i < part.order.length; i += 4) {
+          state.answers[part.statementAt(i).id]!.important = true;
+        }
       }
+      state.leaveSection();
       await tester.pumpAndSettle();
 
+      // The list of parts, a Commons statement, and a devolved vote with its motion.
       await tab(tester, 'Quiz');
+      state.openSection(kCommonsSection);
+      await tester.pumpAndSettle();
       await press(tester, find.text('What did MPs vote on?', skipOffstage: false));
+      final worded = assembly.statements.indexWhere((s) => s.detail.length > 400);
+      state.openSection(kAssembly);
+      while (worded >= 0 && state.current.id != assembly.statements[worded].id && state.step(-1)) {}
+      await tester.pumpAndSettle();
+      if (find.text('Read the whole motion', skipOffstage: false).evaluate().isNotEmpty) {
+        await press(tester, find.text('Read the whole motion', skipOffstage: false));
+      }
+      await press(tester, find.text('What exactly was voted on?', skipOffstage: false));
+
+      // Every result at once: the Commons, the compass, and three more parliaments.
+      Future<void> sweep() async {
+        final scroll = find.byType(SingleChildScrollView).last;
+        for (var i = 0; i < 80; i++) {
+          await tester.drag(scroll, const Offset(0, -500));
+          await tester.pump();
+        }
+        await tester.pumpAndSettle();
+      }
+
       await tab(tester, 'Match');
-      final scroll = find.byType(SingleChildScrollView).last;
-      for (var i = 0; i < 40; i++) {
-        await tester.drag(scroll, const Offset(0, -500));
+      await sweep();
+      await tab(tester, 'About');
+      await sweep();
+
+      // Somewhere with an election, candidates and councillors.
+      await tab(tester, 'Reps');
+      await lookUp(tester, 'TE5 1ST');
+      final reps = find.byType(SingleChildScrollView).first;
+      for (var i = 0; i < 12; i++) {
+        await tester.drag(reps, const Offset(0, -500));
         await tester.pump();
       }
       await tester.pumpAndSettle();
-      await tab(tester, 'About');
+      await tab(tester, 'Match');
+      await sweep();
 
-      // And the full record of the MP with the longest list of everything.
-      final busiest = data.members.reduce((a, b) => a.rebellions >= b.rebellions ? a : b);
-      state.setPlace(Place.area(data.areaByKey[busiest.areaKey]!));
+      // Search results of every kind in one list.
       await tab(tester, 'Reps');
-      await press(tester, find.text('Full record', skipOffstage: false));
-      await press(tester, find.textContaining('How they voted on', skipOffstage: false));
-      await press(tester, find.textContaining('When they broke', skipOffstage: false));
-      expect(tester.takeException(), isNull);
+      await tester.enterText(find.byType(TextField), 'pat exam');
+      await tester.pumpAndSettle();
+      await press(tester, find.widgetWithText(InkWell, 'Pat Example'));
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'smith');
+      await tester.pumpAndSettle();
+
+      // The full record of whoever has the longest list of everything, in the
+      // Commons and out of it.
+      Member busiest(Iterable<Member> people) =>
+          people.reduce((a, b) => a.rebellions >= b.rebellions ? a : b);
+      for (final who in [
+        busiest(data.members),
+        busiest(data.others.where((m) => m.isPeer)),
+        busiest(data.others.where((m) => m.isFormer)),
+        busiest(data.members.where((m) => m.parliament == kAssembly)),
+      ]) {
+        final navigator = tester.state<NavigatorState>(find.byType(Navigator).first);
+        navigator.push(MaterialPageRoute<void>(builder: (_) => MemberPage(who)));
+        await tester.pumpAndSettle();
+        for (final opens in ['How they voted', 'When they broke', 'When they voted unlike']) {
+          final heading = find.textContaining(opens, skipOffstage: false);
+          if (heading.evaluate().isNotEmpty) await press(tester, heading);
+        }
+        final page = find.byType(SingleChildScrollView).last;
+        for (var i = 0; i < 30; i++) {
+          await tester.drag(page, const Offset(0, -600));
+          await tester.pump();
+        }
+        await tester.pumpAndSettle();
+        navigator.pop();
+        await tester.pumpAndSettle();
+      }
+      final problem = tester.takeException();
+      expect(problem, isNull,
+          reason: problem is FlutterError ? problem.toStringDeep() : '$problem');
     });
   }
 }

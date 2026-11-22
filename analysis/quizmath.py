@@ -21,14 +21,26 @@ Agreement on one statement, where both you and the member have a view:
     1 - |you - them| / 2          1 = the same view, 0 = opposite
 
 A match is the average of that over the statements you both have a view on,
-counting twice any you marked as mattering a lot. It is only shown when it
-rests on enough: at least five such statements (or all you answered, if
-fewer), and at least half of the statements you answered THAT THE MEMBER COULD
-HAVE VOTED ON. The last part matters. Someone elected in 2024 cannot have
-voted on tuition fees in 2004; that is not a gap in their record and must not
-count against them. But someone who was a member and did not vote has chosen,
-or been unable, to take a position, and a match resting on a small part of
-what you asked about would mislead.
+counting twice any you marked as mattering a lot.
+
+Two tests decide what is done with it.
+
+  * SHOWN, to the member's own constituents and to anyone who looks them up:
+    when it rests on at least five such statements (or all you answered, if
+    fewer). The figure always comes with how many statements it rests on.
+
+  * RANKED, in a list of who voted most like you, and counted in a party's
+    average: when it is shown AND rests on at least half of the statements
+    you answered THAT THE MEMBER COULD HAVE VOTED ON.
+
+The second test is about fairness between members. Someone elected in 2024
+cannot have voted on tuition fees in 2004; that is not a gap in their record
+and must not count against them. But someone who was a member and did not
+vote has left a gap. An MP from Northern Ireland or Scotland who stays out of
+votes on laws for England may have voted on a third of what you answered: a
+person they represent should still see that figure, and what it rests on. It
+should not sit in a ranking above members with a full record, where five
+lucky agreements would beat thirty real ones.
 """
 from __future__ import annotations
 
@@ -71,11 +83,15 @@ def match(positions: list, votes: list, answers: dict) -> dict:
             "overlap": overlap, "eligible": eligible}
 
 
+def shown(m: dict, answered: int) -> bool:
+    """Whether a match rests on enough to be shown at all."""
+    return m["pct"] is not None and m["overlap"] >= min(answered, MIN_ANSWERS)
+
+
 def enough(m: dict, answered: int) -> bool:
-    """Whether a match rests on enough to be shown."""
-    return (m["pct"] is not None
-            and m["overlap"] >= min(answered, MIN_ANSWERS)
-            and m["overlap"] * 2 >= m["eligible"])
+    """Whether a match also covers enough of what the member could have voted
+    on to be ranked against other members' and averaged into a party's."""
+    return shown(m, answered) and m["overlap"] * 2 >= m["eligible"]
 
 
 def place(statements: list, value_at) -> dict:
@@ -175,7 +191,7 @@ def expected(quiz: dict, answers: dict) -> dict:
         r = match(pos, votes, by_index)
         c = place(statements, lambda i: pos[i])
         return {"pct": _round(r["pct"]), "overlap": r["overlap"], "eligible": r["eligible"],
-                "enough": enough(r, answered),
+                "shown": shown(r, answered), "enough": enough(r, answered),
                 "compass": [_round(c["econ"]), _round(c["social"]), c["econWeight"], c["socialWeight"]]}
 
     you = place(statements, lambda i: by_index.get(i, (None, False))[0])
@@ -190,7 +206,8 @@ def expected(quiz: dict, answers: dict) -> dict:
 def make_fixture(quiz: dict) -> dict:
     """A slice of the real quiz small enough to read, wide enough to matter:
     statements on both axes and neither, from this parliament and before it;
-    members who are new, long-serving, abstentionist and gone."""
+    members who are new, long-serving, abstentionist, gone, and one who was
+    there throughout but voted on under half of it."""
     def pick(statements: list, n: int) -> list:
         tagged_e = [s for s in statements if s["econ"]][: n // 3 + 1]
         tagged_s = [s for s in statements if s["social"]][: n // 3 + 1]
@@ -211,22 +228,34 @@ def make_fixture(quiz: dict) -> dict:
             out["moreVotes"] = [m["moreVotes"][i] for i in mi]
         return out
 
-    sitting = quiz["members"]
-    new = [m for m in sitting if "morePos" not in m and any(p is not None for p in m["pos"])]
-    veterans = sorted((m for m in sitting if "morePos" in m),
-                      key=lambda m: -sum(p is not None for p in m["morePos"]))
-    silent = [m for m in sitting if not any(p is not None for p in m["pos"])]
-    members = [cut(m) for m in new[:3] + veterans[:3] + veterans[-2:] + silent[:1]]
-    former = [cut(m) for m in sorted(quiz["former"],
-                                     key=lambda m: -sum(p is not None for p in m.get("morePos", [])))[:2]]
-    slice_ = {"termStart": quiz["termStart"], "votesAsOf": quiz["votesAsOf"],
-              "statements": core, "moreStatements": more, "members": members, "former": former}
     answers = {}
     for n, s in enumerate(core + more):
         v = _SCALE[n % len(_SCALE)]
         if n == len(core) + len(more) - 1:
             continue                                   # one left unanswered
         answers[str(s["id"])] = {"v": v, "skipped": v is None, "imp": v is not None and n % 4 == 2}
+    by_index = {i: (answers[str(s["id"])]["v"], bool(answers[str(s["id"])].get("imp")))
+                for i, s in enumerate(core + more) if str(s["id"]) in answers}
+    answered = sum(1 for v, _ in by_index.values() if v is not None)
+
+    def partial(m: dict) -> bool:
+        """Shown but not ranked: there for most of it, voted on under half."""
+        c = cut(m)
+        r = match(c["pos"] + c.get("morePos", [None] * len(more)),
+                  c["votes"] + c.get("moreVotes", [""] * len(more)), by_index)
+        return shown(r, answered) and not enough(r, answered)
+
+    sitting = quiz["members"]
+    new = [m for m in sitting if "morePos" not in m and any(p is not None for p in m["pos"])]
+    veterans = sorted((m for m in sitting if "morePos" in m),
+                      key=lambda m: -sum(p is not None for p in m["morePos"]))
+    silent = [m for m in sitting if not any(p is not None for p in m["pos"])]
+    chosen = new[:3] + veterans[:3] + veterans[-2:] + silent[:1] + [m for m in sitting if partial(m)][:1]
+    members = [cut(m) for m in {m["id"]: m for m in chosen}.values()]
+    former = [cut(m) for m in sorted(quiz["former"],
+                                     key=lambda m: -sum(p is not None for p in m.get("morePos", [])))[:2]]
+    slice_ = {"termStart": quiz["termStart"], "votesAsOf": quiz["votesAsOf"],
+              "statements": core, "moreStatements": more, "members": members, "former": former}
     return {
         "_about": ("A frozen slice of app/quiz.json. `expected` is what analysis/quizmath.py makes "
                    "of `answers`; the phone app's tests must reproduce it. Regenerate with: "
@@ -247,7 +276,8 @@ def main(argv=None):
     e = fixture["expected"]
     print(f"Wrote {a.out}: {len(fixture['quiz']['statements'])}+"
           f"{len(fixture['quiz']['moreStatements'])} statements, {len(e['members'])} people, "
-          f"{sum(1 for m in e['members'].values() if m['enough'])} with a match")
+          f"{sum(1 for m in e['members'].values() if m['shown'])} with a match to show, "
+          f"{sum(1 for m in e['members'].values() if m['enough'])} of them ranked")
 
 
 if __name__ == "__main__":

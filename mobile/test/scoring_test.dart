@@ -14,7 +14,7 @@ Statement statement(int id, {double econ = 0, double social = 0, String group = 
       divisions: [for (var i = 0; i < divisions; i++) Division('k$id-$i', '2025-01-01', i, 't', 'agree')],
     );
 
-QuizData quizOf(List<Statement> statements, List<QuizMember> members) =>
+QuizSet quizOf(List<Statement> statements, List<QuizMember> members) =>
     QuizData.fromJson({
       'termStart': '2024-07-05',
       'votesAsOf': '2026-01-01',
@@ -27,11 +27,11 @@ QuizData quizOf(List<Statement> statements, List<QuizMember> members) =>
         for (final m in members)
           {'id': m.id, 'name': m.name, 'party': m.party, 'area': m.area, 'pos': m.pos, 'votes': m.votes},
       ],
-    });
+    }).commons;
 
-QuizMember member(List<double?> pos) => QuizMember(
+QuizMember member(List<double?> pos, [List<String>? votes]) => QuizMember(
     id: 1, name: 'A Member', party: 'Party', area: 'Area', pos: pos,
-    votes: [for (final _ in pos) 'f']);
+    votes: votes ?? [for (final p in pos) p == null ? 'x' : 'f']);
 
 void main() {
   group('agreement', () {
@@ -61,15 +61,57 @@ void main() {
 
     test('no shared statements means no match, not zero', () {
       final r = matchFor(quiz, quiz.members.first, {3: Answer(value: 1)});
-      expect((r.pct, r.overlap), (null, 0));
+      expect((r.pct, r.overlap, r.eligible), (null, 0, 1)); // they were there, and did not vote
+    });
+
+    test('what a member could have voted on is counted apart from what they did', () {
+      // voted | not a member for any of it | absent | not yet a member, then absent
+      final m = member([1, null, null, null], ['f', '', 'x', '.x']);
+      final quiz = quizOf(statements, [m]);
+      final answers = {for (var i = 1; i <= 4; i++) i: Answer(value: 1)};
+      final r = matchFor(quiz, quiz.members.first, answers);
+      expect((r.overlap, r.eligible), (1, 3));
+      expect(couldVote(''), isFalse);
+      expect(couldVote('...'), isFalse);
+      expect(couldVote('..x'), isTrue);
+      expect(couldVote('b'), isTrue);
     });
 
     test('a match needs enough shared statements to be shown', () {
-      expect(enoughOverlap(const MatchResult(80, 5), 6), isTrue);
-      expect(enoughOverlap(const MatchResult(80, 4), 6), isFalse);   // fewer than five
-      expect(enoughOverlap(const MatchResult(80, 5), 12), isFalse);  // under half the answers
-      expect(enoughOverlap(const MatchResult(80, 3), 3), isTrue);    // everything answered
-      expect(enoughOverlap(const MatchResult(null, 0), 0), isFalse);
+      expect(enoughOverlap(const MatchResult(80, 5, 6), 6), isTrue);
+      expect(enoughOverlap(const MatchResult(80, 4, 6), 6), isFalse);    // fewer than five
+      expect(enoughOverlap(const MatchResult(80, 5, 12), 12), isFalse);  // under half of what they could
+      expect(enoughOverlap(const MatchResult(80, 3, 3), 3), isTrue);     // everything answered
+      expect(enoughOverlap(const MatchResult(null, 0, 0), 0), isFalse);
+    });
+
+    test('a partial record is shown, with its basis, but not ranked', () {
+      // There for all twelve, voted in five: an MP who stays out of votes on
+      // laws for another part of the country.
+      const partial = MatchResult(80, 5, 12);
+      expect(showable(partial, 12), isTrue);
+      expect(enoughOverlap(partial, 12), isFalse);
+      expect(enoughOverlap(const MatchResult(80, 6, 12), 12), isTrue); // exactly half
+      // Four in common is too little to show anything, whatever it covers.
+      expect(showable(const MatchResult(80, 4, 4), 9), isFalse);
+      expect(showable(const MatchResult(80, 4, 4), 4), isTrue); // unless that is all there is
+      expect(showable(const MatchResult(null, 0, 6), 6), isFalse);
+      // Nothing is ranked that is not shown.
+      for (var overlap = 0; overlap <= 12; overlap++) {
+        for (var eligible = overlap; eligible <= 12; eligible++) {
+          final r = MatchResult(overlap == 0 ? null : 50, overlap, eligible);
+          if (enoughOverlap(r, 12)) expect(showable(r, 12), isTrue);
+        }
+      }
+    });
+
+    test('votes held before a member arrived are not held against them', () {
+      // Twelve answers, eight of them on votes from before this member sat.
+      // They voted on all four they could have: that is everything, not a third.
+      expect(enoughOverlap(const MatchResult(80, 4, 4), 4), isTrue);
+      expect(enoughOverlap(const MatchResult(80, 5, 5), 12), isTrue);
+      // The same five out of twelve from someone who sat through all twelve.
+      expect(enoughOverlap(const MatchResult(80, 5, 12), 12), isFalse);
     });
   });
 
@@ -119,6 +161,7 @@ void main() {
       expect(partyLabel('Labour/Co-operative'), 'Labour');
       expect(isParty('Independent'), isFalse);
       expect(isParty('Speaker'), isFalse);
+      expect(isParty('Presiding Officer'), isFalse);
       expect(isParty('Plaid Cymru'), isTrue);
     });
   });
@@ -149,20 +192,34 @@ void main() {
   group('parity with the Python build on real data', () {
     final fixture = jsonDecode(File('test/fixtures/quiz_slice.json').readAsStringSync())
         as Map<String, dynamic>;
-    final quiz = QuizData.fromJson(fixture['quiz'] as Map<String, dynamic>);
+    final quiz = QuizData.fromJson(fixture['quiz'] as Map<String, dynamic>).commons;
     final answers = {
       for (final e in (fixture['answers'] as Map<String, dynamic>).entries)
         int.parse(e.key): Answer.fromJson(e.value as Map<String, dynamic>),
     };
     final expected = fixture['expected'] as Map<String, dynamic>;
+    final members = expected['members'] as Map<String, dynamic>;
+    final everyone = [...quiz.members, ...quiz.former];
+    final answered = answers.values.where((a) => a.answered).length;
 
-    test('every MP in the slice gets the same match', () {
-      final members = expected['members'] as Map<String, dynamic>;
-      expect(members, hasLength(quiz.members.length));
-      for (final m in quiz.members) {
+    test('the slice has what it is meant to test', () {
+      expect(quiz.coreCount, lessThan(quiz.statements.length)); // earlier parliaments too
+      expect(quiz.former, isNotEmpty);
+      expect(members, hasLength(everyone.length));
+      final shown = members.values.where((m) => (m as Map)['shown'] == true).length;
+      final ranked = members.values.where((m) => (m as Map)['enough'] == true).length;
+      expect(shown, inExclusiveRange(0, everyone.length)); // some matched, some not
+      expect(ranked, inExclusiveRange(0, shown)); // and someone shown but not ranked
+    });
+
+    test('everyone in the slice gets the same match, sitting or not', () {
+      for (final m in everyone) {
         final want = members['${m.id}'] as Map<String, dynamic>;
         final got = matchFor(quiz, m, answers);
         expect(got.overlap, want['overlap'], reason: m.name);
+        expect(got.eligible, want['eligible'], reason: m.name);
+        expect(showable(got, answered), want['shown'], reason: m.name);
+        expect(enoughOverlap(got, answered), want['enough'], reason: m.name);
         if (want['pct'] == null) {
           expect(got.pct, isNull, reason: m.name);
         } else {
@@ -171,9 +228,8 @@ void main() {
       }
     });
 
-    test('every MP in the slice gets the same compass position', () {
-      final members = expected['members'] as Map<String, dynamic>;
-      for (final m in quiz.members) {
+    test('everyone in the slice gets the same compass position', () {
+      for (final m in everyone) {
         final want = (members['${m.id}'] as Map<String, dynamic>)['compass'] as List;
         final got = placeOnCompass(quiz.statements, (i) => m.pos[i]);
         _expectPoint(got, want, m.name);
@@ -183,11 +239,13 @@ void main() {
     test('the visitor gets the same compass position', () {
       final got = placeOnCompass(quiz.statements, (i) => answers[quiz.statements[i].id]?.value);
       _expectPoint(got, expected['you'] as List, 'you');
-      expect(answers.values.where((a) => a.answered).length, expected['answered']);
+      expect(answered, expected['answered']);
     });
 
-    test('statements are asked in the same order', () {
-      expect(askingOrder(quiz.statements), expected['order']);
+    test('statements are asked in the same order: this parliament first, then earlier ones', () {
+      final order = fullOrder(quiz.statements, quiz.coreCount);
+      expect(order, expected['order']);
+      expect(order.take(quiz.coreCount).every((i) => i < quiz.coreCount), isTrue);
     });
   });
 }

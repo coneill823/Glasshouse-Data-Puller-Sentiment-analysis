@@ -50,28 +50,51 @@ void main() {
     await press(tester, find.widgetWithText(InkWell, 'Islington North'));
     expect(find.text('1 REPRESENTATIVE'), findsOneWidget);
 
-    // Five answers, then a match.
-    await tab(tester, 'Quiz');
-    await press(tester, find.text('Start the quiz'));
-    for (final answer in ['Strongly agree', 'Agree', 'Neutral', 'Disagree', 'Strongly disagree']) {
-      await press(tester, find.text(answer));
-      await tester.pump(const Duration(milliseconds: 500)); // it moves on by itself
-      await tester.pumpAndSettle();
+    // Five answers about the House of Commons, then a match.
+    const answers = ['Strongly agree', 'Agree', 'Neutral', 'Disagree', 'Strongly disagree'];
+    Future<void> answerFive() async {
+      for (final answer in answers) {
+        await press(tester, find.text(answer));
+        await tester.pump(const Duration(milliseconds: 500)); // it moves on by itself
+        await tester.pumpAndSettle();
+      }
     }
+
+    await tab(tester, 'Quiz');
+    await press(tester, find.widgetWithText(FilledButton, 'Start')); // the first part: the Commons
+    expect(find.textContaining('STATEMENT 1 OF'), findsOneWidget);
+    await answerFive();
     expect(find.textContaining('5 answered'), findsOneWidget);
     await press(tester, find.text('See my match'));
     await appears(tester, find.text('YOUR MP'));
     expect(find.textContaining('%'), findsWidgets);
 
+    // A devolved parliament has questions of its own, and they match its
+    // members: several of them for one place, not only an MP.
+    await tab(tester, 'Reps');
+    await tester.enterText(find.byType(TextField), 'Belfast South');
+    await tester.pumpAndSettle();
+    await press(tester, find.widgetWithText(InkWell, 'Belfast South'));
+    expect(find.byType(MemberCard), findsAtLeastNWidgets(3));
+    await press(tester, find.text('Answer the Northern Ireland Assembly questions'));
+    expect(find.textContaining('VOTE 1 OF'), findsOneWidget);
+    await answerFive();
+    await press(tester, find.text('See my match'));
+    await appears(tester, find.text('YOUR MLA'));
+    expect(find.text('MLAS WHO VOTED MOST LIKE YOU'), findsOneWidget);
+
     // Close the app and open it again: the phone's own storage must have
-    // kept the place and the answers.
+    // kept the place, the answers, and where each part of the quiz had got to.
     await tester.pumpWidget(const SizedBox());
     await tester.pumpAndSettle();
     await tester.pumpWidget(GlasshouseApp(key: UniqueKey()));
     await appears(tester, find.text('Who represents you?'));
-    expect(find.text('Islington North'), findsWidgets);
+    expect(find.text('Belfast South'), findsWidgets);
     await tab(tester, 'Quiz');
     expect(find.textContaining('5 answered'), findsOneWidget);
-    expect(find.textContaining('STATEMENT 6 OF'), findsOneWidget);
+    expect(find.textContaining('VOTE 6 OF'), findsOneWidget);
+    await press(tester, find.widgetWithText(TextButton, 'Northern Ireland Assembly'));
+    // Back at the list of parts: five answered in each of the two taken.
+    expect(find.textContaining(RegExp(r'^5 of \d+ answered$')), findsNWidgets(2));
   });
 }

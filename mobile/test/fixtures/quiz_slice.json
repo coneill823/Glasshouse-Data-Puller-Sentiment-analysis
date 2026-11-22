@@ -1672,6 +1672,48 @@
      "",
      ""
     ]
+   },
+   {
+    "id": 25393,
+    "name": "Judith Cummins",
+    "party": "Labour",
+    "area": "Bradford South",
+    "pos": [
+     null,
+     null,
+     null,
+     null,
+     -1.0,
+     null,
+     null,
+     null
+    ],
+    "votes": [
+     "xxx",
+     "...x",
+     ".xxx",
+     "xxxx",
+     ".............axxaaaaxxaxaaaaaaaxxxxxaaxx",
+     "xx",
+     "xxx",
+     "x"
+    ],
+    "morePos": [
+     1.0,
+     null,
+     -0.789,
+     0.5,
+     -1.0,
+     1.0
+    ],
+    "moreVotes": [
+     ".fxxxx",
+     "xxxx",
+     "aaaaaaaaaafxxfaaaxaaaxxxxa",
+     "............fxxfxaxfffffaffxaaxffffafxxxxfxxx",
+     "aaaaaaaaaaaaaaaaaa",
+     "ffx"
+    ]
    }
   ],
   "former": [
@@ -1857,6 +1899,7 @@
     "pct": 75.0,
     "overlap": 2,
     "eligible": 7,
+    "shown": false,
     "enough": false,
     "compass": [
      1.0,
@@ -1869,6 +1912,7 @@
     "pct": 38.888888889,
     "overlap": 7,
     "eligible": 7,
+    "shown": true,
     "enough": true,
     "compass": [
      -1.0,
@@ -1881,6 +1925,7 @@
     "pct": 58.333333333,
     "overlap": 5,
     "eligible": 7,
+    "shown": true,
     "enough": true,
     "compass": [
      -1.0,
@@ -1893,6 +1938,7 @@
     "pct": 68.911538462,
     "overlap": 11,
     "eligible": 12,
+    "shown": true,
     "enough": true,
     "compass": [
      -1.0,
@@ -1905,6 +1951,7 @@
     "pct": 68.653846154,
     "overlap": 11,
     "eligible": 12,
+    "shown": true,
     "enough": true,
     "compass": [
      -1.0,
@@ -1917,6 +1964,7 @@
     "pct": 74.883333333,
     "overlap": 10,
     "eligible": 12,
+    "shown": true,
     "enough": true,
     "compass": [
      -1.0,
@@ -1929,6 +1977,7 @@
     "pct": 50.0,
     "overlap": 6,
     "eligible": 9,
+    "shown": true,
     "enough": true,
     "compass": [
      -1.0,
@@ -1941,6 +1990,7 @@
     "pct": null,
     "overlap": 0,
     "eligible": 12,
+    "shown": false,
     "enough": false,
     "compass": [
      null,
@@ -1953,6 +2003,7 @@
     "pct": null,
     "overlap": 0,
     "eligible": 0,
+    "shown": false,
     "enough": false,
     "compass": [
      null,
@@ -1961,10 +2012,24 @@
      0.0
     ]
    },
+   "25393": {
+    "pct": 70.183333333,
+    "overlap": 5,
+    "eligible": 12,
+    "shown": true,
+    "enough": false,
+    "compass": [
+     -1.0,
+     -0.8945,
+     1.0,
+     2.0
+    ]
+   },
    "10630": {
     "pct": 73.48125,
     "overlap": 7,
     "eligible": 8,
+    "shown": true,
     "enough": true,
     "compass": [
      -1.0,
@@ -1977,6 +2042,7 @@
     "pct": 64.935,
     "overlap": 8,
     "eligible": 8,
+    "shown": true,
     "enough": true,
     "compass": [
      1.0,

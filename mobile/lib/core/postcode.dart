@@ -45,6 +45,12 @@ class PostcodeLookup {
   final http.Client _client;
 
   static const String _base = 'https://api.postcodes.io';
+
+  /// The kinds of area an election can be held for.
+  static const List<String> _areaFields = [
+    'admin_ward', 'ced', 'admin_district', 'admin_county',
+    'parliamentary_constituency_2024', 'pfa',
+  ];
   static const Duration _timeout = Duration(seconds: 12);
 
   static const String welshNote =
@@ -82,6 +88,14 @@ class PostcodeLookup {
     // The Commons seat is matched on its official code, never on its name.
     final codes = res['codes'];
     final gss = codes is Map ? codes['parliamentary_constituency_2024'] : null;
+    // Every area the postcode falls in, by official code: upcoming elections
+    // are found by these. "…99999999" is the register's way of saying none.
+    final areaCodes = <String>{
+      if (codes is Map)
+        for (final field in _areaFields)
+          if (codes[field] is String && !(codes[field] as String).endsWith('99999999'))
+            codes[field] as String,
+    };
     final uk = data.areaByGss[gss];
     if (uk != null) keys.add(uk.key);
 
@@ -95,6 +109,12 @@ class PostcodeLookup {
         ]) {
           final a = data.areaByName['Scottish Parliament||${norm(name?.toString())}'];
           if (a != null) keys.add(a.key);
+        }
+        final scottish = s['codes'];
+        if (scottish is Map) {
+          for (final code in scottish.values) {
+            if (code is String && code.isNotEmpty) areaCodes.add(code);
+          }
         }
       } on PostcodeException {
         notes.add(scottishNote);
@@ -117,6 +137,13 @@ class PostcodeLookup {
 
     final label = (res['postcode'] ?? pc).toString();
     if (keys.isEmpty) throw PostcodeException(PostcodeFailure.noMatch, label);
-    return Place(label: label, keys: keys, notes: notes);
+    return Place(
+      label: label,
+      keys: keys,
+      notes: notes,
+      codes: areaCodes.toList(),
+      ward: (res['admin_ward'] ?? '').toString(),
+      district: codes is Map ? (codes['admin_district'] ?? '').toString() : '',
+    );
   }
 }

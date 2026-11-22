@@ -29,23 +29,49 @@ class Match(unittest.TestCase):
         self.assertTrue(qm.enough(r, answered=10))
 
     def test_being_there_and_not_voting_does_count(self):
-        # Same answers, but they were a member throughout and missed half.
+        # Same answers, but they were a member throughout and missed most.
         positions = [1] * 3 + [None] * 7
         votes = ["f"] * 3 + ["x"] * 7
         r = qm.match(positions, votes, {i: (1, False) for i in range(10)})
         self.assertEqual((r["overlap"], r["eligible"]), (3, 10))
         self.assertFalse(qm.enough(r, answered=10))
 
+    def test_a_partial_record_is_shown_but_not_ranked(self):
+        # An MP who stays out of votes on laws for England: there for all
+        # twelve, voted in five. Their constituents see the figure; it does
+        # not sit in a ranking above members with a full record.
+        positions = [1] * 5 + [None] * 7
+        votes = ["f"] * 5 + ["x"] * 7
+        r = qm.match(positions, votes, {i: (1, False) for i in range(12)})
+        self.assertEqual((r["pct"], r["overlap"], r["eligible"]), (100.0, 5, 12))
+        self.assertTrue(qm.shown(r, answered=12))
+        self.assertFalse(qm.enough(r, answered=12))
+        # Exactly half is enough to be ranked.
+        r = qm.match([1] * 6 + [None] * 6, ["f"] * 6 + ["x"] * 6, {i: (1, False) for i in range(12)})
+        self.assertTrue(qm.enough(r, answered=12))
+
     def test_a_match_needs_five_statements_in_common(self):
         r = qm.match([1] * 4, ["f"] * 4, {i: (1, False) for i in range(4)})
-        self.assertTrue(qm.enough(r, answered=4))        # everything answered so far
+        self.assertTrue(qm.shown(r, answered=4))         # everything answered so far
+        self.assertTrue(qm.enough(r, answered=4))
         r = qm.match([1] * 4 + [None] * 4, ["f"] * 4 + [""] * 4, {i: (1, False) for i in range(8)})
-        self.assertFalse(qm.enough(r, answered=8))       # four is not five
+        self.assertFalse(qm.shown(r, answered=8))        # four is not five
+        self.assertFalse(qm.enough(r, answered=8))
 
     def test_someone_who_never_votes_has_no_match(self):
         r = qm.match([None] * 6, ["x"] * 6, {i: (1, False) for i in range(6)})
         self.assertIsNone(r["pct"])
+        self.assertFalse(qm.shown(r, answered=6))
         self.assertFalse(qm.enough(r, answered=6))
+
+    def test_nothing_is_ranked_that_is_not_shown(self):
+        for overlap in range(0, 13):
+            for there in range(overlap, 13):
+                positions = [1] * overlap + [None] * (12 - overlap)
+                votes = ["f"] * overlap + ["x"] * (there - overlap) + [""] * (12 - there)
+                r = qm.match(positions, votes, {i: (1, False) for i in range(12)})
+                if qm.enough(r, answered=12):
+                    self.assertTrue(qm.shown(r, answered=12), (overlap, there))
 
 
 class Compass(unittest.TestCase):
@@ -90,7 +116,9 @@ class Fixture(unittest.TestCase):
         f = json.loads(qm.FIXTURE.read_text(encoding="utf-8"))
         people = f["expected"]["members"].values()
         self.assertTrue(any(m["enough"] for m in people))
-        self.assertTrue(any(not m["enough"] for m in people))
+        self.assertTrue(any(not m["shown"] for m in people))
+        self.assertTrue(any(m["shown"] and not m["enough"] for m in people),
+                        "nobody in the slice has a match that is shown but not ranked")
         self.assertTrue(any(m["eligible"] < f["expected"]["answered"] for m in people),
                         "nobody in the slice was elected after a statement was voted on")
         self.assertTrue(f["quiz"]["former"] and f["quiz"]["moreStatements"])

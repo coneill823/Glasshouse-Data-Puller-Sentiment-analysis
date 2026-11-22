@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glasshouse/core/models.dart';
+import 'package:glasshouse/core/place.dart';
 import 'package:glasshouse/core/postcode.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -118,5 +119,71 @@ void main() {
         throwsA(isA<PostcodeException>()
             .having((e) => e.kind, 'kind', PostcodeFailure.noMatch)
             .having((e) => e.message, 'message', contains('IM1 1AA'))));
+  });
+
+  group('what else a postcode tells us', () {
+    test('every area it falls in is kept by official code, and the ward by name', () async {
+      final place = await lookup(main: () => ok({
+            'postcode': 'LS1 1UR', 'country': 'England', 'admin_ward': 'Little London & Woodhouse',
+            'codes': {
+              'admin_ward': 'E05011400', 'admin_district': 'E08000035',
+              'admin_county': 'E99999999',            // "there is no county here"
+              'ced': 'E99999999',
+              'parliamentary_constituency_2024': gssOf('Leeds Central and Headingley'),
+              'pfa': 'E23000010', 'lsoa': 'E01033010', 'nuts': 'TLE42',
+            },
+          })).find('LS1 1UR');
+      expect(place.isPostcode, isTrue);
+      expect((place.ward, place.district), ('Little London & Woodhouse', 'E08000035'));
+      expect(place.codes.toSet(), {
+        'E05011400', 'E08000035', gssOf('Leeds Central and Headingley'), 'E23000010',
+      });
+    });
+
+    test('a Scottish postcode also carries its Holyrood codes', () async {
+      final place = await lookup(
+        main: () => ok({
+          'postcode': 'G12 8QQ', 'country': 'Scotland', 'admin_ward': 'Hillhead',
+          'codes': {
+            'admin_ward': 'S13002977', 'admin_district': 'S12000049',
+            'parliamentary_constituency_2024': gssOf('Glasgow North'),
+          },
+        }),
+        scotland: () => ok({
+          'scottish_parliamentary_constituency': 'Glasgow Kelvin and Maryhill',
+          'scottish_parliamentary_region': 'Glasgow',
+          'codes': {'scottish_parliamentary_constituency': 'S16000117',
+                    'scottish_parliamentary_region': 'S17000017'},
+        }),
+      ).find('G12 8QQ');
+      expect(place.codes, containsAll(['S13002977', 'S12000049', 'S16000117', 'S17000017']));
+    });
+
+    test('a place chosen by name knows its constituency and nothing more local', () {
+      final seat = data.areas.firstWhere((a) => a.parliament == kUkParliament && a.area == 'Glasgow North');
+      final place = Place.area(seat);
+      expect(place.isPostcode, isFalse);
+      expect(place.codes, [gssOf('Glasgow North')]);
+      expect((place.ward, place.district), ('', ''));
+    });
+
+    test('all of it survives being saved', () async {
+      final place = await lookup(main: () => ok({
+            'postcode': 'SW1A 0AA', 'country': 'England', 'admin_ward': "St James's",
+            'codes': {
+              'admin_ward': 'E05013806', 'admin_district': 'E09000033',
+              'parliamentary_constituency_2024': gssOf('Cities of London and Westminster'),
+            },
+          })).find('SW1A 0AA');
+      final again = Place.fromJson(
+          jsonDecode(jsonEncode(place.toJson())) as Map<String, dynamic>);
+      expect((again.label, again.ward, again.district), (place.label, place.ward, place.district));
+      expect(again.codes, place.codes);
+      expect(again.keys, place.keys);
+      // and a place saved before any of this existed still loads
+      final old = Place.fromJson({'label': 'Old', 'keys': ['a||b']});
+      expect(old.codes, isEmpty);
+      expect((old.ward, old.isPostcode), ('', false));
+    });
   });
 }
