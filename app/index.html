@@ -1758,7 +1758,9 @@ function renderMatch(){
     block.appendChild(el("h3","bhead",house(set.parliament)));
     block.appendChild(el("p","lede","From the "+answered+" of its "+set.statements.length+
       " votes you answered. Each is one vote it actually held: you said how you would have voted, and this is how they did."));
-    if(qm) block.appendChild(headline(set,qm,mine[qm.id]?"yours":"chosen"));
+    // yours, one you picked, or simply whoever voted most like you
+    if(qm) block.appendChild(headline(set,qm, mine[qm.id] ? "yours"
+      : set.byId[FOCUS[set.parliament]] ? "chosen" : "closest"));
     var grid=el("div","grid2");
     grid.appendChild(closest(set,ranked));
     block.appendChild(grid);
@@ -1836,7 +1838,8 @@ function headline(set,qm,why){
   hero.appendChild(el("div","big", ok ? Math.round(fm.pct)+"%" : "—"));
   var txt=el("div");
   txt.appendChild(el("p","eyebrow", why==="yours" ? "Your "+role
-    : why==="chosen" ? (qm.former?"Former ":"Selected ")+role : "Your closest match in the House"));
+    : why==="chosen" ? (qm.former?"Former ":"Selected ")+role
+    : set.commons ? "Your closest match in the House" : "The "+role+" who voted most like you"));
   txt.appendChild(el("h3",null,qm.name));
   txt.appendChild(el("p","small muted",partyLabel(qm.party)+" · "+qm.area+(qm.former&&qm.to?" · "+qm.from+"–"+qm.to:"")));
   hero.appendChild(txt); panel.appendChild(hero);

@@ -377,6 +377,9 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Whether the visitor picked the member a legislature's results are about.
+  bool pickedIn(QuizSet set) => set.byId[_focusIn[set.parliament]] != null;
+
   /// Goes to the match screen, at one member's results.
   void showMatchFor(QuizSet set, int memberId) {
     if (set.isCommons) {

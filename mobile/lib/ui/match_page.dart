@@ -170,7 +170,12 @@ class _MatchPageState extends State<MatchPage> {
         ),
         _YourRepresentatives(onShow: _show),
         if (focus != null) ...[
-          SizedBox(key: _block(commons), height: 12),
+          SizedBox(key: _block(commons), height: 24),
+          Semantics(
+            header: true,
+            child: Text('House of Commons', style: GlassText.display(24, color: context.glass.ink)),
+          ),
+          const SizedBox(height: 12),
           _Headline(focus),
           const SizedBox(height: 12),
           _CompassPanel(
@@ -692,7 +697,16 @@ class _ChamberResults extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         if (focus != null) ...[
-          _ChamberHeadline(set, focus, isYours: mine.contains(focus.id)),
+          _ChamberHeadline(
+            set,
+            focus,
+            // Yours, one you picked, or simply whoever voted most like you.
+            why: mine.contains(focus.id)
+                ? FocusReason.yours
+                : state.pickedIn(set)
+                    ? FocusReason.chosen
+                    : FocusReason.closest,
+          ),
           const SizedBox(height: 12),
         ],
         _Closest(set, ranked, onShow: onShow),
@@ -720,11 +734,11 @@ class _ChamberResults extends StatelessWidget {
 }
 
 class _ChamberHeadline extends StatelessWidget {
-  const _ChamberHeadline(this.set, this.member, {required this.isYours});
+  const _ChamberHeadline(this.set, this.member, {required this.why});
 
   final QuizSet set;
   final QuizMember member;
-  final bool isYours;
+  final FocusReason why;
 
   @override
   Widget build(BuildContext context) {
@@ -758,7 +772,11 @@ class _ChamberHeadline extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Eyebrow(isYours ? 'Your $role' : 'Selected $role'),
+                    Eyebrow(switch (why) {
+                      FocusReason.yours => 'Your $role',
+                      FocusReason.chosen => 'Selected $role',
+                      FocusReason.closest => 'The $role who voted most like you',
+                    }),
                     const SizedBox(height: 3),
                     Text(member.name, style: GlassText.display(20, color: c.ink)),
                     const SizedBox(height: 2),

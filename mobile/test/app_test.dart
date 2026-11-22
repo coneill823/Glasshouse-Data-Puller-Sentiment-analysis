@@ -492,6 +492,12 @@ void main() {
       await press(tester, onMatch(find.text(stranger.member.name)));
       expect(find.text('SELECTED MLA'), findsOneWidget);
 
+      // A parliament you are not represented in is about whoever is closest, and says so.
+      answerPart('Scottish Parliament');
+      await tester.pumpAndSettle();
+      expect(find.text('THE MSP WHO VOTED MOST LIKE YOU'), findsOneWidget);
+      expect(find.text('SELECTED MSP'), findsNothing);
+
       // Each row opens onto the vote itself.
       final rows = find.byWidgetPredicate(
           (w) => w is Disclosure && w.key.toString().contains('cmp-${stranger.member.id}-'),
