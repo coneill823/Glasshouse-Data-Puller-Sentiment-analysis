@@ -114,6 +114,13 @@ class PartyLineRules(unittest.TestCase):
         self.assertEqual(r["D"]["rebellions"], 1)
         self.assertEqual(r["C"]["with_party"], 1)
 
+    def test_a_title_is_words_not_markup(self):
+        self.assertEqual(record.plain_title("Brexit: Joint Committee - <i>Motion to Agree</i>"),
+                         "Brexit: Joint Committee - Motion to Agree")
+        self.assertEqual(record.plain_title("P&amp;O Ferries  and\nEmployment Rights"),
+                         "P&O Ferries and Employment Rights")
+        self.assertEqual(record.plain_title(None), "")
+
     def test_whip_groups(self):
         for unwhipped in ("", "independent", "Independent", "speaker", "crossbench",
                           "independent-unionist", None):

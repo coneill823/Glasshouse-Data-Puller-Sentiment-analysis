@@ -117,11 +117,11 @@ class AboutPage extends StatelessWidget {
             'party\'s average, a member must also have voted on at least half of what you '
             'answered, out of the votes held while they were a member. Someone elected in '
             '2024 could not have voted on tuition fees in 2004, and that is not held against '
-            'them. Someone who was a member and did not vote has left a gap. An MP from '
-            'Northern Ireland or Scotland who stays out of votes on laws for England may '
-            'have voted on a third of what you answered: you still see their figure and '
-            'what it rests on, marked as a partial picture, but it is not ranked above '
-            'members with a full record.'),
+            'them. Someone who was a member and did not vote has left a gap. A few sitting '
+            'MPs have voted on under half of this parliament\'s statements: the Speaker and '
+            'deputies, who do not vote, and some who take part in few votes. You still see '
+            'their figure and what it rests on, marked as a partial picture, but it is not '
+            'ranked above members with a full record.'),
 
         const _Heading('What a vote does and does not mean'),
         const _Para('A vote is not an opinion. Most votes are whipped: the typical member votes '

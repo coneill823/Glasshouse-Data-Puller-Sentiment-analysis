@@ -106,10 +106,9 @@ bool showable(MatchResult r, int answered) =>
 ///
 /// Someone elected in 2024 cannot have voted on tuition fees in 2004; that is
 /// not a gap in their record. Someone who was a member and did not vote has
-/// left a gap. An MP who stays out of votes on laws for another part of the
-/// country may have voted on a third of what was asked: the people they
-/// represent still see that figure and what it rests on, but it does not sit
-/// in a ranking above members with a full record.
+/// left a gap. A few sitting MPs have voted on under half of what is asked:
+/// the people they represent still see that figure and what it rests on, but
+/// it does not sit in a ranking above members with a full record.
 bool enoughOverlap(MatchResult r, int answered) =>
     showable(r, answered) && r.overlap * 2 >= r.eligible;
 

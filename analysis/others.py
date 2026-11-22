@@ -87,12 +87,11 @@ def former_members(people, chamber: str, records: dict, sitting: set) -> list:
 
 def peers(cache_dir: Path, people, parliament_began: str) -> tuple:
     """(sitting peers with their record, the chamber's summary)."""
-    import html
 
     divisions = mysociety.load_table(cache_dir, "divisions")
     divisions = divisions[divisions["chamber_slug"] == "lords"].copy()
     divisions["date"] = divisions["date"].astype(str)
-    divisions["division_name"] = divisions["division_name"].map(lambda s: html.unescape(s or ""))
+    divisions["division_name"] = divisions["division_name"].map(record.plain_title)
     votes = mysociety.load_table(cache_dir, "votes")
     votes = votes[votes["division_key"].isin(set(divisions["key"]))]
     # The Lords has no elections, so "this term" is the current parliament.

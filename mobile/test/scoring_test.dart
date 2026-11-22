@@ -86,8 +86,7 @@ void main() {
     });
 
     test('a partial record is shown, with its basis, but not ranked', () {
-      // There for all twelve, voted in five: an MP who stays out of votes on
-      // laws for another part of the country.
+      // A member for all twelve who voted in five.
       const partial = MatchResult(80, 5, 12);
       expect(showable(partial, 12), isTrue);
       expect(enoughOverlap(partial, 12), isFalse);

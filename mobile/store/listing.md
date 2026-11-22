@@ -25,37 +25,47 @@ the UK, built from what they did rather than what they said.
 FIND YOUR REPRESENTATIVES
 Type a postcode, a constituency or a name. See how often each of your
 representatives votes, every time they broke with their party, and what they
-spend their time on.
+spend their time on. Former members and the House of Lords are there by name.
 
 TAKE THE QUIZ
-36 statements, each one something MPs have really voted on in this
-parliament. Say how far you agree. Skip any you like, and mark the ones that
-matter most to you.
+Statements that MPs have really voted on, and the votes the Scottish
+Parliament, the Senedd and the Northern Ireland Assembly actually held. Say
+how far you agree. Skip any you like, and mark the ones that matter most to
+you.
 
 SEE YOUR MATCH
-How closely your MP's votes line up with your answers, statement by statement,
-with every vote behind each figure one tap away. See which MPs and parties
-voted most like you, and where you sit on a compass of the whole House.
+How closely each of your representatives' votes line up with your answers,
+in each parliament, one vote at a time, with every vote behind each figure
+one tap away. See which members and parties voted most like you, and where
+you sit on a compass of the House of Commons.
+
+WHO CAN I VOTE FOR?
+Elections coming up where you live and who is standing, from Democracy Club.
+Nobody is scored for standing: a candidate has done nothing in office yet.
 
 NOTHING HIDDEN
-Only votes that used the powers of Parliament count towards a match. Which
-votes belong to which issue is decided by TheyWorkForYou, run by the
-non-partisan charity mySociety — not by us. The About screen explains every
-number and what it cannot tell you.
+Only what people did in office counts: no news coverage, no social media, no
+opinions. For the House of Commons, which votes belong to which issue is
+decided by TheyWorkForYou, run by the non-partisan charity mySociety — not by
+us. The About screen explains every number and what it cannot tell you.
 
 PRIVATE BY DESIGN
 No account, no adverts, no tracking. Your answers never leave your phone.
 
 Glasshouse is independent. It is not affiliated with, or endorsed by, any
-parliament, government, political party or mySociety, and it does not
-represent any government body.
+parliament, council, government, political party, mySociety or Democracy
+Club, and it does not represent any government body.
 
 Sources: TheyWorkForYou Votes and the parlparse register by mySociety
 (https://votes.theyworkforyou.com); UK Parliament (https://www.parliament.uk);
 the Scottish Parliament (https://www.parliament.scot); Senedd Cymru
 (https://senedd.wales); the Northern Ireland Assembly
-(https://www.niassembly.gov.uk). Contains Parliamentary information licensed
-under the Open Parliament Licence v3.0.
+(https://www.niassembly.gov.uk); elections and candidates from Democracy Club
+(https://democracyclub.org.uk); councillors from Belfast City Council
+(https://minutes.belfastcity.gov.uk) and Cardiff Council
+(https://cardiff.moderngov.co.uk). Contains Parliamentary information
+licensed under the Open Parliament Licence v3.0 and public sector information
+licensed under the Open Government Licence v3.0.
 
 ## Details
 

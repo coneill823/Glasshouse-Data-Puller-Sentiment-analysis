@@ -36,11 +36,11 @@ Two tests decide what is done with it.
 The second test is about fairness between members. Someone elected in 2024
 cannot have voted on tuition fees in 2004; that is not a gap in their record
 and must not count against them. But someone who was a member and did not
-vote has left a gap. An MP from Northern Ireland or Scotland who stays out of
-votes on laws for England may have voted on a third of what you answered: a
-person they represent should still see that figure, and what it rests on. It
-should not sit in a ranking above members with a full record, where five
-lucky agreements would beat thirty real ones.
+vote has left a gap. A few sitting MPs have voted on under half of this
+parliament's statements: the Speaker and deputies, who do not vote, and some
+who take part in few votes. A person they represent should still see that
+figure, and what it rests on. It should not sit in a ranking above members
+with a full record, where five lucky agreements would beat thirty real ones.
 """
 from __future__ import annotations
 

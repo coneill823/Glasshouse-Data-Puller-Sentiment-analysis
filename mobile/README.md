@@ -31,7 +31,7 @@ Install [Flutter](https://docs.flutter.dev/get-started/install) 3.50 or newer, t
 cd mobile
 flutter pub get
 flutter run            # on a connected phone or an emulator
-flutter test           # 66 tests, about fifteen seconds
+flutter test           # 122 tests, about a minute
 flutter analyze
 flutter test integration_test   # drives the real app on the attached phone
 ```
@@ -39,7 +39,7 @@ flutter test integration_test   # drives the real app on the attached phone
 | Where | What |
 | --- | --- |
 | `lib/core/` | Data, scoring, postcode lookup, saved answers. No screens. |
-| `lib/ui/` | The four screens, the compass, the full-record page. |
+| `lib/ui/` | The four screens, the compass, the full-record page, and `local.dart`: elections and councillors for a place. |
 | `lib/theme.dart` | Colours and type, light and dark. |
 | `assets/data/` | The two data files the app ships with. |
 | `test/` | Unit tests and tests that drive the whole app. |
@@ -48,12 +48,23 @@ flutter test integration_test   # drives the real app on the attached phone
 
 ### The same numbers as the website
 
-The match percentage, the compass and the order the statements are asked in
-are computed by `lib/core/scoring.dart`, a port of the arithmetic in
-`app/index.html`. `test/scoring_test.dart` checks the port against results
-computed by the Python build on a frozen slice of real MPs, so the app and the
-website cannot quietly drift apart. If you change how anything is scored,
-change it in all three places and regenerate `test/fixtures/quiz_slice.json`.
+The match percentage, when it is shown and when it is ranked, the compass
+and the order the statements are asked in are computed by
+`lib/core/scoring.dart`. The reference for all of it is
+`analysis/quizmath.py` in the repository root, which the website follows too.
+`python -m analysis.quizmath` writes `test/fixtures/quiz_slice.json`: a frozen
+slice of real MPs, sitting and former, with the results the reference gives.
+`test/scoring_test.dart` must reproduce every number in it, so the app and
+the website cannot quietly drift apart. If you change how anything is scored,
+change the reference first, regenerate the slice, then make this file and
+`app/index.html` agree with it.
+
+### Tests that do not depend on today's news
+
+Elections come and go, so the tests do not rely on which ones are in the
+register on the day the data was built. `test/support.dart` adds an invented
+ward, with a by-election and a council, to the real data; the tests for
+elections, candidates and councillors use that.
 
 ### Keeping the data fresh
 
@@ -92,6 +103,15 @@ These are yours to decide or do; none of them can be done from here.
   credit the app already gives. Their policy groupings — the mapping of votes
   to quiz statements — carry no explicit licence that we could find, so ask
   them before launch (see `docs/METHODS.md`).
+- **Democracy Club's terms.** Elections and candidates are CC BY 4.0, credited
+  on the About screen and on every ballot. Their data covers real people
+  standing for office, so tell them what you are building before launch, and
+  read the section of the privacy draft on people who appear in the app: as
+  the publisher you would be the one answering a candidate or councillor who
+  says something shown about them is wrong.
+- **The councils.** Councillors and attendance are read from two councils' own
+  public committee pages. That is a trial; before a public launch, ask each
+  council you include.
 - **Shop listing.** A name, descriptions, a category and a support email.
   [`store/listing.md`](store/listing.md) is a draft of the wording, and
   [`store/`](store/) holds the icons, the Play banner and screenshots at the
@@ -162,6 +182,14 @@ simulator.
 - A Welsh postcode finds your MP but not your Senedd constituency; search for
   that by name. (postcodes.io, which the app uses, does not return Senedd
   seats.)
-- The quiz covers the House of Commons only, for the reason given on the About
-  screen.
+- The questions for the Scottish Parliament, the Senedd and the Assembly are
+  single votes, most of them on motions that express a view; the About screen
+  says what that is worth. Members first elected in May 2026 have too few
+  votes to be matched yet, and the Senedd's questions have titles but not the
+  motion's wording.
+- Candidates are listed and never scored. Councillors are shown for two
+  councils only, by name, party and attendance.
+- Looking a postcode up on a real phone over a real connection has not been
+  tried by anyone yet. The automated tests use a stand-in for the lookup
+  service; the first thing to try on your own phone is your own postcode.
 - English only.

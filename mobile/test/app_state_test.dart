@@ -293,8 +293,8 @@ void main() {
   });
 
   group('a member who skipped most of it', () {
-    // There are a handful in the Commons: mostly MPs from Northern Ireland and
-    // Scotland, who stay out of votes on laws for England.
+    // There are a handful in the Commons: the Speaker and deputies, who do
+    // not vote, and some MPs who take part in few votes.
     QuizMember partialMp() => quiz.members.firstWhere((m) {
           final core = m.pos.take(quiz.commons.coreCount);
           final voted = core.where((p) => p != null).length;

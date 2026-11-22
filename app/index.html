@@ -273,6 +273,40 @@
     .pbar{grid-template-columns:minmax(0,104px) minmax(0,1fr) 44px}
     .big{font-size:44px}
   }
+  /* ---- people found by name, and what is local to a place ---- */
+  .hitlabel{margin:12px 0 0}
+  .place-head .linkbtn{margin-left:auto}
+  .chamber>.note{margin-top:10px}
+  .note.lim{max-width:72ch}
+  .plain{list-style:none; margin:0; padding:0}
+  .plain li{padding:8px 0; border-bottom:1px solid var(--line); font-size:14px}
+  .plain .pname{font-weight:600}
+  .plain .sub{display:block; font-size:12.5px; color:var(--muted)}
+  .cllr{font-size:14px; margin:12px 0 4px}
+  .cllr:first-child{margin-top:0}
+  .metric.wide{grid-template-columns:minmax(0,132px) minmax(0,1fr) 78px}
+
+  /* ---- the parts of the quiz ---- */
+  .parts{display:grid; gap:18px; margin-top:18px;
+         grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))}
+  .parts>.panel{margin-top:0; max-width:none}
+  .part{display:flex; flex-direction:column}
+  .part>.row{margin-top:auto; padding-top:14px}
+  .motion{border-left:2px solid var(--line); padding-left:14px; font-size:14px; color:var(--ink-2)}
+  .motion .linkbtn{margin-top:6px}
+
+  /* ---- results, one parliament at a time ---- */
+  .block{margin-top:38px; scroll-margin-top:76px}
+  .bhead{font-family:var(--f-display); font-size:clamp(21px,3vw,27px); font-weight:600}
+  .repgroup{margin-top:18px}
+  .repgroup>h4{font-size:14px; font-weight:600}
+  .repgroup>.small{margin-top:4px; max-width:68ch}
+  .repgroup>.btn{margin-top:10px}
+  .rank .v.big2{font-family:var(--f-body); font-size:20px; font-weight:700}
+  @media (max-width:640px){
+    .metric.wide{grid-template-columns:minmax(0,104px) minmax(0,1fr) 70px}
+    .block{scroll-margin-top:12px}
+  }
   @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
@@ -296,19 +330,22 @@
     <p class="lede">Find your representatives and see their record: how often they vote, when
       they have broken with their party, and what they spend their time on. Then
       <button class="linkbtn" type="button" data-go="quiz" style="font-size:inherit">take the quiz</button>
-      to see how closely your MP's votes match your own views.</p>
+      to see how closely their votes match your own views.</p>
 
     <div class="finder">
-      <label class="eyebrow" for="place-search">Postcode, constituency, or a representative's name</label>
+      <label class="eyebrow" for="place-search">Postcode, constituency, or a politician's name</label>
       <form class="searchrow" id="place-form">
         <input id="place-search" type="search" autocomplete="off" spellcheck="false"
                placeholder="e.g. BT7 1NN, Glasgow North, Ynys Môn">
         <button class="btn" type="submit" id="place-go">Find</button>
       </form>
       <ul class="hits" id="hits"></ul>
+      <p class="eyebrow hitlabel" id="people-label" hidden>People not in a seat now</p>
+      <ul class="hits" id="people-hits"></ul>
       <p class="msg" id="search-msg" role="status" aria-live="polite"></p>
     </div>
 
+    <div class="place" id="opened" hidden></div>
     <div class="place" id="place"></div>
   </section>
 
@@ -317,17 +354,20 @@
     <h2>Where do you stand?</h2>
     <p class="lede" id="quiz-lede"></p>
 
-    <div class="panel" id="quiz-intro">
-      <p>Every statement is something MPs have <b>actually voted on</b> in this parliament. Say how
-        you feel about each one, and we compare your answers with how each MP used their vote —
-        not with what they have said.</p>
-      <p class="small muted">Your answers stay in this browser. Nothing you choose is sent or
-        stored anywhere else. You can skip any statement and stop whenever you like; more answers
-        make the match more reliable.</p>
-      <div class="row"><button class="btn" type="button" id="quiz-start">Start the quiz</button></div>
+    <div id="quiz-parts">
+      <div class="panel" id="quiz-intro">
+        <p>Everything here is something members have <b>actually voted on</b>. Say how you feel,
+          and we compare your answers with how each of them used their vote — not with what they
+          have said.</p>
+        <p class="small muted">Your answers stay in this browser. Nothing you choose is sent or
+          stored anywhere else. Skip anything and stop whenever you like; more answers make a
+          match more reliable.</p>
+      </div>
+      <div class="parts" id="parts"></div>
     </div>
 
     <div class="panel" id="quiz-card" hidden>
+      <div><button class="linkbtn" type="button" id="q-leave"></button></div>
       <div class="qmeta">
         <span class="eyebrow" id="q-count"></span>
         <span class="chip" id="q-group"></span>
@@ -335,11 +375,12 @@
       </div>
       <div class="progress" aria-hidden="true"><i id="q-bar" style="width:0"></i></div>
       <div>
-        <p class="qlead">I support…</p>
+        <p class="qlead" id="q-lead">I support…</p>
         <p class="qtext" id="q-text"></p>
       </div>
+      <div class="motion" id="q-motion" hidden></div>
       <details class="qmore" id="q-more">
-        <summary>What did MPs vote on?</summary>
+        <summary id="q-more-sum">What did MPs vote on?</summary>
         <div id="q-detail"></div>
       </details>
       <div class="answers" id="q-answers" role="radiogroup" aria-labelledby="q-text"></div>
@@ -370,23 +411,28 @@
     <h2>How this works, and what it cannot tell you</h2>
     <div class="prose">
       <h3>Actions, not words</h3>
-      <p>Everything here is built from what representatives did, weighted by how directly the act
-        changes anything:</p>
+      <p>Everything here is built from what people did in office, weighted by how directly the
+        act changes anything:</p>
       <ul>
         <li><b>Votes that use the powers of Parliament</b> — passing a stage of a bill, amending
-          it, approving an order — decide your match. These are the only votes the quiz counts.</li>
+          it, approving an order — decide your House of Commons match. They are the only votes
+          that quiz counts.</li>
         <li><b>Motions that only express a view</b> (“this House regrets…”) are left out of the
-          match, however heated the debate.</li>
+          House of Commons match, however heated the debate. The devolved legislatures are
+          different, for a reason given below.</li>
         <li><b>Motions signed</b> are shown as activity. Signing one is entirely the member's own
           choice, but it changes no law, so it never feeds a score.</li>
         <li><b>Questions and speeches</b> tell you what a member spends time on, never which side
           they are on. Words are too easy to misread, so they are counted and not interpreted.</li>
       </ul>
+      <p>Nothing comes from news coverage, social media, donations or anyone's opinion of a
+        person, including ours.</p>
 
-      <h3>Whose judgement is in the quiz</h3>
+      <h3>Whose judgement is in the House of Commons quiz</h3>
       <p>Deciding that a vote was “for” or “against” something is a judgement, and it is not ours.
-        The <span id="m-n">36</span> statements, the votes behind each one and which way each vote
-        counts are the published policy groupings of
+        The <span id="m-core">36</span> statements about this parliament<span id="m-earlier-wrap">
+        and the <span id="m-earlier">95</span> about earlier ones</span>, the votes behind each one
+        and which way each vote counts are the published policy groupings of
         <a href="https://votes.theyworkforyou.com/policies" target="_blank" rel="noopener">TheyWorkForYou</a>,
         run by the non-partisan charity mySociety. Every score on this site can be traced to the
         named divisions behind it — open any statement in your results to see them.</p>
@@ -397,23 +443,73 @@
         long-serving MP's position rests on more votes than a new one's; each match shows how
         many.</p>
 
+      <div id="m-devolved-wrap">
+      <h3>The Scottish Parliament, the Senedd and the Assembly</h3>
+      <p>Nobody publishes policy groupings for the devolved legislatures, and we will not invent
+        them. So their questions involve no grouping at all: each one is a <b>single vote the
+        legislature actually held</b>, and you say how you would have voted. There are
+        <span id="m-devolved">questions for each</span>.</p>
+      <p>Which votes are asked is fixed by a rule rather than chosen by subject: the most recent
+        votes of the current term on a whole bill or a whole motion — never an amendment, a
+        single clause or a point of procedure — where at least one member in ten of those voting
+        was on the losing side, one question per bill or motion, up to 30. Where a new term has
+        fewer than 20 such votes, the newest from the term before fill the gap.</p>
+      <p>The wording is the legislature's own title, and the motion as it was put where its
+        records give it. Voting aye is “for”; nothing is paraphrased.</p>
+      <ul>
+        <li><b>Most of these are motions that express a view, not laws.</b> The devolved
+          legislatures divide on few bills, so leaving such motions out, as the Commons quiz
+          does, would leave almost nothing to ask. Voting on one is still something each member
+          did, but it changes less than a vote on a bill. Every question is marked Bill or
+          Motion so you can tell.</li>
+        <li><b>One vote is thinner evidence</b> than a Commons statement, which pools several.
+          Members sometimes vote against a motion they sympathise with because of its wording or
+          who proposed it.</li>
+        <li>The Scottish Parliament and the Senedd were elected in May 2026, so most of their
+          questions come from the term before. <b>A member first elected in 2026 did not vote
+          on those</b>, and gets a match only once they have voted on enough.</li>
+        <li>The Senedd's record gives each vote's title but not its wording. Follow the link on
+          a question before answering if its title could be read either way.</li>
+        <li>Figures from different parliaments cannot be compared with each other: they are
+          answers to different questions.</li>
+      </ul>
+      </div>
+
+      <h3>When a match is shown</h3>
+      <p>A figure is shown once you and a member both have a view on at least five things, and it
+        always says how many it rests on.</p>
+      <p>To be <b>ranked</b> among those who voted most like you, or counted in a party's average,
+        a member must also have voted on at least half of what you answered, out of the votes
+        held while they were a member. Someone elected in 2024 could not have voted on tuition
+        fees in 2004, and that is not held against them. Someone who was a member and did not
+        vote has left a gap. A few sitting MPs have voted on under half of this parliament's
+        statements: the Speaker and deputies, who do not vote, and some who take part in few
+        votes. You still see their figure and what it rests on, marked as a partial picture,
+        but it is not ranked above members with a full record.</p>
+
       <h3>What a vote does and does not mean</h3>
       <p>A vote is not an opinion. Most votes are whipped: the typical member votes with their
         party about 99% of the time, so on most statements your MP's record is their party's.
-        And MPs vote against things for different reasons — an opposition MP may oppose a bill
-        because it goes too far, or not far enough. What the record does show, without
-        interpretation, is how each MP used the power you gave them.</p>
-      <p>Because the statements must have been voted on in this parliament, they mostly follow
-        the government's programme. Subjects Parliament has not voted on are not here.</p>
+        And members vote against things for different reasons — an opposition MP may oppose a
+        bill because it goes too far, or not far enough. What the record does show, without
+        interpretation, is how each of them used the power you gave them.</p>
+      <p>The questions follow what was actually voted on, which is mostly the government's
+        programme. Subjects no parliament has voted on are not here.</p>
 
       <h3>The compass</h3>
-      <p>The compass is the one interpretive layer we add. Each statement that sits clearly on an
-        economic (left–right) or social (liberal–authoritarian) axis is tagged with one; thirteen
-        that do not are left untagged. You and every MP are placed with the same tags, so any
-        mistake in them moves everyone identically. As a check, the tags were compared with the
-        structure of the voting record itself: with no tagging at all, the leading pattern in
-        MPs' positions lines up with our economic axis (correlation 0.98) and the second with our
-        social axis (0.76). It shows where votes sit, not what anyone believes.</p>
+      <p>The compass is the one interpretive layer we add, and it covers the House of Commons
+        only. Each statement that sits clearly on an economic (left–right) or social
+        (liberal–authoritarian) axis is tagged with one: <span id="m-tagged">66</span> are, and
+        <span id="m-untagged">65</span> that do not are left untagged. You and every MP are
+        placed with the same tags, so any mistake in them moves everyone identically.</p>
+      <p>As a check, the tags were compared with the structure of the voting record itself, with
+        no tagging at all. Among sitting MPs on this parliament's statements, the leading
+        pattern lines up with our economic axis (correlation 0.98) and the second with our
+        social axis (0.76). Across every statement and everyone who has voted on them since 1997
+        the economic axis still holds (0.89) but the social one is much weaker (0.40): over
+        thirty years, what divides MPs on social questions has changed more than our one axis
+        can follow. Treat the up-and-down position as rougher than the left-and-right one. It
+        shows where votes sit, not what anyone believes.</p>
 
       <h3>The record</h3>
       <p><b>Turnout</b> is the share of divisions a member voted in this term, out of those they
@@ -425,15 +521,50 @@
         keyword lists; that is categorisation rather than opinion, but it is the one place a
         list we wrote touches these numbers.</p>
 
+      <h3>People who do not represent you now</h3>
+      <p id="m-others-wrap">Searching by name also finds <b><span id="m-former">1,479</span> former
+        MPs, MSPs and MSs</b> and the <b><span id="m-peers">815</span> members of the House of
+        Lords</b>. They are shown the same way, by what they did with their votes, and a former
+        MP can be matched with your answers on the statements they voted on. Peers are not
+        elected, and there is no quiz for the Lords.</p>
+      <p><b>Candidates</b> in an election that has not happened yet are listed under the place
+        they are standing<span id="m-ballots"></span>. The list is
+        <a href="https://democracyclub.org.uk/" target="_blank" rel="noopener">Democracy Club</a>'s,
+        compiled by volunteers from each council's official notices. A candidate has done
+        nothing in office, so none is given a score; one who has held a seat before links to
+        that record. Only a name, a party and where they are standing are kept. Nobody appears
+        until they are on that register: this site does not guess who might stand.</p>
+      <p id="m-councils-wrap"><b>Councillors</b> are a trial, with <span id="m-councils">two
+        councils</span> so far. What it found is that councils do not record who voted which
+        way — most votes are a show of hands, written down only as carried or lost — so a
+        councillor cannot be matched with your views from their record. Where a council
+        publishes attendance, that is shown, with what it covers, and nothing more is made of
+        it.</p>
+
       <h3>What is missing</h3>
       <ul>
-        <li>The quiz covers the <b>House of Commons only</b>. Nobody publishes an independent
-          vote-by-vote policy mapping for the Scottish Parliament, the Senedd or the Northern
-          Ireland Assembly, and we will not invent one quietly. Their members' records are shown
-          without a match.</li>
-        <li>Postcode lookup uses the open postcodes.io service and needs this page to be hosted
-          on the web. Northern Ireland Assembly seats still use pre-2024 boundaries, so near an
+        <li>Former members of the Northern Ireland Assembly, and votes there before the current
+          term.</li>
+        <li>Mayors, police and crime commissioners and the London Assembly, except as candidates
+          when an election is coming.</li>
+        <li>A Welsh postcode finds your MP but not yet your Senedd constituency: search for that
+          by name. Northern Ireland Assembly seats still use pre-2024 boundaries, so near an
           edge the lookup can return the neighbouring seat.</li>
+        <li>Postcode lookup needs this page to be hosted on the web; opened as a file, search by
+          name instead.</li>
+      </ul>
+
+      <h3>What this site knows about you</h3>
+      <ul>
+        <li><b>Your answers never leave this browser.</b> They are political opinions, so they
+          are kept in this browser's own storage and nowhere else. Clearing your answers, or
+          this site's data, removes them.</li>
+        <li><b>A postcode you search for is sent to postcodes.io</b>, an open lookup service, to
+          find its constituencies, ward and council. Elections and councillors are then found in
+          this page from those. Searching by name sends nothing.</li>
+        <li>The typefaces are loaded from Google Fonts. That request carries nothing about you
+          or your answers beyond what any web page request does.</li>
+        <li>There are no accounts, no adverts and no analytics.</li>
       </ul>
     </div>
   </section>
@@ -449,16 +580,26 @@
 (function(){
 "use strict";
 var D=null, Q=null;
-var AREAS=[], areaByKey={}, areaByGss={}, areaByName={}, quizById={};
-var ORDER=[], COMPASS={}, EXAMPLE=null;
-var S={place:null, answers:{}, at:0, mp:null, started:false};
+var AREAS=[], areaByKey={}, areaByGss={}, areaByName={}, memberById={}, RECORDS={};
+/* One quiz per chamber: the Commons, and each devolved legislature. A quiz is
+   asked in parts; the Commons has two, this parliament and earlier ones. */
+var SETS=[], SETBY={}, SECTIONS=[], COMPASS={}, EXAMPLE=null;
+var S={place:null, answers:{}, ats:{}, section:"commons", mp:null, started:false};
+var FOCUS={};     // the member each devolved match is about, if the visitor picked one
+var REVEAL=null;  // the parliament whose results the match page should open at
+var OPENED=null;  // a person or a ballot opened from search
 var STORE="glasshouse.quiz.v1";
 var VIEWS=["reps","quiz","match","method"];
 var MIN_ANSWERS=5;
 var PC_RE=/^[A-Za-z]{1,2}\d[A-Za-z\d]?\s*\d[A-Za-z]{2}$/;
+var PC_START=/^[A-Za-z]{1,2}\d[A-Za-z\d]?\s*(\d[A-Za-z]?)?$/;
 var ANSWERS=[["Strongly agree",1],["Agree",0.5],["Neutral",0],["Disagree",-0.5],["Strongly disagree",-1]];
-var CODE={f:"For",a:"Against",b:"Abstained",x:"Absent",".":"Not an MP then"};
-var UK="UK Parliament";
+var CODE={f:"For",a:"Against",b:"Abstained",x:"Absent",".":"Not a member then"};
+var UK="UK Parliament", COMMONS="commons", EARLIER="earlier";
+/* The kinds of area an election can be held for, as postcodes.io names them. */
+var AREA_FIELDS=["admin_ward","ced","admin_district","admin_county","parliamentary_constituency_2024","pfa"];
+var MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
+var DAYS=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 var tip=document.getElementById("tip");
 
 function $(id){ return document.getElementById(id); }
@@ -468,6 +609,9 @@ function el(tag,cls,text){
   if(text!==undefined&&text!==null) e.textContent=text;
   return e;
 }
+function button(cls,text,fn){
+  var b=el("button",cls,text); b.type="button"; b.addEventListener("click",fn); return b;
+}
 function norm(s){
   return (s||"").normalize("NFKD").replace(/[̀-ͯ]/g,"").toLowerCase()
     .replace(/&/g," and ").replace(/[^a-z0-9 ]/g," ").replace(/\s+/g," ").trim();
@@ -475,7 +619,20 @@ function norm(s){
 function has(v){ return v!==null&&v!==undefined&&v!==""; }
 function num(n){ return has(n) ? Number(n).toLocaleString() : "—"; }
 function chamber(p){ return (D.chambers||{})[p]||{}; }
+function house(p){ return chamber(p).house||p; }
+function roleOf(p){ return chamber(p).role||"Member"; }
 function cap(s){ return s ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
+function list(items){
+  return items.length<2 ? items.join("") : items.slice(0,-1).join(", ")+" and "+items[items.length-1];
+}
+/* "2026-11-26" -> "26 November 2026", with the day of the week if asked. */
+function longDate(iso,weekday){
+  var m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(iso||"");
+  if(!m) return iso||"";
+  var d=new Date(Date.UTC(+m[1],+m[2]-1,+m[3]));
+  var s=d.getUTCDate()+" "+MONTHS[d.getUTCMonth()]+" "+d.getUTCFullYear();
+  return weekday ? DAYS[d.getUTCDay()]+" "+s : s;
+}
 
 /* ---------- saved state: this browser only ---------- */
 function save(){
@@ -485,15 +642,31 @@ function load(){
   try{
     var j=JSON.parse(localStorage.getItem(STORE)||"null");
     if(j&&typeof j==="object"){
-      S.answers=j.answers||{}; S.at=j.at||0; S.place=j.place||null;
+      S.answers=j.answers||{}; S.place=j.place||null;
       S.mp=j.mp||null; S.started=!!j.started;
+      // How far through each part. Before there were parts there was one
+      // number, for the Commons.
+      S.ats=(j.ats&&typeof j.ats==="object") ? j.ats : {};
+      if(!j.ats&&typeof j.at==="number") S.ats[COMMONS]=j.at;
+      S.section=typeof j.section==="string" ? j.section : COMMONS;
     }
   }catch(e){}
 }
 function isAnswered(id){ var a=S.answers[id]; return !!a&&typeof a.v==="number"; }
+/* Answers given anywhere, to one whole quiz, and to one part of one. */
 function answeredCount(){
-  return Q ? Q.statements.filter(function(s){ return isAnswered(s.id); }).length : 0;
+  var n=0;
+  SETS.forEach(function(set){ n+=answeredInSet(set); });
+  return n;
 }
+function answeredInSet(set){
+  return set.statements.filter(function(s){ return isAnswered(s.id); }).length;
+}
+function answeredIn(sec){
+  return sec.order.filter(function(i){ return isAnswered(sec.set.statements[i].id); }).length;
+}
+function canShow(set){ return answeredInSet(set)>=MIN_ANSWERS; }
+function anyMatch(){ return SETS.some(canShow); }
 
 /* ---------- tooltips ---------- */
 function bindTip(node,text){
@@ -514,9 +687,12 @@ function init(data,quiz){
   D.members.forEach(function(m){
     var k=m.parliament+"||"+m.area, a=areaByKey[k];
     if(!a){ a=areaByKey[k]={key:k,area:m.area,parliament:m.parliament,members:[]}; AREAS.push(a); }
-    a.members.push(m);
+    a.members.push(m); memberById[m.id]=m;
     if(m.gss&&m.parliament===UK) areaByGss[m.gss]=a;
   });
+  // Every record held for a person: the seat they sit in now first, then any
+  // they used to hold, then the House of Lords.
+  D.members.concat(D.others||[]).forEach(function(m){ (RECORDS[m.id]=RECORDS[m.id]||[]).push(m); });
   AREAS.forEach(function(a){
     areaByName[a.parliament+"||"+norm(a.area)]=a;
     a.region = a.parliament==="Scottish Parliament" && a.members.length>1;
@@ -524,11 +700,7 @@ function init(data,quiz){
   AREAS.sort(function(a,b){ return a.area.localeCompare(b.area); });
   EXAMPLE=AREAS.filter(function(a){ return a.parliament===UK; })[0]||AREAS[0];
 
-  if(Q){
-    Q.members.forEach(function(m){ quizById[m.id]=m; });
-    ORDER=askingOrder();
-    Q.members.forEach(function(m){ COMPASS[m.id]=place(function(i){ return m.pos[i]; }); });
-  }
+  if(Q) buildQuiz();
   load();
   // forget anything saved that no longer exists in the data
   if(S.place&&S.place.keys){
@@ -536,13 +708,106 @@ function init(data,quiz){
     if(!S.place.keys.length) S.place=null;
   }
   if(Q){
-    var ids={}; Q.statements.forEach(function(s){ ids[s.id]=1; });
+    var ids={};
+    SETS.forEach(function(set){ set.statements.forEach(function(s){ ids[s.id]=1; }); });
     Object.keys(S.answers).forEach(function(k){ if(!ids[k]) delete S.answers[k]; });
-    if(S.at>=ORDER.length) S.at=0;
+    Object.keys(S.ats).forEach(function(id){
+      var sec=sectionById(id), n=S.ats[id];
+      if(!sec||typeof n!=="number"||n<0||n>=sec.order.length) delete S.ats[id];
+    });
+    if(!sectionById(S.section)) S.section=COMMONS;
+    if(S.mp&&!SETBY[UK].byId[S.mp]) S.mp=null;
+  } else {
+    S.started=false;
   }
+  methodNumbers();
   footer();
   wire();
   show((location.hash||"#reps").slice(1));
+}
+
+/* A member's positions on every Commons statement: this parliament's, then
+   the earlier ones. Someone with no record on any earlier statement carries no
+   entries for them at all, to keep the file small. */
+function widen(m,more,former){
+  var mp=m.morePos||[], mv=m.moreVotes||[], pos=m.pos.slice(), votes=m.votes.slice();
+  for(var i=0;i<more;i++){ pos.push(i<mp.length?mp[i]:null); votes.push(i<mv.length?mv[i]:""); }
+  return {id:m.id,name:m.name,party:m.party,area:m.area,pos:pos,votes:votes,
+          from:m.from||"",to:m.to||"",former:!!former};
+}
+function makeSet(parliament,statements,core,members,former,termStart){
+  var set={parliament:parliament,statements:statements,core:core,members:members,former:former,
+           byId:{},termStart:termStart||"",commons:parliament===UK};
+  former.forEach(function(m){ set.byId[m.id]=m; });
+  members.forEach(function(m){ set.byId[m.id]=m; });
+  SETS.push(set); SETBY[parliament]=set;
+  return set;
+}
+function buildQuiz(){
+  var more=Q.moreStatements||[], n=Q.statements.length;
+  var commons=makeSet(UK, Q.statements.concat(more), n,
+    Q.members.map(function(m){ return widen(m,more.length,false); }),
+    (Q.former||[]).map(function(m){ return widen(m,more.length,true); }), Q.termStart);
+  var since=(Q.termStart||"").slice(0,4);
+  // this parliament's statements first, then the earlier ones, each in its own asking order
+  var order=askingOrder(Q.statements).concat(askingOrder(more).map(function(i){ return n+i; }));
+  SECTIONS.push({id:COMMONS, set:commons, order:order.slice(0,n), title:"House of Commons",
+    blurb:n+" statements MPs have voted on"+(since?" since "+since:" this parliament")+".",
+    lead:"I support…", devolved:false});
+  Object.keys(Q.chambers||{}).forEach(function(p){
+    var c=Q.chambers[p];
+    if(!c.statements||!c.statements.length) return;
+    var set=makeSet(p,c.statements,c.statements.length,c.members||[],[],c.termStart);
+    SECTIONS.push({id:p, set:set, order:askingOrder(c.statements), title:house(p),
+      blurb:c.statements.length+" votes it actually held. Say how you would have voted.",
+      lead:"I would have voted for…", devolved:true});
+  });
+  if(more.length) SECTIONS.push({id:EARLIER, set:commons, order:order.slice(n), title:"Earlier parliaments",
+    blurb:more.length+" more statements, voted on before "+(since||"this parliament")+
+      ": tuition fees, Iraq, identity cards. They sharpen your place on the compass and reach MPs' longer records.",
+    lead:"I support…", devolved:false});
+  commons.members.forEach(function(m){
+    COMPASS[m.id]=place(commons.statements,function(i){ return m.pos[i]; });
+  });
+}
+function sectionById(id){
+  for(var i=0;i<SECTIONS.length;i++) if(SECTIONS[i].id===id) return SECTIONS[i];
+  return null;
+}
+function section(){ return sectionById(S.section)||SECTIONS[0]; }
+/* The part that asks a quiz's main questions (for the Commons, this parliament's). */
+function sectionFor(set){
+  for(var i=0;i<SECTIONS.length;i++) if(SECTIONS[i].set===set&&SECTIONS[i].id!==EARLIER) return SECTIONS[i];
+  return null;
+}
+function at(sec){
+  var n=S.ats[sec.id]||0;
+  return Math.max(0,Math.min(n,sec.order.length-1));
+}
+function current(){ var sec=section(); return sec.set.statements[sec.order[at(sec)]]; }
+function openSection(id){
+  if(sectionById(id)) S.section=id;
+  S.started=true; save();
+}
+
+/* The visitor's own representatives in one legislature. */
+function repsIn(set){
+  if(!S.place) return [];
+  var out=[];
+  placeAreas(S.place).forEach(function(a){
+    if(a.parliament!==set.parliament) return;
+    a.members.forEach(function(m){ if(set.byId[m.id]) out.push(set.byId[m.id]); });
+  });
+  return out;
+}
+/* The parts of the quiz, those for the visitor's own parliaments first. */
+function offered(){
+  var mine=[], theirs=[], out=[];
+  SECTIONS.forEach(function(s){ if(s.devolved) (repsIn(s.set).length?mine:theirs).push(s); });
+  SECTIONS.forEach(function(s){ if(s.id===COMMONS) out.push(s); });
+  out=out.concat(mine);
+  SECTIONS.forEach(function(s){ if(s.id===EARLIER) out.push(s); });
+  return out.concat(theirs);
 }
 
 /* The order statements are asked in. Three lanes are taken in turn — those
@@ -550,10 +815,10 @@ function init(data,quiz){
    that nine answers are enough for a compass position; and within a lane
    subjects rotate, best-evidenced first, so that stopping early still leaves a
    spread rather than seven questions on tax. */
-function askingOrder(){
+function askingOrder(statements){
   var lanes=[[],[],[]];
-  Q.statements.forEach(function(s,i){ lanes[s.social?0:s.econ?1:2].push(i); });
-  lanes=lanes.map(rotateSubjects);
+  statements.forEach(function(s,i){ lanes[s.social?0:s.econ?1:2].push(i); });
+  lanes=lanes.map(function(l){ return rotateSubjects(statements,l); });
   var out=[], left=true;
   while(left){
     left=false;
@@ -561,20 +826,22 @@ function askingOrder(){
   }
   return out;
 }
-function rotateSubjects(indices){
+function rotateSubjects(statements,indices){
   var groups={}, names=[];
   indices.forEach(function(i){
-    var s=Q.statements[i];
-    if(!groups[s.group]){ groups[s.group]=[]; names.push(s.group); }
-    groups[s.group].push(i);
+    var g=statements[i].group||"";
+    if(!groups[g]){ groups[g]=[]; names.push(g); }
+    groups[g].push(i);
   });
   names.forEach(function(g){
+    // ties fall back to the original order, so the result never depends on
+    // how the browser happens to sort
     groups[g].sort(function(a,b){
-      return Q.statements[b].termVotes-Q.statements[a].termVotes ||
-             Q.statements[b].divisions.length-Q.statements[a].divisions.length;
+      return (statements[b].termVotes||0)-(statements[a].termVotes||0) ||
+             statements[b].divisions.length-statements[a].divisions.length || a-b;
     });
   });
-  names.sort(function(a,b){ return groups[b].length-groups[a].length || a.localeCompare(b); });
+  names.sort(function(a,b){ return groups[b].length-groups[a].length || (a<b?-1:a>b?1:0); });
   var out=[], left=true;
   while(left){
     left=false;
@@ -585,9 +852,9 @@ function rotateSubjects(indices){
 
 /* Where a set of positions sits on the two axes. The SAME function places the
    user (from their answers) and every MP (from their votes). */
-function place(valueAt){
+function place(statements,valueAt){
   var e=0,en=0,s=0,sn=0;
-  Q.statements.forEach(function(st,i){
+  statements.forEach(function(st,i){
     var v=valueAt(i);
     if(v===null||v===undefined) return;
     if(st.econ){ e+=st.econ*v; en+=Math.abs(st.econ); }
@@ -595,28 +862,39 @@ function place(valueAt){
   });
   return {e:en?e/en:null, s:sn?s/sn:null, en:en, sn:sn};
 }
-function userValue(i){
-  var a=S.answers[Q.statements[i].id];
-  return a&&typeof a.v==="number" ? a.v : null;
+/* Sitting MPs are placed once, at the start; a former one only when asked about. */
+function compassOf(qm){
+  return COMPASS[qm.id] || place(SETBY[UK].statements,function(i){ return qm.pos[i]; });
 }
+function couldVote(codes){ return /[fabx]/.test(codes||""); }
 
-/* Agreement between the user's answers and one MP's votes, as a percentage.
-   Each statement both have a view on scores 1 - |you - them| / 2. */
-function matchFor(qm){
-  var sum=0,weight=0,k=0;
-  Q.statements.forEach(function(st,i){
+/* Agreement between the user's answers and one member's votes, as a
+   percentage. Each statement both have a view on scores 1 - |you - them| / 2.
+   `eligible` counts the answers on statements the member could have voted on:
+   they sat during at least one of the votes. The reference for this and the
+   two tests below is analysis/quizmath.py. */
+function matchFor(set,qm){
+  var sum=0,weight=0,k=0,eligible=0;
+  set.statements.forEach(function(st,i){
     var a=S.answers[st.id];
     if(!a||typeof a.v!=="number") return;
+    if(couldVote(qm.votes[i])) eligible++;
     var p=qm.pos[i];
     if(p===null||p===undefined) return;
     var w=a.imp?2:1;
     sum+=w*(1-Math.abs(a.v-p)/2); weight+=w; k++;
   });
-  return {pct:weight?100*sum/weight:null, k:k};
+  return {pct:weight?100*sum/weight:null, k:k, eligible:eligible};
 }
-function enoughOverlap(m){
-  var n=answeredCount();
-  return m.pct!==null && m.k>=Math.min(n,MIN_ANSWERS) && m.k*2>=n;
+/* Shown: at least five statements in common, or all that were answered. */
+function shownIn(m,answered){ return m.pct!==null && m.k>=Math.min(answered,MIN_ANSWERS); }
+/* Ranked and averaged: also at least half of what the member could have voted on. */
+function enoughIn(m,answered){ return shownIn(m,answered) && m.k*2>=m.eligible; }
+function rankedFor(set){
+  var n=answeredInSet(set);
+  return set.members.map(function(qm){ var m=matchFor(set,qm); m.qm=qm; return m; })
+    .filter(function(m){ return enoughIn(m,n); })
+    .sort(function(a,b){ return b.pct-a.pct || b.k-a.k; });
 }
 
 /* ---------- navigation ---------- */
@@ -630,15 +908,17 @@ function show(v){
     if(t.dataset.view===v) t.setAttribute("aria-current","page"); else t.removeAttribute("aria-current");
   });
   tip.classList.remove("on");
-  if(v==="reps") renderPlace();
+  if(v==="reps"){ renderPlace(); renderOpened(); }
   if(v==="quiz") renderQuiz();
   if(v==="match") renderMatch();
   navCount();
   window.scrollTo(0,0);
+  if(v==="match"&&REVEAL) bringUp(REVEAL);
+  REVEAL=null;
 }
 function navCount(){
-  var n=answeredCount();
-  $("nav-quiz").textContent = Q&&n ? n+"/"+Q.statements.length : "";
+  var n=Q ? answeredCount() : 0;
+  $("nav-quiz").textContent = n ? n+" answered" : "";
 }
 function wire(){
   document.querySelectorAll(".tab").forEach(function(t){
@@ -654,7 +934,7 @@ function wire(){
   if(Q) wireQuiz();
 }
 
-/* ---------- finding a place ---------- */
+/* ---------- finding a place, or a person ---------- */
 function setMsg(t){ $("search-msg").textContent=t||""; }
 function matches(q){
   q=norm(q);
@@ -669,41 +949,123 @@ function matches(q){
   });
   return out.slice(0,36);
 }
-function renderHits(list){
+/* Former members and peers whose name contains the query. Three letters are
+   needed: there are thousands of them. The start of a word comes first. */
+function searchOthers(q,limit){
+  q=norm(q);
+  if(q.length<3) return [];
+  var starts=[], contains=[];
+  (D.others||[]).forEach(function(m){
+    var n=norm(m.name);
+    if(n.indexOf(q)===0||n.indexOf(" "+q)>-1) starts.push(m);
+    else if(n.indexOf(q)>-1) contains.push(m);
+  });
+  return starts.concat(contains).slice(0,limit);
+}
+/* People standing in an upcoming election whose name starts with the query. */
+function searchCandidates(q,limit){
+  q=norm(q);
+  if(q.length<3) return [];
+  var out=[];
+  ((D.elections||{}).ballots||[]).forEach(function(b){
+    (b.candidates||[]).forEach(function(c){
+      var n=norm(c.name);
+      if(n.indexOf(q)===0||n.indexOf(" "+q)>-1) out.push({candidate:c,ballot:b});
+    });
+  });
+  return out.slice(0,limit);
+}
+function renderHits(areas,people,standing){
   var ul=$("hits"); ul.innerHTML="";
-  list.forEach(function(a){
-    var li=el("li"), b=el("button","hit"); b.type="button";
+  (areas||[]).forEach(function(a){
+    var li=el("li"), b=button("hit",null,function(){ chooseArea(a); });
     b.appendChild(el("span",null,a.area));
     b.appendChild(el("span","legis",(chamber(a.parliament).role||"")+(a.region?" · region":"")));
-    b.addEventListener("click",function(){ chooseArea(a); });
     li.appendChild(b); ul.appendChild(li);
   });
+  var pl=$("people-hits"); pl.innerHTML="";
+  (people||[]).forEach(function(m){
+    var li=el("li"), b=button("hit",null,function(){ openPerson(m); });
+    b.appendChild(el("span",null,m.name));
+    b.appendChild(el("span","legis", m.status==="peer" ? "Peer"
+      : "Former "+roleOf(m.parliament)+(m.until?" · until "+m.until:"")));
+    li.appendChild(b); pl.appendChild(li);
+  });
+  (standing||[]).forEach(function(x){
+    var li=el("li"), b=button("hit",null,function(){ openBallot(x.ballot,x.candidate.name); });
+    b.appendChild(el("span",null,x.candidate.name));
+    b.appendChild(el("span","legis","Candidate · "+ballotWhere(x.ballot)));
+    li.appendChild(b); pl.appendChild(li);
+  });
+  $("people-label").hidden=!pl.children.length;
+  $("people-label").textContent=(areas||[]).length ? "People not in a seat now" : "People";
 }
 function onSearchInput(){
-  var q=$("place-search").value;
-  if(PC_RE.test(q.trim())){ renderHits([]); setMsg("Press Enter to look up "+q.trim().toUpperCase()+"."); return; }
-  var list=matches(q);
-  renderHits(list);
-  setMsg(norm(q).length>=2&&!list.length ? "No constituency or representative matches that." : "");
+  var q=$("place-search").value, t=q.trim();
+  if(PC_RE.test(t)){ renderHits(); setMsg("Press Enter to look up "+t.toUpperCase()+"."); return; }
+  // The beginning of a postcode is not the beginning of anyone's name.
+  if(PC_START.test(t)){ renderHits(); setMsg("Type the whole postcode, then press Enter."); return; }
+  var areas=matches(q), people=searchOthers(q,6), standing=searchCandidates(q,4);
+  renderHits(areas,people,standing);
+  setMsg(norm(q).length>=2&&!areas.length&&!people.length&&!standing.length
+    ? "No constituency or representative matches that." : "");
 }
 function onSearchSubmit(){
   var q=$("place-search").value.trim();
   if(PC_RE.test(q)){ lookupPostcode(q); return; }
-  var list=matches(q);
-  if(list.length===1) chooseArea(list[0]);
-  else if(!list.length&&q) setMsg("No constituency or representative matches that. Try a postcode.");
+  if(PC_START.test(q)){ setMsg("That is only part of a postcode. Type all of it, like G12 8QQ."); return; }
+  var areas=matches(q), people=searchOthers(q,6).length+searchCandidates(q,4).length;
+  if(areas.length===1&&!people) chooseArea(areas[0]);
+  else if(!areas.length&&!people&&q) setMsg("No constituency or representative matches that. Try a postcode.");
 }
 function chooseArea(a){
-  setPlace({label:a.area, keys:[a.key], notes:[]});
-  renderHits([]); setMsg("");
+  // A place chosen by name knows its own code and nothing more local.
+  var codes={};
+  a.members.forEach(function(m){ if(m.gss) codes[m.gss]=1; });
+  setPlace({label:a.area, keys:[a.key], notes:[], codes:Object.keys(codes), ward:"", district:""});
+  renderHits(); setMsg("");
 }
 function setPlace(p){
-  S.place=p; S.mp=null; save(); renderPlace();
+  S.place=p; S.mp=null; FOCUS={}; OPENED=null; save(); renderPlace(); renderOpened();
   var h=$("place"); if(h.scrollIntoView) h.scrollIntoView({behavior:"smooth",block:"start"});
+}
+function openPerson(m){
+  OPENED={kind:"person",record:m};
+  show("reps"); renderHits(); setMsg("");
+  var h=$("opened"); if(h.scrollIntoView) h.scrollIntoView({behavior:"smooth",block:"start"});
+}
+function openBallot(b,name){
+  OPENED={kind:"ballot",ballot:b,name:name};
+  show("reps"); renderHits(); setMsg("");
+  var h=$("opened"); if(h.scrollIntoView) h.scrollIntoView({behavior:"smooth",block:"start"});
+}
+/* A former member, a peer or a ballot, found by name rather than by place. */
+function renderOpened(){
+  var host=$("opened"); host.innerHTML=""; host.hidden=!OPENED;
+  if(!OPENED) return;
+  var head=el("div","place-head");
+  if(OPENED.kind==="person"){
+    var m=OPENED.record;
+    head.appendChild(el("h3",null,m.name));
+    head.appendChild(el("span","eyebrow", m.status==="peer" ? "House of Lords"
+      : m.status==="former" ? "Former "+roleOf(m.parliament) : roleOf(m.parliament)));
+  } else {
+    head.appendChild(el("h3",null,ballotWhere(OPENED.ballot)));
+    head.appendChild(el("span","eyebrow",ballotKind(OPENED.ballot)));
+  }
+  head.appendChild(button("linkbtn","Close",function(){ OPENED=null; renderOpened(); }));
+  host.appendChild(head);
+  var grid=el("div","cards");
+  grid.appendChild(OPENED.kind==="person" ? card(OPENED.record,true)
+                                          : ballotCard(OPENED.ballot,OPENED.name));
+  host.appendChild(grid);
+  if(OPENED.kind==="ballot") host.appendChild(el("p","note lim",candidatesNote()));
 }
 
 /* Postcode -> constituencies, via the open postcodes.io service. This cannot
-   run inside a sandboxed preview, so every failure falls back to name search. */
+   run inside a sandboxed preview, so every failure falls back to name search.
+   The reply also names the postcode's ward and council and gives every area's
+   official code; elections and councillors are found by those, in this page. */
 function lookupPostcode(raw){
   var pc=raw.replace(/\s+/g,"").toUpperCase();
   setMsg("Looking up "+pc+"…");
@@ -713,8 +1075,12 @@ function lookupPostcode(raw){
     if(!r.ok) throw new Error("HTTP "+r.status);
     return r.json();
   }).then(function(j){
-    var res=j.result||{}, keys=[], notes=[];
-    var uk=areaByGss[(res.codes||{}).parliamentary_constituency_2024];
+    var res=j.result||{}, keys=[], notes=[], given=res.codes||{}, codes={};
+    // "…99999999" is the register's way of saying there is no such area here.
+    AREA_FIELDS.forEach(function(f){
+      if(typeof given[f]==="string"&&!/99999999$/.test(given[f])) codes[given[f]]=1;
+    });
+    var uk=areaByGss[given.parliamentary_constituency_2024];
     if(uk) keys.push(uk.key);
     var extra=Promise.resolve();
     if(res.country==="Scotland"){
@@ -725,6 +1091,8 @@ function lookupPostcode(raw){
             var a=areaByName["Scottish Parliament||"+norm(n)];
             if(a) keys.push(a.key);
           });
+          var sc=r2.codes||{};
+          Object.keys(sc).forEach(function(k){ if(typeof sc[k]==="string"&&sc[k]) codes[sc[k]]=1; });
         }).catch(function(){ notes.push("We found your MP but could not look up your MSPs. Search for your Scottish Parliament constituency by name."); });
     } else if(res.country==="Wales"){
       notes.push("We cannot yet match a postcode to a Senedd constituency. Search for yours by name to see your Members of the Senedd.");
@@ -736,7 +1104,8 @@ function lookupPostcode(raw){
     }
     return extra.then(function(){
       if(!keys.length){ setMsg("We could not match "+(res.postcode||pc)+" to a constituency. Search by name instead."); return; }
-      setPlace({label:res.postcode||pc, keys:keys, notes:notes});
+      setPlace({label:res.postcode||pc, keys:keys, notes:notes, codes:Object.keys(codes),
+                ward:res.admin_ward||"", district:given.admin_district||""});
       setMsg("");
     });
   }).catch(function(err){
@@ -747,7 +1116,6 @@ function lookupPostcode(raw){
 
 /* ---------- a place ---------- */
 function placeAreas(p){
-  var order={}; order[UK]=0;
   return p.keys.map(function(k){ return areaByKey[k]; }).filter(Boolean).sort(function(a,b){
     var x=(a.parliament===UK?0:1)+(a.region?1:0), y=(b.parliament===UK?0:1)+(b.region?1:0);
     return x-y;
@@ -765,8 +1133,20 @@ function renderPlace(){
     : total+" representative"+(total===1?"":"s")));
   host.appendChild(head);
   (p.notes||[]).forEach(function(n){ var x=el("p","msg",n); host.appendChild(x); });
+  // Each parliament has questions of its own. Say so where it matters: a
+  // place with members the visitor has not yet answered anything about.
+  if(!example&&Q) SECTIONS.forEach(function(sec){
+    if(!sec.devolved||canShow(sec.set)) return;
+    var mine=repsIn(sec.set);
+    if(!mine.length) return;
+    var x=el("p","msg");
+    x.appendChild(document.createTextNode("Your "+roleOf(sec.set.parliament)+"s are matched on the "+sec.title+
+      "'s own votes, which are different questions from the House of Commons. "));
+    x.appendChild(button("linkbtn","Answer the "+sec.title+" questions",function(){ openSection(sec.id); go("quiz"); }));
+    host.appendChild(x);
+  });
   areas.forEach(function(a){
-    var ch=chamber(a.parliament), sec=el("div","chamber"), h=el("h4",null,(ch.house||a.parliament)+" ");
+    var sec=el("div","chamber"), h=el("h4",null,house(a.parliament)+" ");
     h.appendChild(el("span",null,"· "+a.area+(a.region?" (regional list)":"")));
     sec.appendChild(h);
     var grid=el("div","cards");
@@ -774,8 +1154,125 @@ function renderPlace(){
       .forEach(function(m){ grid.appendChild(card(m)); });
     sec.appendChild(grid); host.appendChild(sec);
   });
+  // An example is not somewhere anyone lives: nothing local is claimed for it.
+  if(!example){ electionsHere(host,p); councillorsHere(host,p); }
 }
 
+/* ---------- elections coming up, and who is standing ---------- */
+function ballotKind(b){ return b.kind+" "+(b.byElection?"by-election":"election"); }
+function ballotWhere(b){ return !b.area||b.area===b.body ? b.body : b.area+(b.body?", "+b.body:""); }
+function ballotsFor(codes){
+  var want={};
+  (codes||[]).forEach(function(c){ if(c) want[c]=1; });
+  return ((D.elections||{}).ballots||[]).filter(function(b){ return want[b.gss]; });
+}
+function candidatesNote(){
+  var e=D.elections||{};
+  return "Candidates as announced so far, from Democracy Club's register"+(e.asOf?", "+longDate(e.asOf):"")+
+    " (CC BY 4.0). Close to polling day the list is complete; earlier, it holds only those who have declared.";
+}
+function ballotCard(b,highlight){
+  var c=el("article","card"), top=el("div","who");
+  top.appendChild(el("span","eyebrow",longDate(b.date,true)));
+  if(b.cancelled) top.appendChild(el("span","role","Cancelled"));
+  c.appendChild(top);
+  c.appendChild(el("h4","cname",ballotWhere(b)));
+  var people=b.candidates||[], n=people.length;
+  c.appendChild(el("p","csub",ballotKind(b)+" · "+b.seats+" seat"+(b.seats===1?"":"s")+" · "+
+    (n ? n+" standing so far" : "no candidates announced yet")));
+  if(n){
+    var ul=el("ul","plain");
+    people.forEach(function(p){
+      var li=el("li"), rec=p.record&&RECORDS[p.record] ? RECORDS[p.record][0] : null;
+      if(rec) li.appendChild(button("linkbtn",p.name,function(){ openPerson(rec); }));
+      else { var nm=el("span","pname",p.name); if(p.name===highlight) nm.style.fontWeight="700"; li.appendChild(nm); }
+      li.appendChild(el("span","sub",p.party+" · "+(rec ? "has a record: see it" : "no record in office")));
+      ul.appendChild(li);
+    });
+    c.appendChild(ul);
+  }
+  c.appendChild(el("p","note","Nobody here is scored for standing: a candidate has done nothing in office yet. Anyone who has held a seat before links to that record."));
+  if(b.url){ var l=el("div","links"); l.appendChild(ext(b.url,"This election on WhoCanIVoteFor")); c.appendChild(l); }
+  return c;
+}
+function electionsHere(host,p){
+  var e=D.elections;
+  if(!e) return;
+  var sec=el("div","chamber"), found=ballotsFor(p.codes);
+  sec.appendChild(el("h4",null,"Elections coming up here"));
+  var checked=e.asOf ? " (checked "+longDate(e.asOf)+")" : "";
+  if(!found.length){
+    sec.appendChild(el("p","note lim", p.district
+      ? "None is scheduled for this postcode in Democracy Club's register"+checked+"."
+      : "None is scheduled for this constituency"+checked+". Search by postcode to see elections for your council ward as well."));
+  } else {
+    var grid=el("div","cards");
+    found.forEach(function(b){ grid.appendChild(ballotCard(b)); });
+    sec.appendChild(grid);
+    sec.appendChild(el("p","note lim",candidatesNote()));
+  }
+  host.appendChild(sec);
+}
+
+/* ---------- councillors, where a council's own records were read ---------- */
+function councilFor(district,ward){
+  var want=norm(ward), bodies=(D.councils||{}).bodies||[];
+  if(!want) return null;
+  for(var i=0;i<bodies.length;i++){
+    if(bodies[i].gss!==district) continue;
+    for(var j=0;j<bodies[i].wards.length;j++){
+      var w=bodies[i].wards[j];
+      if(norm(w.name)===want||(w.covers||[]).some(function(c){ return norm(c)===want; }))
+        return {body:bodies[i],ward:w};
+    }
+  }
+  return null;
+}
+function councillorsHere(host,p){
+  var bodies=(D.councils||{}).bodies||[];
+  if(!bodies.length) return;
+  var sec=el("div","chamber"), found=councilFor(p.district,p.ward);
+  sec.appendChild(el("h4",null,"Your councillors"));
+  if(!found){
+    var read=bodies.map(function(b){ return b.name.replace(/ (City )?Council$/,""); });
+    sec.appendChild(el("p","note lim","Not here yet. Councils each publish their own records, and so far only "+
+      list(read)+" "+(read.length===1?"has":"have")+" been read, as a trial. "+
+      (p.district ? "" : "Search by postcode to find your ward. ")+
+      "Almost no council records how each councillor voted."));
+    host.appendChild(sec); return;
+  }
+  var b=found.body, w=found.ward, period=(D.councils||{}).period||[], c=el("article","card"), top=el("div");
+  top.appendChild(el("span","eyebrow",b.name));
+  top.appendChild(el("h4","cname",w.name));
+  c.appendChild(top);
+  if((w.covers||[]).length>1&&p.ward&&p.ward!==w.name)
+    c.appendChild(el("p","csub","The electoral area that "+p.ward+" ward is part of."));
+  var s=el("div","sect");
+  w.councillors.forEach(function(x){
+    var known=has(x.expected)&&x.expected>0&&has(x.present), who=el("p","cllr");
+    who.appendChild(x.url ? ext(x.url,x.name) : el("b",null,x.name));
+    who.appendChild(document.createTextNode(" · "+x.party));
+    s.appendChild(who);
+    if(!b.attendance) return;
+    var row=el("div","metric wide"), track=el("div","mtrack");
+    row.appendChild(el("div","mlabel",known ? "Meetings attended" : "Attendance not recorded"));
+    if(known){ var f=el("div","mfill"); f.style.width=Math.max(0,Math.min(100*x.present/x.expected,100))+"%"; track.appendChild(f); }
+    row.appendChild(track);
+    row.appendChild(el("div","mval",known ? x.present+" of "+x.expected : "—"));
+    s.appendChild(row);
+  });
+  c.appendChild(s);
+  c.appendChild(el("p","note", b.attendance
+    ? "The bar is how many of the meetings they were expected at they attended"+
+      (period.length===2 ? ", "+longDate(period[0])+" to "+longDate(period[1]) : "")+
+      ", from the council's own records. It counts only the committees they sit on, and absence is not always a choice."
+    : b.name+" does not publish attendance in a form that could be read, so only names and parties are shown."));
+  c.appendChild(el("p","note","There is no match with your answers. Councils record most votes only as carried or lost, not who voted which way, so there is nothing to compare."));
+  var grid=el("div","cards"); grid.appendChild(c); sec.appendChild(grid);
+  host.appendChild(sec);
+}
+
+/* ---------- one person's record ---------- */
 function tile(value,label){
   var d=el("div","tile"); d.appendChild(el("b",null,value)); d.appendChild(el("span",null,label)); return d;
 }
@@ -799,7 +1296,7 @@ function band(p,n){
         : "consistently voted against";
   return w+" ("+n+" votes)";
 }
-function castCount(codes){ return (codes.match(/[fab]/g)||[]).length; }
+function castCount(codes){ return ((codes||"").match(/[fab]/g)||[]).length; }
 function axis(them,you){
   var a=el("div","axis"); a.appendChild(el("span","mid"));
   var x=function(v){ return (Math.max(-1,Math.min(1,v))+1)*50; };
@@ -811,8 +1308,10 @@ function axis(them,you){
   if(has(you)){ var y=el("span","you"); y.style.left=x(you)+"%"; a.appendChild(y); }
   return a;
 }
+/* Where to read about a division: its own page for the devolved
+   legislatures, TheyWorkForYou's for the Commons. */
 function divisionUrl(d){
-  return "https://votes.theyworkforyou.com/decisions/division/commons/"+d.date+"/"+d.number;
+  return d.url || "https://votes.theyworkforyou.com/decisions/division/commons/"+d.date+"/"+d.number;
 }
 function receiptUrl(parliament,key){
   var m=/^pw-(\d{4}-\d{2}-\d{2})-(\d+)-([a-z]+)$/.exec(key||"");
@@ -821,23 +1320,61 @@ function receiptUrl(parliament,key){
 function ext(href,text){
   var a=el("a",null,text); a.href=href; a.target="_blank"; a.rel="noopener"; return a;
 }
+/* The years someone sat: "2019–2024". */
+function years(m){
+  if(!m.since) return m.until ? "until "+m.until : "";
+  return !m.until||m.until===m.since ? m.since : m.since+"–"+m.until;
+}
+/* Party and length of service, in one line. */
+function memberLine(m,withArea){
+  var role=roleOf(m.parliament), party=m.party||"No party";
+  if(m.status==="former"){
+    var y=years(m), seat=withArea&&m.area ? role+" for "+m.area : "former "+role;
+    return y ? party+" · "+seat+", "+y : party+" · "+seat;
+  }
+  if(m.status==="peer") return m.since ? party+" · in the Lords since "+m.since : party;
+  var sits=withArea ? role+" for "+m.area : role;
+  if(!m.since) return withArea ? party+" · "+sits : party;
+  return party+" · "+sits+" since "+m.since;
+}
+/* Crossbenchers, bishops and the like sit in a group, but nobody tells them
+   how to vote. Voting unlike the rest of the group is not breaking a whip. */
+function whipped(m){
+  return !(m.status==="peer"&&/^(crossbench|bishop|non-affiliated|judge)/i.test(m.party||""));
+}
+/* The match with the visitor's answers, if there is one to show. Each
+   parliament has its own questions, so each member is matched on their own. */
+function memberMatch(m){
+  var set=SETBY[m.parliament];
+  if(!set||!canShow(set)) return null;
+  var qm=set.byId[m.id];
+  if(!qm) return null;
+  var mt=matchFor(set,qm);
+  return shownIn(mt,answeredInSet(set)) ? {set:set,qm:qm,match:mt} : null;
+}
+/* Goes to the match page, at one member's results. */
+function showMatchFor(set,id){
+  if(set.commons){ S.mp=id; save(); } else FOCUS[set.parliament]=id;
+  REVEAL=set.parliament;
+  go("match");
+}
 
-function card(m){
-  var ch=chamber(m.parliament), c=el("article","card"), qm=quizById[m.id];
+function card(m,alone){
+  var ch=chamber(m.parliament), c=el("article","card");
+  var set=SETBY[m.parliament], qm=set ? set.byId[m.id] : null;
+  var former=m.status==="former", peer=m.status==="peer", sitting=!m.status, group=!whipped(m);
   var who=el("div","who");
   who.appendChild(el("h4","cname",m.name));
-  who.appendChild(el("span","role",ch.role||"Member"));
+  who.appendChild(el("span","role",(former?"Former ":"")+(ch.role||"Member")));
   c.appendChild(who);
-  c.appendChild(el("p","csub",(m.party||"No party")+(m.since?" · "+(ch.role||"member")+" since "+m.since:"")));
+  c.appendChild(el("p","csub",memberLine(m,!!alone)));
+  if(former) c.appendChild(el("p","note","No longer sits in the "+house(m.parliament)+
+    ". This is what they did while they were there; nothing is added from anything they have said or done since."));
+  if(peer) c.appendChild(el("p","note","Nobody votes for a member of the House of Lords: peers are appointed, or sit by inheritance or office. They are here because they vote on the same laws."));
 
-  if(qm&&m.parliament===UK&&answeredCount()>=MIN_ANSWERS){
-    var mt=matchFor(qm);
-    if(enoughOverlap(mt)){
-      var mb=el("button","matchbtn",Math.round(mt.pct)+"% match with your answers →"); mb.type="button";
-      mb.addEventListener("click",function(){ S.mp=m.id; save(); go("match"); });
-      c.appendChild(mb);
-    }
-  }
+  var found=memberMatch(m);
+  if(found) c.appendChild(button("matchbtn",Math.round(found.match.pct)+"% match with your answers →",
+    function(){ showMatchFor(found.set,m.id); }));
 
   var termKnown=has(m.termVotes)&&m.eligible>0;
   var neverVoted=termKnown&&m.termVotes===0;
@@ -845,46 +1382,60 @@ function card(m){
   tiles.appendChild(termKnown ? tile(num(m.termVotes),"of "+num(m.eligible)+" votes this term")
                               : tile(num(m.votesCast),"votes cast"));
   // whole record, not just this term, so it says how many votes it is out of
-  tiles.appendChild(m.partyLineDivisions ? tile(num(m.rebellions),"breaks with party in "+num(m.partyLineDivisions)+" votes")
-                                         : tile("—","breaks with party"));
-  tiles.appendChild(tile(has(m.questions)?num((m.questions||0)+(m.speeches||0)):"—","questions & speeches"));
+  tiles.appendChild(m.partyLineDivisions
+    ? tile(num(m.rebellions),(group?"votes unlike their group":"breaks with party")+" in "+num(m.partyLineDivisions)+" votes")
+    : tile("—","breaks with party"));
+  // questions and speeches are only collected for people sitting now
+  if(sitting) tiles.appendChild(tile(has(m.questions)?num((m.questions||0)+(m.speeches||0)):"—","questions & speeches"));
   c.appendChild(tiles);
 
   // --- voting record ---
   var s1=el("div","sect"); s1.appendChild(el("h5",null,"Voting record"));
-  if(neverVoted){
-    var why = /sinn/i.test(m.party) ? "Sinn Féin MPs do not take their seats at Westminster, so they do not vote."
-      : /speaker/i.test(m.party) ? "The Speaker does not vote."
+  // a peer who has not voted lately still has a record from before
+  if(neverVoted&&!peer){
+    var why = m.parliament===UK&&/sinn/i.test(m.party) ? "Sinn Féin MPs do not take their seats at Westminster, so they do not vote."
+      : /^(speaker|presiding)/i.test(m.party) ? "Whoever chairs the chamber does not vote."
       : "Has not voted this term. Some members do not vote by convention, such as Deputy Speakers.";
     s1.appendChild(el("p","note",why));
   } else {
-    if(termKnown) s1.appendChild(metric("Turnout",m.turnout,ch.turnout,
+    // The medians are of the people sitting now. Someone who has left is not
+    // measured against a chamber they are no longer in.
+    var med=former ? {} : ch;
+    if(termKnown) s1.appendChild(metric("Turnout",m.turnout,med.turnout,
       "Voted in "+num(m.termVotes)+" of the "+num(m.eligible)+" divisions they were eligible for since "+
       (ch.termStart||"the election")+". Chamber median "+(has(ch.turnout)?ch.turnout+"%":"—")+
       ". Absence is not always a choice: ministers are often excused and members can be paired."));
-    s1.appendChild(metric("With their party",m.partyAgreement,ch.partyAgreement,
-      "Did the same as most of their party at the time in "+(has(m.partyAgreement)?m.partyAgreement+"%":"—")+
-      " of "+num(m.partyLineDivisions)+" divisions on record. Almost every member sits near 99%."));
-    s1.appendChild(metric("With the result",m.chamberAgreement,ch.chamberAgreement,
+    s1.appendChild(group
+      ? metric("With their group",m.partyAgreement,null,
+          "Did the same as most of the "+(m.party||"").toLowerCase()+" peers voting in "+(has(m.partyAgreement)?m.partyAgreement+"%":"—")+
+          " of "+num(m.partyLineDivisions)+" divisions on record. Nobody instructs them how to vote, so this is not loyalty to a party.")
+      : metric("With their party",m.partyAgreement,med.partyAgreement,
+          "Did the same as most of their party at the time in "+(has(m.partyAgreement)?m.partyAgreement+"%":"—")+
+          " of "+num(m.partyLineDivisions)+" divisions on record. Almost every member sits near 99%."));
+    s1.appendChild(metric("With the result",m.chamberAgreement,med.chamberAgreement,
       "How often they were on the winning side. This mostly reflects being in government or opposition."));
-    var kl=el("div","keyline"); kl.appendChild(el("i")); kl.appendChild(document.createTextNode("chamber median"));
-    s1.appendChild(kl);
+    if(!former){
+      var kl=el("div","keyline"); kl.appendChild(el("i")); kl.appendChild(document.createTextNode("chamber median"));
+      s1.appendChild(kl);
+    }
+    if(peer) s1.appendChild(el("p","note","Peers are not expected to attend every vote: many have other work, and the typical peer votes in well under half."));
     // A very low figure nearly always has a reason other than not turning up.
-    if(termKnown&&has(m.turnout)&&m.turnout<20) s1.appendChild(el("p","note",
+    if(!peer&&termKnown&&has(m.turnout)&&m.turnout<20) s1.appendChild(el("p","note",
       "Turnout this low usually has a reason other than absence: presiding officers do not vote, and ministers are often excused."));
     if(m.recordAsOf) s1.appendChild(el("p","note","Votes collected by Glasshouse from the legislature's own records, "+m.recordAsOf+"."+
       (termKnown?"":" Turnout is shown once it has been recomputed for the current term.")));
   }
   c.appendChild(s1);
 
-  // --- positions on the quiz statements (MPs) ---
+  // --- where their votes put them on each thing the quiz asks about ---
   if(qm){
     var rows=[];
-    Q.statements.forEach(function(st,i){ if(has(qm.pos[i])) rows.push({st:st,i:i,p:qm.pos[i],n:castCount(qm.votes[i])}); });
+    set.statements.forEach(function(st,i){ if(has(qm.pos[i])) rows.push({st:st,i:i,p:qm.pos[i],n:castCount(qm.votes[i])}); });
     if(rows.length){
       rows.sort(function(a,b){ return b.p-a.p || b.n-a.n; });
       var s4=el("details","sect");
-      s4.appendChild(el("summary",null,"How they voted on "+rows.length+" issues"));
+      s4.appendChild(el("summary",null, set.commons ? "How they voted on "+rows.length+" issues"
+        : "How they voted in "+rows.length+" of the quiz's votes"));
       var ends=el("div","ends"); ends.appendChild(el("span",null,"Against")); ends.appendChild(el("span",null,"For"));
       var wrapEnds=el("div","issue"); wrapEnds.style.borderBottom="none"; wrapEnds.style.padding="0";
       wrapEnds.appendChild(el("span")); wrapEnds.appendChild(ends); s4.appendChild(wrapEnds);
@@ -895,6 +1446,9 @@ function card(m){
         row.appendChild(el("div","iband",cap(band(r.p,r.n))));
         s4.appendChild(row);
       });
+      s4.appendChild(el("p","note", set.commons
+        ? "From the votes that used the powers of Parliament. Take the quiz to compare these with your own views."
+        : "One vote each, picked by a fixed rule rather than by us: see How it works. Take the quiz to compare these with your own views."));
       c.appendChild(s4);
     }
   }
@@ -921,12 +1475,12 @@ function card(m){
   }
 
   // --- receipts ---
-  var rec=m.receipts||[];
+  var rec=m.receipts||[], side=group?"group":"party";
   if(m.partyLineDivisions&&!m.rebellions){
-    c.appendChild(el("p","note","Has never voted differently from most of their party."));
+    c.appendChild(el("p","note",(former?"Never voted":"Has never voted")+" differently from most of their "+side+"."));
   } else if(rec.length){
     var s3=el("details","sect");
-    s3.appendChild(el("summary",null,"When they broke with their party"+
+    s3.appendChild(el("summary",null,(group?"When they voted unlike their group":"When they broke with their party")+
       (m.rebellions>rec.length?" · latest "+rec.length+" of "+num(m.rebellions):" · "+rec.length)));
     var sc=el("div","scroll"), t=el("table","receipts");
     t.innerHTML="<thead><tr><th>Date</th><th>Division</th><th>Vote</th></tr></thead>";
@@ -936,27 +1490,36 @@ function card(m){
       var td=el("td"), url=receiptUrl(m.parliament,r[4]);
       if(url) td.appendChild(ext(url,r[1]||"(untitled division)")); else td.textContent=r[1]||"(untitled division)";
       tr.appendChild(td);
-      tr.appendChild(el("td",null,r[2]+" · party "+r[3]));
+      tr.appendChild(el("td",null,r[2]+" · "+side+" "+r[3]));
       tb.appendChild(tr);
     });
     t.appendChild(tb); sc.appendChild(t); s3.appendChild(sc); c.appendChild(s3);
   }
 
-  var links=el("div","links"), slug={commons:"mp",scotland:"msp",senedd:"ms",ni:"mla"}[ch.slug];
+  // --- the same person's record somewhere else ---
+  (RECORDS[m.id]||[]).forEach(function(r){
+    if(r.parliament===m.parliament) return;
+    var label=!r.status ? "Now in the "+house(r.parliament)
+      : r.status==="peer" ? "Also in the House of Lords" : "Used to sit in the "+house(r.parliament);
+    var p=el("p","small");
+    p.appendChild(button("linkbtn",label+" →",function(){ openPerson(r); }));
+    c.appendChild(p);
+  });
+
+  var links=el("div","links"), slug={commons:"mp",scotland:"msp",senedd:"ms",ni:"mla",lords:"peer"}[ch.slug];
   if(slug&&m.id) links.appendChild(ext("https://www.theyworkforyou.com/"+slug+"/"+m.id,"Full record on TheyWorkForYou"));
-  if(m.mnis) links.appendChild(ext("https://members.parliament.uk/member/"+m.mnis+"/contact","Contact"));
+  if(m.mnis&&sitting) links.appendChild(ext("https://members.parliament.uk/member/"+m.mnis+"/contact","Contact"));
   if(links.children.length) c.appendChild(links);
   return c;
 }
 
 /* ---------- quiz ---------- */
 function wireQuiz(){
-  $("quiz-start").addEventListener("click",function(){ S.started=true; save(); renderQuiz(); });
+  $("q-leave").addEventListener("click",function(){ S.started=false; save(); renderQuiz(); window.scrollTo(0,0); });
   var box=$("q-answers");
   ANSWERS.forEach(function(a,i){
-    var b=el("button","ans",a[0]); b.type="button"; b.setAttribute("role","radio");
-    b.dataset.v=a[1]; b.title="Press "+(i+1);
-    b.addEventListener("click",function(){ answer(a[1]); });
+    var b=button("ans",a[0],function(){ answer(a[1]); });
+    b.setAttribute("role","radio"); b.dataset.v=a[1]; b.title="Press "+(i+1);
     box.appendChild(b);
   });
   $("q-skip").addEventListener("click",function(){
@@ -978,52 +1541,113 @@ function wireQuiz(){
     else if(e.key==="ArrowRight"){ step(1); }
   });
 }
-function current(){ return Q.statements[ORDER[S.at]]; }
 function answer(v){
   var st=current(), a=S.answers[st.id]||{};
   a.v=v; a.imp=!!a.imp; S.answers[st.id]=a; save();
   renderQuiz();
-  setTimeout(function(){ if(current()===st) step(1); },170);
+  setTimeout(function(){ if(S.started&&current()===st) step(1); },170);
 }
 function step(d){
-  var n=S.at+d;
+  var sec=section(), n=at(sec)+d;
   if(n<0) return;
-  if(n>=ORDER.length){ save(); if(answeredCount()>=MIN_ANSWERS) go("match"); else renderQuiz(); return; }
-  S.at=n; save(); renderQuiz();
+  if(n>=sec.order.length){
+    save();
+    if(canShow(sec.set)) go("match"); else renderQuiz();
+    return;
+  }
+  S.ats[sec.id]=n; save(); renderQuiz();
+}
+/* The parts of the quiz, and how far through each the visitor is. */
+function renderParts(){
+  var host=$("parts"); host.innerHTML="";
+  offered().forEach(function(sec){
+    var p=el("div","panel part"), done=answeredIn(sec), total=sec.order.length, head=el("div","who");
+    head.appendChild(el("h3","cname",sec.title));
+    if(sec.devolved&&repsIn(sec.set).length) head.appendChild(el("span","role","Your "+roleOf(sec.set.parliament)+"s"));
+    p.appendChild(head);
+    p.appendChild(el("p","small",sec.blurb));
+    var bar=el("div","progress"), fill=el("i"); bar.setAttribute("aria-hidden","true");
+    fill.style.width=(total?100*done/total:0)+"%"; bar.appendChild(fill); p.appendChild(bar);
+    p.appendChild(el("p","keyline",done+" of "+total+" answered"));
+    var row=el("div","row");
+    row.appendChild(button(done?"btn ghost":"btn", !done ? "Start" : done>=total ? "Review my answers" : "Continue",
+      function(){ openSection(sec.id); renderQuiz(); window.scrollTo(0,0); }));
+    p.appendChild(row);
+    host.appendChild(p);
+  });
 }
 function renderQuiz(){
-  if(!Q){ $("quiz-lede").textContent="The quiz data has not been built yet."; $("quiz-intro").hidden=true; return; }
-  $("quiz-lede").textContent=Q.statements.length+" statements, all of them voted on by MPs since "+
-    Q.termStart.slice(0,4)+". The quiz covers the House of Commons.";
-  $("quiz-intro").hidden=S.started; $("quiz-card").hidden=!S.started;
+  if(!Q){
+    $("quiz-lede").textContent="The quiz data has not been built yet.";
+    $("quiz-parts").hidden=true; $("quiz-card").hidden=true; return;
+  }
+  var mine=SECTIONS.some(function(s){ return s.devolved&&repsIn(s.set).length; });
+  $("quiz-lede").textContent = mine
+    ? "You are represented in more than one parliament. Each has its own part, because each votes on different things."
+    : "Each part compares your views with how one parliament's members actually voted.";
+  $("quiz-parts").hidden=S.started; $("quiz-card").hidden=!S.started;
   navCount();
-  if(!S.started) return;
-  var st=current(), a=S.answers[st.id]||{}, n=answeredCount();
-  $("q-count").textContent="Statement "+(S.at+1)+" of "+ORDER.length;
-  $("q-group").textContent=st.group||"";
+  if(!S.started){ renderParts(); return; }
+  var sec=section(), pos=at(sec), total=sec.order.length, st=current(), a=S.answers[st.id]||{};
+  var n=answeredInSet(sec.set);
+  $("q-leave").textContent="← "+sec.title+", and the other parts";
+  $("q-count").textContent=(sec.devolved?"Vote ":"Statement ")+(pos+1)+" of "+total;
+  $("q-group").textContent=st.group||""; $("q-group").hidden=!st.group;
   $("q-free").hidden=!st.freeVote;
-  $("q-bar").style.width=(100*(S.at+1)/ORDER.length)+"%";
+  $("q-bar").style.width=(100*(pos+1)/total)+"%";
+  $("q-lead").textContent=sec.lead;
   $("q-text").textContent=st.text+".";
   $("q-imp").checked=!!a.imp;
   document.querySelectorAll("#q-answers .ans").forEach(function(b){
     b.setAttribute("aria-checked", typeof a.v==="number"&&Number(b.dataset.v)===a.v ? "true":"false");
   });
+  // A devolved question is a single motion: show what it actually said,
+  // because its title alone can be read either way.
+  var motion=$("q-motion"), words=sec.devolved ? (st.detail||"") : "";
+  motion.innerHTML=""; motion.hidden=!words;
+  if(words){
+    // Long ones open in full on request.
+    var cut=320, isLong=words.length>cut+80, short=isLong ? words.slice(0,words.lastIndexOf(" ",cut))+"…" : words;
+    var body=el("p",null,short);
+    motion.appendChild(body);
+    if(isLong){
+      var whole=false;
+      var more=button("linkbtn","Read the whole motion",function(){
+        whole=!whole;
+        body.textContent=whole ? words : short;
+        more.textContent=whole ? "Show less" : "Read the whole motion";
+      });
+      motion.appendChild(more);
+    }
+  }
   // detail: what was actually voted on
   var d=$("q-detail"); d.innerHTML=""; $("q-more").open=false;
-  if(st.detail&&norm(st.detail)!==norm(st.text)) d.appendChild(el("p",null,st.detail));
-  d.appendChild(el("p",null,st.divisions.length+" vote"+(st.divisions.length===1?"":"s")+" in all, "+
-    st.termVotes+" in this parliament. The most recent:"));
-  var ul=el("ul");
-  st.divisions.slice(-3).reverse().forEach(function(dv){
-    var li=el("li"); li.appendChild(document.createTextNode(dv.date+" — "));
-    li.appendChild(ext(divisionUrl(dv),dv.title));
-    li.appendChild(document.createTextNode(dv.alignment==="agree" ? " (voting aye supported it)" : " (voting no supported it)"));
-    ul.appendChild(li);
-  });
-  d.appendChild(ul);
-  if(st.link){ var p=el("p"); p.appendChild(ext(st.link,"The legislation on Parliament's website")); d.appendChild(p); }
-  $("q-back").disabled=S.at===0;
-  $("q-next").textContent=S.at===ORDER.length-1 ? "Finish" : "Next →";
+  $("q-more-sum").textContent=sec.devolved ? "What exactly was voted on?" : "What did MPs vote on?";
+  if(sec.devolved){
+    var vote=st.divisions[0], res=st.result||[];
+    d.appendChild(el("p",null,"One vote, on "+longDate(vote.date)+(res.length===2 ? ": "+res[0]+" for, "+res[1]+" against" : "")+
+      ". Agreeing means you would have voted for it."));
+    if(!st.detail) d.appendChild(el("p",null,"The record gives its title, not its wording. Follow the link before answering if the title could be read either way."));
+    var lp=el("p"); lp.appendChild(ext(divisionUrl(vote),"The vote, and what was said about it")); d.appendChild(lp);
+    d.appendChild(el("p",null,"One vote is thinner evidence than the Commons statements, which pool several. Members sometimes vote against something they sympathise with because of how it is worded or who proposed it."));
+  } else {
+    if(st.detail&&norm(st.detail)!==norm(st.text)) d.appendChild(el("p",null,st.detail.replace(/\s*-\s*learn more about this legislation\.?\s*$/i,"")));
+    var all=st.divisions.length;
+    d.appendChild(el("p",null, st.termVotes>0
+      ? all+" vote"+(all===1?"":"s")+" in all, "+st.termVotes+" in this parliament. The most recent:"
+      : all+" vote"+(all===1?"":"s")+", the last in "+st.divisions[all-1].date.slice(0,4)+". The most recent:"));
+    var ul=el("ul");
+    st.divisions.slice(-3).reverse().forEach(function(dv){
+      var li=el("li"); li.appendChild(document.createTextNode(dv.date+" — "));
+      li.appendChild(ext(divisionUrl(dv),dv.title));
+      li.appendChild(document.createTextNode(dv.alignment==="agree" ? " (voting aye supported it)" : " (voting no supported it)"));
+      ul.appendChild(li);
+    });
+    d.appendChild(ul);
+    if(st.link){ var p=el("p"); p.appendChild(ext(st.link,"The legislation on Parliament's website")); d.appendChild(p); }
+  }
+  $("q-back").disabled=pos===0;
+  $("q-next").textContent=pos===total-1 ? "Finish" : "Next →";
   $("q-done").disabled=n<MIN_ANSWERS;
   $("q-hint").textContent = n<MIN_ANSWERS
     ? "Answer "+(MIN_ANSWERS-n)+" more to see a match. Keys 1–5 answer; arrow keys move."
@@ -1031,87 +1655,235 @@ function renderQuiz(){
 }
 
 /* ---------- match ---------- */
+function partyLabel(p){ return /^labour/i.test(p) ? "Labour" : p; }
+/* Sitting as an independent, or in the chair, is the absence of a party. */
+function isParty(p){ return !!p && !/^(independent|speaker|presiding officer)/i.test(p); }
+var SHORT={"Scottish National Party":"SNP","Liberal Democrat":"Lib Dem",
+  "Social Democratic and Labour Party":"SDLP","Traditional Unionist Voice":"TUV"};
+function ownMp(){
+  var mine=repsIn(SETBY[UK]);
+  return mine.length ? mine[0] : null;
+}
+/* Which MP the Commons results are about: the one picked, else your own,
+   else whoever voted most like you. */
 function focusMember(ranked){
-  var mine=null;
-  if(S.place){
-    var areas=placeAreas(S.place).filter(function(a){ return a.parliament===UK; });
-    if(areas.length&&quizById[areas[0].members[0].id]) mine=quizById[areas[0].members[0].id];
-  }
-  if(S.mp&&quizById[S.mp]) return {qm:quizById[S.mp], why:mine&&mine.id===S.mp?"yours":"chosen"};
+  var set=SETBY[UK], mine=ownMp();
+  if(S.mp&&set.byId[S.mp]) return {qm:set.byId[S.mp], why:mine&&mine.id===S.mp?"yours":"chosen"};
   if(mine) return {qm:mine, why:"yours"};
   return ranked.length ? {qm:ranked[0].qm, why:"closest"} : null;
 }
-function partyLabel(p){ return /^labour/i.test(p) ? "Labour" : p; }
-/* Sitting as an independent, or as Speaker, is the absence of a party. */
-function isParty(p){ return !!p && !/^(independent|speaker)/i.test(p); }
-var SHORT={"Scottish National Party":"SNP","Liberal Democrat":"Lib Dem",
-  "Social Democratic and Labour Party":"SDLP","Traditional Unionist Voice":"TUV"};
+/* And for a devolved legislature: the one picked, else whichever of your own
+   representatives voted most like you, else the closest of anyone. */
+function focusIn(set,ranked){
+  var chosen=set.byId[FOCUS[set.parliament]];
+  if(chosen) return chosen;
+  var mine=repsIn(set), n=answeredInSet(set), best=null, bestPct=-1;
+  mine.forEach(function(qm){
+    var m=matchFor(set,qm);
+    if(shownIn(m,n)&&m.pct>bestPct){ best=qm; bestPct=m.pct; }
+  });
+  if(best) return best;
+  if(mine.length) return mine[0];
+  return ranked.length ? ranked[0].qm : null;
+}
+/* Why a member has no match, in a few words. */
+function whyNoMatch(set,qm,m){
+  if(m.k===0&&m.eligible>0){
+    // Sinn Féin MPs do not sit at Westminster. Its MLAs do sit, and vote.
+    if(set.commons&&/sinn/i.test(qm.party)) return "does not take their seat";
+    return "has not voted on these";
+  }
+  if(m.eligible===0) return "was not a member for these votes";
+  return "too few votes in common";
+}
+/* What a figure rests on, in a few words. */
+function basis(set,m,enough){
+  var things=set.commons ? "statements" : "votes";
+  return enough ? m.k+" "+things+" in common" : "voted on "+m.k+" of "+m.eligible+" "+things+" they could have";
+}
+/* The same in a sentence, for a figure that rests on under half. */
+function partialNote(set,m,listName){
+  var missed=m.eligible-m.k, role=roleOf(set.parliament);
+  return " They were "+(/^M[A-Z]/.test(role)?"an":"a")+" "+role+" for "+missed+" more that you answered and did not vote on "+
+    (missed===1?"it":"them")+", so this is a partial picture, and they are left out of the "+listName+" below.";
+}
+function blockId(parliament){ return "blk-"+norm(parliament).replace(/ /g,"-"); }
+function bringUp(parliament){
+  var blk=$(blockId(parliament));
+  if(blk&&blk.scrollIntoView) blk.scrollIntoView({block:"start"});
+}
+/* Makes one member the subject of their parliament's results, and brings those up. */
+function showIn(set,id){
+  if(set.commons){ S.mp=id; save(); } else FOCUS[set.parliament]=id;
+  renderMatch(); bringUp(set.parliament);
+}
+function clearAnswers(){
+  if(!window.confirm("Clear all "+answeredCount()+" of your answers from this browser? This cannot be undone.")) return;
+  S.answers={}; S.ats={}; S.section=COMMONS; S.started=false; S.mp=null; FOCUS={}; save(); go("quiz");
+}
+
 function renderMatch(){
   var host=$("match-body"); host.innerHTML="";
   if(!Q){ $("match-lede").textContent="The quiz data has not been built yet."; return; }
   var n=answeredCount();
-  if(n<MIN_ANSWERS){
-    $("match-lede").textContent="Answer at least "+MIN_ANSWERS+" statements and your match appears here.";
-    var p=el("div","panel"); var b=el("button","btn",n?"Continue the quiz":"Take the quiz"); b.type="button";
-    b.addEventListener("click",function(){ S.started=true; save(); go("quiz"); });
-    p.appendChild(el("p",null,"You have answered "+n+" so far.")); p.appendChild(b); host.appendChild(p);
+  if(!anyMatch()){
+    $("match-lede").textContent="Answer at least "+MIN_ANSWERS+" statements in any part of the quiz and your match appears here.";
+    var p=el("div","panel");
+    p.appendChild(el("p",null,"You have answered "+n+" so far."));
+    p.appendChild(button("btn",n?"Continue the quiz":"Take the quiz",function(){ if(n){ S.started=true; save(); } go("quiz"); }));
+    host.appendChild(p);
     return;
   }
-  $("match-lede").textContent="Based on the "+n+" statement"+(n===1?"":"s")+" you answered, compared with how each MP voted on the same things.";
+  $("match-lede").textContent="Based on the "+n+" statement"+(n===1?"":"s")+" you answered, compared with how each member voted on the same things.";
+  host.appendChild(yourRepresentatives());
 
-  var ranked=Q.members.map(function(qm){ var m=matchFor(qm); return {qm:qm,pct:m.pct,k:m.k}; })
-    .filter(enoughOverlap).sort(function(a,b){ return b.pct-a.pct || b.k-a.k; });
-  var focus=focusMember(ranked);
-
-  // --- headline ---
-  if(focus){
-    var fm=matchFor(focus.qm), panel=el("div","panel"), hero=el("div","hero");
-    panel.style.maxWidth="none";
-    var ok=enoughOverlap(fm);
-    hero.appendChild(el("div","big", ok ? Math.round(fm.pct)+"%" : "—"));
-    var txt=el("div");
-    txt.appendChild(el("p","eyebrow", focus.why==="yours" ? "Your MP" : focus.why==="chosen" ? "Selected MP" : "Your closest match in the House"));
-    txt.appendChild(el("h3",null,focus.qm.name));
-    txt.appendChild(el("p","small muted",partyLabel(focus.qm.party)+" · "+focus.qm.area));
-    hero.appendChild(txt); panel.appendChild(hero);
-    panel.appendChild(el("p","small", ok
-      ? "Agreement across the "+fm.k+" statement"+(fm.k===1?"":"s")+" you answered that "+focus.qm.name+
-        " has voted on. 100% would mean they always voted the way you feel; 50% is no relationship either way."
-      : focus.qm.name+" has voted on too few of the statements you answered to give a match."+
-        (/sinn/i.test(focus.qm.party)?" Sinn Féin MPs do not take their seats, so they have no voting record.":"")));
-    var act=el("div","row");
-    var b1=el("button","btn ghost","Change my answers"); b1.type="button";
-    b1.addEventListener("click",function(){ S.started=true; save(); go("quiz"); });
-    act.appendChild(b1);
-    if(focus.why!=="yours"){
-      var b2=el("button","btn quiet",S.place?"Back to my MP":"Find my MP"); b2.type="button";
-      b2.addEventListener("click",function(){ S.mp=null; save(); if(S.place) renderMatch(); else go("reps"); });
-      act.appendChild(b2);
-    }
-    var b3=el("button","linkbtn","Clear my answers and start again"); b3.type="button";
-    b3.addEventListener("click",function(){ S.answers={}; S.at=0; S.started=false; S.mp=null; save(); go("quiz"); });
-    act.appendChild(b3);
-    panel.appendChild(act);
-    host.appendChild(panel);
+  var commons=SETBY[UK];
+  if(canShow(commons)){
+    var ranked=rankedFor(commons), focus=focusMember(ranked), block=el("div","block");
+    block.id=blockId(UK);
+    block.appendChild(el("h3","bhead","House of Commons"));
+    if(focus) block.appendChild(headline(commons,focus.qm,focus.why));
+    var grid=el("div","grid2");
+    grid.appendChild(compassPanel(focus&&focus.qm));
+    grid.appendChild(closest(commons,ranked));
+    block.appendChild(grid);
+    if(focus) block.appendChild(breakdown(commons,focus.qm));
+    host.appendChild(block);
   }
+  SETS.forEach(function(set){
+    if(set.commons||!canShow(set)) return;
+    var ranked=rankedFor(set), qm=focusIn(set,ranked), block=el("div","block"), answered=answeredInSet(set);
+    var mine={}; repsIn(set).forEach(function(x){ mine[x.id]=1; });
+    block.id=blockId(set.parliament);
+    block.appendChild(el("h3","bhead",house(set.parliament)));
+    block.appendChild(el("p","lede","From the "+answered+" of its "+set.statements.length+
+      " votes you answered. Each is one vote it actually held: you said how you would have voted, and this is how they did."));
+    if(qm) block.appendChild(headline(set,qm,mine[qm.id]?"yours":"chosen"));
+    var grid=el("div","grid2");
+    grid.appendChild(closest(set,ranked));
+    block.appendChild(grid);
+    if(qm) block.appendChild(breakdown(set,qm));
+    var sec=sectionFor(set);
+    if(sec&&answered<set.statements.length){
+      var more=el("p","small");
+      more.appendChild(button("linkbtn","Answer more of its votes ("+(set.statements.length-answered)+" left)",
+        function(){ openSection(sec.id); go("quiz"); }));
+      block.appendChild(more);
+    }
+    host.appendChild(block);
+  });
 
-  // --- compass + context ---
-  var grid=el("div","grid2");
-  grid.appendChild(compassPanel(focus&&focus.qm));
-  var side=el("div","panel");
-  side.appendChild(el("p","eyebrow","MPs who voted most like you"));
+  var foot=el("p","small"); foot.style.marginTop="26px";
+  foot.appendChild(button("linkbtn","Clear my answers and start again",clearAnswers));
+  host.appendChild(foot);
+}
+
+/* Everyone who represents the visitor, in every parliament, with their match.
+   This is the answer to the question the site exists for. */
+function yourRepresentatives(){
+  var panel=el("div","panel"); panel.style.maxWidth="none";
+  if(!S.place){
+    panel.appendChild(el("p","eyebrow","Your representatives"));
+    panel.appendChild(el("p","small","Choose where you live to see how your own representatives compare. Until then, this page shows whoever voted most like you."));
+    panel.appendChild(button("btn ghost","Find my representatives",function(){ go("reps"); }));
+    return panel;
+  }
+  panel.appendChild(el("p","eyebrow","Your representatives · "+S.place.label));
+  var any=false;
+  SETS.forEach(function(set){
+    var mine=repsIn(set);
+    if(!mine.length) return;
+    any=true;
+    var role=roleOf(set.parliament), answered=answeredInSet(set), group=el("div","repgroup");
+    group.appendChild(el("h4",null,house(set.parliament)));
+    if(!canShow(set)){
+      var who=mine.length===1 ? role+", "+mine[0].name+", compares" : mine.length+" "+role+"s compare";
+      group.appendChild(el("p","small", set.commons
+        ? "Answer at least "+MIN_ANSWERS+" of its statements to see how your "+who+"."
+        : "It votes on different things from Westminster, so it has its own questions. Answer at least "+MIN_ANSWERS+
+          " to see how your "+who+"."+(answered?" You have answered "+answered+".":"")));
+      var sec=sectionFor(set);
+      if(sec) group.appendChild(button("btn", set.commons ? "Answer its statements" : "Answer its "+set.statements.length+" questions",
+        function(){ openSection(sec.id); go("quiz"); }));
+      panel.appendChild(group);
+      return;
+    }
+    var rows=mine.map(function(qm){ var m=matchFor(set,qm); m.qm=qm; m.shown=shownIn(m,answered); return m; })
+      .sort(function(a,b){ return (b.shown?b.pct:-1)-(a.shown?a.pct:-1); });
+    var ol=el("ul","rank");
+    rows.forEach(function(m){
+      var li=el("li"), left=el("div"), nb=button("linkbtn",m.qm.name,function(){ showIn(set,m.qm.id); });
+      nb.style.fontSize="14px";
+      left.appendChild(nb);
+      left.appendChild(el("span","sub",partyLabel(m.qm.party)+" · "+
+        (m.shown ? basis(set,m,enoughIn(m,answered)) : whyNoMatch(set,m.qm,m))));
+      li.appendChild(left); li.appendChild(el("span","v big2",m.shown ? Math.round(m.pct)+"%" : "—"));
+      ol.appendChild(li);
+    });
+    group.appendChild(ol);
+    panel.appendChild(group);
+  });
+  if(!any) panel.appendChild(el("p","small","Nobody who sits for "+S.place.label+" has a record to compare yet."));
+  panel.appendChild(el("p","note","Each figure compares your answers with that member's own votes in their own parliament. Different parliaments vote on different things, so compare members within one, not across."));
+  return panel;
+}
+
+/* The figure a parliament's results lead with, and who it is about. */
+function headline(set,qm,why){
+  var fm=matchFor(set,qm), answered=answeredInSet(set), ok=shownIn(fm,answered), partial=ok&&!enoughIn(fm,answered);
+  var role=roleOf(set.parliament), panel=el("div","panel"), hero=el("div","hero");
+  panel.style.maxWidth="none";
+  hero.appendChild(el("div","big", ok ? Math.round(fm.pct)+"%" : "—"));
+  var txt=el("div");
+  txt.appendChild(el("p","eyebrow", why==="yours" ? "Your "+role
+    : why==="chosen" ? (qm.former?"Former ":"Selected ")+role : "Your closest match in the House"));
+  txt.appendChild(el("h3",null,qm.name));
+  txt.appendChild(el("p","small muted",partyLabel(qm.party)+" · "+qm.area+(qm.former&&qm.to?" · "+qm.from+"–"+qm.to:"")));
+  hero.appendChild(txt); panel.appendChild(hero);
+  var words;
+  if(!ok){
+    words = set.commons
+      ? qm.name+" has voted on too few of the statements you answered to give a match."+
+        (/sinn/i.test(qm.party)?" Sinn Féin MPs do not take their seats, so they have no voting record.":"")
+      : qm.name+" "+whyNoMatch(set,qm,fm)+", so there is no match to show.";
+  } else if(set.commons){
+    words="Agreement across the "+fm.k+" statement"+(fm.k===1?"":"s")+" you answered that "+qm.name+
+      " has voted on. 100% would mean they always voted the way you feel; 50% is no relationship either way."+
+      (partial ? partialNote(set,fm,"list of closest MPs") : "");
+  } else {
+    words="Agreement across the "+fm.k+" of these votes that "+qm.name+" took part in."+
+      (partial ? partialNote(set,fm,"list of the closest") : "");
+  }
+  panel.appendChild(el("p","small",words));
+  var act=el("div","row"), sec=sectionFor(set);
+  if(sec) act.appendChild(button("btn ghost","Change my answers",function(){ openSection(sec.id); go("quiz"); }));
+  if(set.commons&&why!=="yours"){
+    act.appendChild(button("btn quiet",S.place?"Back to my MP":"Find my MP",function(){
+      S.mp=null; save(); if(S.place){ renderMatch(); bringUp(UK); } else go("reps");
+    }));
+  }
+  panel.appendChild(act);
+  return panel;
+}
+
+/* The members closest to you, and how each party compares on average. */
+function closest(set,ranked){
+  var roles=roleOf(set.parliament)+"s", side=el("div","panel");
+  side.appendChild(el("p","eyebrow",roles+" who voted most like you"));
+  if(!ranked.length) side.appendChild(el("p","note","No "+roles+" have enough votes in common with your answers yet."));
   var ol=el("ol","rank");
   ranked.slice(0,6).forEach(function(r){
-    var li=el("li"), left=el("div"), nb=el("button","linkbtn",r.qm.name); nb.type="button";
+    var li=el("li"), left=el("div"), nb=button("linkbtn",r.qm.name,function(){ showIn(set,r.qm.id); });
     nb.style.fontSize="14px";
-    nb.addEventListener("click",function(){ S.mp=r.qm.id; save(); renderMatch(); window.scrollTo(0,0); });
     left.appendChild(nb); left.appendChild(el("span","sub",partyLabel(r.qm.party)+" · "+r.qm.area));
     li.appendChild(left); li.appendChild(el("span","v",Math.round(r.pct)+"%")); ol.appendChild(li);
   });
   side.appendChild(ol);
-  var byParty={};
+  // Enough members for an average to mean something: four in the Commons,
+  // three in the smaller chambers.
+  var least=set.commons?4:3, byParty={};
   ranked.forEach(function(r){ var p=partyLabel(r.qm.party); (byParty[p]=byParty[p]||[]).push(r.pct); });
-  var parties=Object.keys(byParty).filter(function(p){ return isParty(p)&&byParty[p].length>=4; }).map(function(p){
+  var parties=Object.keys(byParty).filter(function(p){ return isParty(p)&&byParty[p].length>=least; }).map(function(p){
     var v=byParty[p]; return {p:p,n:v.length,avg:v.reduce(function(a,b){return a+b;},0)/v.length};
   }).sort(function(a,b){ return b.avg-a.avg; });
   if(parties.length){
@@ -1121,36 +1893,24 @@ function renderMatch(){
       var row=el("div","pbar"); row.appendChild(el("div","mlabel",x.p));
       var tr=el("div","mtrack"), f=el("div","mfill"); f.style.width=x.avg+"%"; tr.appendChild(f); row.appendChild(tr);
       row.appendChild(el("div","mval",Math.round(x.avg)+"%"));
-      bindTip(row,x.p+": average match "+x.avg.toFixed(1)+"% across "+x.n+" MPs. Individual MPs differ — see the list above.");
+      bindTip(row,x.p+": average match "+x.avg.toFixed(1)+"% across "+x.n+" "+roles+". Individual members differ — see the list above.");
       pb.appendChild(row);
     });
     side.appendChild(pb);
-    side.appendChild(el("p","note","Parties with at least four MPs. Because most votes are whipped, your MP's match is usually close to their party's."));
+    side.appendChild(el("p","note","Parties with at least "+(least===4?"four":"three")+" "+roles+
+      ". Because most votes are whipped, a member's match is usually close to their party's."));
   }
-  grid.appendChild(side);
-  host.appendChild(grid);
-
-  // --- statement by statement ---
-  if(focus) host.appendChild(breakdown(focus.qm));
-
-  // --- devolved representatives ---
-  if(S.place){
-    var dev=placeAreas(S.place).filter(function(a){ return a.parliament!==UK; });
-    if(dev.length){
-      var note=el("div","panel"); note.style.maxWidth="none";
-      note.appendChild(el("p","eyebrow","Your other representatives"));
-      note.appendChild(el("p","small","There is no match yet for "+dev.map(function(a){
-        return a.members.length+" "+(chamber(a.parliament).role||"member")+(a.members.length===1?"":"s")+" for "+a.area; }).join(", ")+
-        ". Nobody publishes an independent mapping of votes to policies for the devolved legislatures, and we will not invent one quietly. Their voting records are under Your representatives."));
-      host.appendChild(note);
-    }
-  }
+  side.appendChild(el("p","note","Only "+roles+" who voted on at least half of what you answered, of the votes held while they were a member, are ranked or averaged here."));
+  return side;
 }
 
 function compassPanel(focusQm){
-  var panel=el("div","panel");
+  var commons=SETBY[UK], panel=el("div","panel");
   panel.appendChild(el("p","eyebrow","Where the votes sit"));
-  var you=place(userValue);
+  var you=place(commons.statements,function(i){
+    var a=S.answers[commons.statements[i].id];
+    return a&&typeof a.v==="number" ? a.v : null;
+  });
   var NS="http://www.w3.org/2000/svg", P=36, W=300, size=W+2*P;
   var svg=document.createElementNS(NS,"svg");
   svg.setAttribute("viewBox","0 0 "+size+" "+size); svg.setAttribute("class","compass");
@@ -1172,7 +1932,7 @@ function compassPanel(focusQm){
   node("text",{x:P+W,y:P+W+22,"text-anchor":"end"},"Right →");
   // every MP with enough tagged votes to place
   var sums={};
-  Q.members.forEach(function(m){
+  commons.members.forEach(function(m){
     var c=COMPASS[m.id];
     if(c.e===null||c.s===null||c.en<4||c.sn<3) return;
     // Many MPs have identical records and would sit on one point; a small
@@ -1201,7 +1961,7 @@ function compassPanel(focusQm){
       boxes.push(pick);
       node("text",{x:pick.x.toFixed(1),y:pick.y.toFixed(1),"text-anchor":"middle","class":"plab"},name);
     });
-  var fc=focusQm&&COMPASS[focusQm.id];
+  var fc=focusQm ? compassOf(focusQm) : null;
   if(fc&&fc.e!==null&&fc.s!==null){
     var f=node("circle",{cx:X(fc.e).toFixed(1),cy:Y(fc.s).toFixed(1),r:6.5,fill:"var(--data)",stroke:"var(--surface)","stroke-width":2});
     bindTip(f,focusQm.name+" — from "+fc.en+" economic and "+fc.sn+" social statements they have voted on.");
@@ -1219,8 +1979,14 @@ function compassPanel(focusQm){
   key("k-you","You"); if(focusQm) key("k-them",focusQm.name); key("k-all","Every other MP");
   panel.appendChild(lg);
   panel.appendChild(el("p","note", placed
-    ? "Placed from votes, not beliefs: a dot shows where an MP's votes sit on the statements we could tag, which reflects government and opposition as well as conviction. Party names mark each party's average; dots are nudged slightly so MPs with identical records don't hide one another."
+    ? "You are placed from "+you.en+" economic and "+you.sn+" social statements. Placed from votes, not beliefs: a dot shows where an MP's votes sit on the statements we could tag, which reflects government and opposition as well as conviction. Party names mark each party's average; dots are nudged slightly so MPs with identical records don't hide one another."
     : "Answer at least three statements on each axis to place yourself. The tags behind this compass are ours; see How it works."));
+  var earlier=sectionById(EARLIER);
+  if(earlier&&answeredIn(earlier)<earlier.order.length){
+    var more=el("p","small");
+    more.appendChild(button("linkbtn","Sharpen it: answer earlier parliaments",function(){ openSection(EARLIER); go("quiz"); }));
+    panel.appendChild(more);
+  }
   return panel;
 }
 
@@ -1228,17 +1994,18 @@ function answerLabel(v){
   for(var i=0;i<ANSWERS.length;i++) if(ANSWERS[i][1]===v) return ANSWERS[i][0].toLowerCase();
   return "";
 }
-function breakdown(qm){
+/* Your answer beside their votes, one statement at a time. */
+function breakdown(set,qm){
   var wrap=el("div","panel"); wrap.style.maxWidth="none";
-  wrap.appendChild(el("p","eyebrow","Statement by statement · "+qm.name));
+  wrap.appendChild(el("p","eyebrow",(set.commons?"Statement by statement":"Vote by vote")+" · "+qm.name));
   var lg=el("div","legend");
   var s1=el("span"); s1.appendChild(el("i","k-you")); s1.appendChild(document.createTextNode("Your answer")); lg.appendChild(s1);
   var s2=el("span"); s2.appendChild(el("i","k-them")); s2.appendChild(document.createTextNode("Their votes")); lg.appendChild(s2);
-  lg.appendChild(el("span","muted","Open a statement to see every vote behind it."));
+  lg.appendChild(el("span","muted", set.commons ? "Open a statement to see every vote behind it." : "Open one to see the vote itself."));
   wrap.appendChild(lg);
 
   var groups=[["You agree",[]],["Somewhere in between",[]],["You disagree",[]],["No voting record on these",[]]];
-  Q.statements.forEach(function(st,i){
+  set.statements.forEach(function(st,i){
     var a=S.answers[st.id];
     if(!a||typeof a.v!=="number") return;
     var p=qm.pos[i], row={st:st,i:i,v:a.v,imp:a.imp,p:p};
@@ -1254,44 +2021,73 @@ function breakdown(qm){
     var ge=el("div","ends"); ge.appendChild(el("span",null,"Against")); ge.appendChild(el("span",null,"For"));
     gh.appendChild(ge); sec.appendChild(gh);
     g[1].forEach(function(r){
-      var d=el("details","cmp"), sm=el("summary");
+      var d=el("details","cmp"), sm=el("summary"), codes=qm.votes[r.i]||"";
       sm.appendChild(el("div","st",cap(r.st.text)+(r.imp?"  ★":"")));
       sm.appendChild(axis(r.p,r.v));
-      var n=castCount(qm.votes[r.i]);
+      var n=castCount(codes);
       sm.appendChild(el("div","who2","You "+answerLabel(r.v)+(r.imp?" (matters a lot)":"")+" · "+
-        (has(r.p) ? qm.name+" "+band(r.p,n) : qm.name+" has not voted on this")));
+        (has(r.p) ? qm.name+" "+band(r.p,n)
+          : couldVote(codes) ? qm.name+" did not vote on this"
+          : qm.name+" was not a member when this was voted on")));
       d.appendChild(sm);
       var body=el("div","body"), sc=el("div","scroll"), t=el("table","receipts");
-      t.innerHTML="<thead><tr><th>Date</th><th>Division</th><th>On this statement</th></tr></thead>";
-      var tb=el("tbody"), codes=qm.votes[r.i];
+      t.innerHTML="<thead><tr><th>Date</th><th>Division</th><th>"+(set.commons?"On this statement":"Their vote")+"</th></tr></thead>";
+      var tb=el("tbody");
       r.st.divisions.forEach(function(dv,j){
         var tr=el("tr"); tr.appendChild(el("td",null,dv.date));
         var td=el("td"); td.appendChild(ext(divisionUrl(dv),dv.title)); tr.appendChild(td);
-        tr.appendChild(el("td",null,CODE[codes.charAt(j)]||"—")); tb.appendChild(tr);
+        tr.appendChild(el("td",null,CODE[codes.charAt(j)||"."]||"—")); tb.appendChild(tr);
       });
       // newest first reads better; the table was built oldest first
       Array.prototype.slice.call(tb.children).reverse().forEach(function(x){ tb.appendChild(x); });
       t.appendChild(tb); sc.appendChild(t); body.appendChild(sc);
+      if(r.st.divisions.length>1||r.st.divisions[0].alignment!=="agree")
+        body.appendChild(el("p","note","For, against and so on are relative to the statement, not to the wording of the motion."));
       if(r.st.freeVote) body.appendChild(el("p","note","A free vote: parties did not instruct their MPs."));
       d.appendChild(body);
       sec.appendChild(d);
     });
     wrap.appendChild(sec);
   });
-  var skipped=Q.statements.length-answeredCount();
-  if(skipped) wrap.appendChild(el("p","note",skipped+" statement"+(skipped===1?" is":"s are")+" not counted because you skipped or have not reached "+(skipped===1?"it":"them")+"."));
+  var skipped=set.statements.length-answeredInSet(set), thing=set.commons?"statement":"vote";
+  if(skipped) wrap.appendChild(el("p","note",skipped+" "+thing+(skipped===1?" is":"s are")+" not counted because you skipped or have not reached "+(skipped===1?"it":"them")+"."));
   return wrap;
 }
 
+/* ---------- the numbers in How it works, and the sources ---------- */
+function methodNumbers(){
+  function put(id,text){ var n=$(id); if(n) n.textContent=text; }
+  function hide(id,gone){ var n=$(id); if(n) n.hidden=gone; }
+  var commons=SETBY[UK];
+  if(commons){
+    var earlier=commons.statements.length-commons.core;
+    var tagged=commons.statements.filter(function(s){ return s.econ||s.social; }).length;
+    put("m-core",commons.core); put("m-earlier",earlier); hide("m-earlier-wrap",!earlier);
+    put("m-tagged",tagged); put("m-untagged",commons.statements.length-tagged);
+  }
+  var devolved=SETS.filter(function(s){ return !s.commons; }).map(function(s){
+    return s.statements.length+" for the "+house(s.parliament);
+  });
+  put("m-devolved",list(devolved)); hide("m-devolved-wrap",!devolved.length);
+  var others=D.others||[];
+  var former=others.filter(function(m){ return m.status==="former"; }).length;
+  put("m-former",num(former)); put("m-peers",num(others.length-former)); hide("m-others-wrap",!others.length);
+  var ballots=((D.elections||{}).ballots||[]).length;
+  put("m-ballots", ballots ? " ("+ballots+" ballot"+(ballots===1?" is":"s are")+" in the register now)" : "");
+  var councils=((D.councils||{}).bodies||[]).map(function(b){ return b.name.replace(/ (City )?Council$/,""); });
+  put("m-councils",list(councils)); hide("m-councils-wrap",!councils.length);
+}
 function footer(){
   var f=$("foot"); f.innerHTML="";
-  var src=D.sources||{}, v=src.votes||{}, sp=src.speech||{};
+  var src=D.sources||{}, v=src.votes||{}, sp=src.speech||{}, e=D.elections||{}, c=D.councils||{};
   var line="Votes and memberships: TheyWorkForYou Votes and the parlparse register, by mySociety (CC BY 4.0)"+
     (v.asOf?", as of "+v.asOf:"")+". ";
   if(sp.asOf) line+="Questions, speeches and Northern Ireland Assembly votes: Glasshouse's own collection from the four legislatures, as of "+sp.asOf+". ";
-  line+="Contains Parliamentary information licensed under the Open Parliament Licence v3.0, and information from the Scottish Parliament, Senedd Cymru and the Northern Ireland Assembly under their open licences. Not affiliated with any of them, or with mySociety.";
+  if(e.ballots) line+="Elections and candidates: Democracy Club (CC BY 4.0)"+(e.asOf?", as of "+e.asOf:"")+". ";
+  if((c.bodies||[]).length) line+="Councillors and attendance: each council's own published committee records"+(c.asOf?", as of "+c.asOf:"")+
+    "; Northern Ireland's electoral areas from the District Electoral Areas (Northern Ireland) Order 2014. ";
+  line+="Contains Parliamentary information licensed under the Open Parliament Licence v3.0, public sector information licensed under the Open Government Licence v3.0, and information from the Scottish Parliament, Senedd Cymru and the Northern Ireland Assembly under their open licences. Glasshouse is independent: not affiliated with any parliament, council, government or party, nor with mySociety or Democracy Club.";
   f.textContent=line;
-  if(Q){ var n=$("m-n"); if(n) n.textContent=Q.statements.length; }
 }
 
 /* ---------- load ---------- */

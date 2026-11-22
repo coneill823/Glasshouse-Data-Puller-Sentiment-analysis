@@ -17,27 +17,33 @@ const web = path.join(root, 'build', 'web');
 const out = path.join(root, 'store', 'screenshots');
 const quiz = JSON.parse(fs.readFileSync(path.join(root, 'assets', 'data', 'quiz.json'), 'utf8'));
 
-// Someone part-way through: most statements answered, some marked as
-// mattering more, a few skipped; a Glasgow postcode already looked up.
+// Someone part-way through: most of the Commons statements and of the
+// Assembly's votes answered, some marked as mattering more, a few skipped; a
+// Belfast postcode already looked up, which has an MP and five MLAs.
 const scale = [1, 0.5, -0.5, -1, 0.5, 0, 1, -1, 0.5, -0.5];
 const answers = {};
 quiz.statements.forEach((s, i) => {
   if (i % 9 === 8) return;
   answers[s.id] = { v: scale[i % scale.length], skipped: false, imp: i % 7 === 0 };
 });
+const ASSEMBLY = 'NI Assembly';
+quiz.chambers[ASSEMBLY].statements.forEach((s, i) => {
+  if (i % 11 === 10) return;
+  answers[s.id] = { v: scale[(i * 3) % scale.length], skipped: false, imp: i % 6 === 0 };
+});
 const saved = JSON.stringify({
   answers,
-  at: 6,
+  ats: { commons: 6, [ASSEMBLY]: 2 },
+  section: 'commons',
   mp: null,
   started: true,
   place: {
-    label: 'G12 8QQ',
-    keys: [
-      'UK Parliament||Glasgow North',
-      'Scottish Parliament||Glasgow Kelvin and Maryhill',
-      'Scottish Parliament||Glasgow',
-    ],
+    label: 'BT7 1NN',
+    keys: ['UK Parliament||Belfast South and Mid Down', `${ASSEMBLY}||Belfast South`],
     notes: [],
+    codes: ['N09000003'],
+    ward: 'Central',
+    district: 'N09000003',
   },
 });
 
@@ -102,7 +108,10 @@ function serve() {
     // The four destinations share the width of the bar at the bottom.
     const tab = async (index) => {
       await page.mouse.click((d.width / 4) * (index + 0.5), d.height - 34);
-      await page.waitForTimeout(700);
+      // A pointer left resting on the bar brings up its tooltip, which a
+      // phone never shows. Move it away and let the tooltip go.
+      await page.mouse.move(d.width / 2, d.height / 3);
+      await page.waitForTimeout(1600);
     };
 
     // The app draws on a canvas, so there is nothing in the page to scroll to.
@@ -157,12 +166,15 @@ function serve() {
     await tab(1);
     await shot('2-quiz');
     await tab(2);
+    // Everyone who represents you, in both parliaments, each with a figure.
     await shot('3-match');
     const perUnit = await measure('Based on the');
     await bring('Where the votes sit', UNDER_BAR, perUnit);
     await shot('4-compass');
     await bring('Statement by statement', UNDER_BAR, perUnit);
     await shot('5-statements');
+    await bring('Vote by vote', UNDER_BAR, perUnit);
+    await shot('6-votes');
     await context.close();
     console.log(`${d.name}: ${d.width * d.ratio} x ${d.height * d.ratio}`);
   }

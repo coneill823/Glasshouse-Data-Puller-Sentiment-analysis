@@ -29,6 +29,18 @@ Future<void> press(WidgetTester tester, Finder finder) async {
   await tester.pumpAndSettle();
 }
 
+/// Types into the search box.
+///
+/// The test binding asks for the keyboard only when the field being typed into
+/// is a different one from last time. On a real device nothing tells it that
+/// the box was left in between, so typing into the same box twice would be
+/// dropped the second time unless it is made to forget the first.
+Future<void> search(WidgetTester tester, String text) async {
+  tester.binding.focusedEditable = null;
+  await tester.enterText(find.byType(TextField), text);
+  await tester.pumpAndSettle();
+}
+
 Future<void> tab(WidgetTester tester, String label) => press(
     tester, find.descendant(of: find.byType(NavigationBar), matching: find.text(label)));
 
@@ -45,8 +57,7 @@ void main() {
     expect(find.byType(MemberCard), findsWidgets); // the bundled data was read
 
     // Search works on the real data.
-    await tester.enterText(find.byType(TextField), 'Islington North');
-    await tester.pumpAndSettle();
+    await search(tester, 'Islington North');
     await press(tester, find.widgetWithText(InkWell, 'Islington North'));
     expect(find.text('1 REPRESENTATIVE'), findsOneWidget);
 
@@ -72,8 +83,7 @@ void main() {
     // A devolved parliament has questions of its own, and they match its
     // members: several of them for one place, not only an MP.
     await tab(tester, 'Reps');
-    await tester.enterText(find.byType(TextField), 'Belfast South');
-    await tester.pumpAndSettle();
+    await search(tester, 'Belfast South');
     await press(tester, find.widgetWithText(InkWell, 'Belfast South'));
     expect(find.byType(MemberCard), findsAtLeastNWidgets(3));
     await press(tester, find.text('Answer the Northern Ireland Assembly questions'));

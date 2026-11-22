@@ -22,6 +22,8 @@ divisions — so its record still comes from behaviour.py over the scraped data.
 """
 from __future__ import annotations
 
+import html
+import re
 from pathlib import Path
 
 from analysis import mysociety
@@ -152,16 +154,20 @@ def compute(votes, divisions, party_of_membership, term_start: str) -> dict:
     return out
 
 
+def plain_title(text: str) -> str:
+    """A division's title as words. The Lords' titles arrive with markup in
+    them ("Bill - <i>Motion to Agree</i>") and some with entities."""
+    text = re.sub(r"<[^>]*>", "", html.unescape(text or ""))
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def chamber_record(cache_dir: Path, chamber: str, people=None) -> dict:
     """Voting record for everyone who has voted in `chamber`."""
-    import html
-
     people = people or mysociety.People(cache_dir)
     divisions = mysociety.load_table(cache_dir, "divisions")
     divisions = divisions[divisions["chamber_slug"] == chamber].copy()
     divisions["date"] = divisions["date"].astype(str)
-    divisions["division_name"] = divisions["division_name"].map(
-        lambda s: html.unescape(s or ""))
+    divisions["division_name"] = divisions["division_name"].map(plain_title)
     votes = mysociety.load_table(cache_dir, "votes")
     votes = votes[votes["division_key"].isin(set(divisions["key"]))]
     return compute(votes, divisions, people.party_of_membership,

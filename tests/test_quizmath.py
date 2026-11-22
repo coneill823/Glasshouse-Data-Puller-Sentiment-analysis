@@ -37,9 +37,9 @@ class Match(unittest.TestCase):
         self.assertFalse(qm.enough(r, answered=10))
 
     def test_a_partial_record_is_shown_but_not_ranked(self):
-        # An MP who stays out of votes on laws for England: there for all
-        # twelve, voted in five. Their constituents see the figure; it does
-        # not sit in a ranking above members with a full record.
+        # A member for all twelve who voted in five. Their constituents see
+        # the figure; it does not sit in a ranking above members with a full
+        # record.
         positions = [1] * 5 + [None] * 7
         votes = ["f"] * 5 + ["x"] * 7
         r = qm.match(positions, votes, {i: (1, False) for i in range(12)})
