@@ -1,61 +1,365 @@
 {
-  "_about": "Every editorial decision Glasshouse makes about the quiz is in this file. The statements themselves, the votes behind them and which way each vote counts are mySociety's (TheyWorkForYou) and are used unchanged. If you disagree with something here, this is the only place you need to look.",
-
-  "wording": {
-    "_about": "Fixes to statement text only where the source has a typo or reads awkwardly as a question. The original is kept in the output as sourceText.",
-    "20005": {"text": "increasing employers' national insurance contributions", "why": "source reads 'increasing in employers'' (typo)"},
-    "20007": {"text": "creating a publicly owned energy investment company (Great British Energy)", "why": "source spells it 'publically'"},
-    "20006": {"text": "means-testing winter fuel payments for pensioners, ending the universal payment", "why": "source uses a slash: 'means-testing/removing universality on'"},
-    "826": {"text": "measures that increase LGBT+ rights and social equality", "why": "source is past tense ('increased'), written to describe votes rather than to ask a question"}
+ "_about": "Every editorial decision Glasshouse makes about the quiz is in this file. The statements themselves, the votes behind them and which way each vote counts are mySociety's (TheyWorkForYou) and are used unchanged. If you disagree with something here, this is the only place you need to look.",
+ "wording": {
+  "_about": "Fixes to statement text only where the source has a typo or reads awkwardly as a question. The original is kept in the output as sourceText.",
+  "20005": {
+   "text": "increasing employers' national insurance contributions",
+   "why": "source reads 'increasing in employers'' (typo)"
   },
-
-  "exclude": {
-    "_about": "Statements deliberately left out of the quiz, with the reason. Empty: every policy with a scoring vote this parliament is asked."
+  "20007": {
+   "text": "creating a publicly owned energy investment company (Great British Energy)",
+   "why": "source spells it 'publically'"
   },
-
-  "compass": {
-    "_about": "Which compass axis a statement moves you on, and in which direction, if you SUPPORT it. econ: -1 = left (more tax, public spending, public ownership, regulation of markets), +1 = right. social: -1 = liberal (personal autonomy, civil liberties, lighter enforcement), +1 = authoritarian (restriction, enforcement, security). A statement with no entry does not move the compass at all — that is the default, and it is used whenever a statement is a package of several things or does not sit cleanly on either axis. The same tags place the user and every MP, so any error here moves everyone identically.",
-
-    "20009": {"econ": -1, "why": "raising a tax on capital"},
-    "20002": {"econ": -1, "why": "raising a tax on company profits"},
-    "20011": {"econ": -1, "why": "ending a tax exemption for private education"},
-    "20003": {"econ": -1, "why": "raising a tax on property purchases"},
-    "20005": {"econ": -1, "why": "raising a tax on employers"},
-    "20031": {"econ": -1, "why": "narrowing a tax relief"},
-    "20032": {"econ": -1, "why": "raising income tax in real terms"},
-    "20008": {"econ": -1, "why": "regulating the labour market in favour of employees"},
-    "20010": {"econ": -1, "why": "regulating the rental market in favour of tenants"},
-    "6746": {"econ": -1, "why": "public ownership"},
-    "20028": {"econ": -1, "why": "public ownership"},
-    "20007": {"econ": -1, "why": "public ownership"},
-    "20025": {"econ": -1, "why": "public control of a privately run service"},
-    "20027": {"econ": -1, "why": "higher welfare spending"},
-    "20023": {"econ": 1, "why": "lower welfare spending on balance; a package, but the cut was the contested part"},
-    "20006": {"econ": 1, "why": "ending a universal benefit"},
-
-    "1087": {"social": 1, "why": "stricter border enforcement"},
-    "20019": {"social": 1, "why": "banning organisations under terrorism law"},
-    "20012": {"social": 1, "why": "new state powers to monitor bank accounts"},
-    "811": {"social": 1, "why": "restricting a personal choice by law"},
-    "20004": {"social": -1, "why": "earlier release from prison"},
-    "826": {"social": -1, "why": "extending individual rights"},
-    "6732": {"social": -1, "why": "personal autonomy over end of life"}
+  "20006": {
+   "text": "means-testing winter fuel payments for pensioners, ending the universal payment",
+   "why": "source uses a slash: 'means-testing/removing universality on'"
   },
-
-  "compass_untagged": {
-    "_about": "Why the remaining statements carry no compass tag. They still count fully towards the match.",
-    "1030": "climate policy is not an economic left-right or liberal-authoritarian question",
-    "6704": "as above",
-    "20014": "as above",
-    "6694": "a tax, but argued on public-health grounds rather than left-right ones",
-    "20020": "industry regulation that began under one party and was passed by another",
-    "20015": "a package: academy pay and curriculum, child protection, breakfast clubs",
-    "20016": "planning speed versus local control cuts across both axes",
-    "20017": "a package: new immigration offences AND scrapping the Rwanda scheme",
-    "20021": "its meaning is itself the disagreement: equal treatment vs correcting unequal outcomes",
-    "20029": "specific to the legacy of the Troubles",
-    "837": "constitutional reform is a separate question from either axis",
-    "1079": "as above",
-    "1084": "as above"
+  "826": {
+   "text": "measures that increase LGBT+ rights and social equality",
+   "why": "source is past tense ('increased'), written to describe votes rather than to ask a question"
+  },
+  "6764": {
+   "text": "a right to remain for EU nationals already living in the UK",
+   "why": "source reads 'already in living in' (typo)"
   }
+ },
+ "exclude": {
+  "_about": "Statements deliberately left out of the quiz, with the reason. Everything else that has ever had a scoring vote is asked.",
+  "6667": "\"the policies included in the 2010 Coalition Agreement\" is 58 votes on unrelated measures; nobody can agree or disagree with it as one thing"
+ },
+ "compass": {
+  "_about": "Which compass axis a statement moves you on, and in which direction, if you SUPPORT it. econ: -1 = left (more tax, public spending, public ownership, regulation of markets), +1 = right. social: -1 = liberal (personal autonomy, civil liberties, lighter enforcement), +1 = authoritarian (restriction, enforcement, security). A statement with no entry does not move the compass at all — that is the default, and it is used whenever a statement is a package of several things or does not sit cleanly on either axis. The same tags place the user and every MP, so any error here moves everyone identically.",
+  "20009": {
+   "econ": -1,
+   "why": "raising a tax on capital"
+  },
+  "20002": {
+   "econ": -1,
+   "why": "raising a tax on company profits"
+  },
+  "20011": {
+   "econ": -1,
+   "why": "ending a tax exemption for private education"
+  },
+  "20003": {
+   "econ": -1,
+   "why": "raising a tax on property purchases"
+  },
+  "20005": {
+   "econ": -1,
+   "why": "raising a tax on employers"
+  },
+  "20031": {
+   "econ": -1,
+   "why": "narrowing a tax relief"
+  },
+  "20032": {
+   "econ": -1,
+   "why": "raising income tax in real terms"
+  },
+  "20008": {
+   "econ": -1,
+   "why": "regulating the labour market in favour of employees"
+  },
+  "20010": {
+   "econ": -1,
+   "why": "regulating the rental market in favour of tenants"
+  },
+  "6746": {
+   "econ": -1,
+   "why": "public ownership"
+  },
+  "20028": {
+   "econ": -1,
+   "why": "public ownership"
+  },
+  "20007": {
+   "econ": -1,
+   "why": "public ownership"
+  },
+  "20025": {
+   "econ": -1,
+   "why": "public control of a privately run service"
+  },
+  "20027": {
+   "econ": -1,
+   "why": "higher welfare spending"
+  },
+  "20023": {
+   "econ": 1,
+   "why": "lower welfare spending on balance; a package, but the cut was the contested part"
+  },
+  "20006": {
+   "econ": 1,
+   "why": "ending a universal benefit"
+  },
+  "1087": {
+   "social": 1,
+   "why": "stricter border enforcement"
+  },
+  "20019": {
+   "social": 1,
+   "why": "banning organisations under terrorism law"
+  },
+  "20012": {
+   "social": 1,
+   "why": "new state powers to monitor bank accounts"
+  },
+  "811": {
+   "social": 1,
+   "why": "restricting a personal choice by law"
+  },
+  "20004": {
+   "social": -1,
+   "why": "earlier release from prison"
+  },
+  "826": {
+   "social": -1,
+   "why": "extending individual rights"
+  },
+  "6732": {
+   "social": -1,
+   "why": "personal autonomy over end of life"
+  },
+  "6679": {
+   "econ": 1,
+   "why": "cutting a tax on company profits"
+  },
+  "6691": {
+   "econ": 1,
+   "why": "tax reliefs for business"
+  },
+  "1052": {
+   "econ": 1,
+   "why": "moving the cost of university from the state to the student"
+  },
+  "1132": {
+   "econ": 1,
+   "why": "moving the cost of university from the state to the student"
+  },
+  "6677": {
+   "econ": -1,
+   "why": "limiting private work inside a public service"
+  },
+  "6963": {
+   "econ": -1,
+   "why": "more of the cost of care met from public funds"
+  },
+  "6743": {
+   "econ": 1,
+   "why": "market pricing in social housing"
+  },
+  "6744": {
+   "econ": 1,
+   "why": "weaker security of tenure in social housing"
+  },
+  "1105": {
+   "econ": 1,
+   "why": "selling a public service into private ownership"
+  },
+  "1120": {
+   "econ": 1,
+   "why": "reducing what the state pays its own workers"
+  },
+  "6707": {
+   "econ": 1,
+   "why": "cutting public funding for legal help"
+  },
+  "6718": {
+   "econ": -1,
+   "why": "regulating what landlords' agents may charge tenants"
+  },
+  "6671": {
+   "econ": 1,
+   "why": "cutting grants to councils"
+  },
+  "6681": {
+   "econ": -1,
+   "why": "a higher top rate of income tax"
+  },
+  "6711": {
+   "econ": -1,
+   "why": "a new tax on wealth held in property"
+  },
+  "6716": {
+   "econ": 1,
+   "why": "trading employment rights away"
+  },
+  "6731": {
+   "econ": 1,
+   "why": "restricting trade unions"
+  },
+  "6733": {
+   "econ": -1,
+   "why": "raising a tax on banks"
+  },
+  "6925": {
+   "econ": -1,
+   "why": "raising tax to pay for public services"
+  },
+  "6693": {
+   "econ": 1,
+   "why": "cutting a tax"
+  },
+  "6670": {
+   "econ": 1,
+   "why": "cutting welfare spending"
+  },
+  "6672": {
+   "econ": 1,
+   "why": "cutting a benefit"
+  },
+  "6673": {
+   "econ": -1,
+   "why": "higher benefits"
+  },
+  "6674": {
+   "econ": -1,
+   "why": "protecting benefits from inflation"
+  },
+  "6684": {
+   "econ": 1,
+   "why": "cutting support with council tax"
+  },
+  "6788": {
+   "econ": -1,
+   "why": "paying the state pension from an earlier age for longer"
+  },
+  "6897": {
+   "econ": 1,
+   "why": "paying the state pension later"
+  },
+  "6764": {
+   "social": -1,
+   "why": "protecting the status of migrants already here"
+  },
+  "6734": {
+   "social": 1,
+   "why": "stricter immigration enforcement"
+  },
+  "6860": {
+   "social": 1,
+   "why": "legal restrictions on daily life, whatever their purpose"
+  },
+  "6967": {
+   "social": -1,
+   "why": "personal autonomy over pregnancy"
+  },
+  "1051": {
+   "social": 1,
+   "why": "compulsory state identification"
+  },
+  "1071": {
+   "social": 1,
+   "why": "ministerial power over inquests"
+  },
+  "6721": {
+   "social": 1,
+   "why": "state retention of private communications data"
+  },
+  "6751": {
+   "social": 1,
+   "why": "state surveillance"
+  },
+  "6868": {
+   "social": 1,
+   "why": "permitting agents of the state to break the law"
+  },
+  "6916": {
+   "social": 1,
+   "why": "new police powers against unauthorised encampments"
+  },
+  "6965": {
+   "social": 1,
+   "why": "wider power to strip citizenship"
+  },
+  "1053": {
+   "social": 1,
+   "why": "detention, control orders and wider police powers"
+  },
+  "6715": {
+   "social": 1,
+   "why": "evidence heard in secret"
+  },
+  "6678": {
+   "social": 1,
+   "why": "restricting political campaigning"
+  },
+  "6686": {
+   "social": -1,
+   "why": "extending a civil right"
+  },
+  "6703": {
+   "social": -1,
+   "why": "equality and human-rights protections"
+  }
+ },
+ "compass_untagged": {
+  "_about": "Why the remaining statements carry no compass tag. They still count fully towards the match.",
+  "1030": "climate policy is not an economic left-right or liberal-authoritarian question",
+  "6704": "as above",
+  "20014": "as above",
+  "6694": "a tax, but argued on public-health grounds rather than left-right ones",
+  "20020": "industry regulation that began under one party and was passed by another",
+  "20015": "a package: academy pay and curriculum, child protection, breakfast clubs",
+  "20016": "planning speed versus local control cuts across both axes",
+  "20017": "a package: new immigration offences AND scrapping the Rwanda scheme",
+  "20021": "its meaning is itself the disagreement: equal treatment vs correcting unequal outcomes",
+  "20029": "specific to the legacy of the Troubles",
+  "837": "constitutional reform is a separate question from either axis",
+  "1079": "as above",
+  "1084": "as above",
+  "1074": "how a public service is organised, not how much the state owns, spends or permits",
+  "6687": "how a public service is organised, not how much the state owns, spends or permits",
+  "363": "how a public service is organised, not how much the state owns, spends or permits",
+  "6676": "how a public service is organised, not how much the state owns, spends or permits",
+  "6741": "environmental and transport policy is not an economic left-right or liberal-authoritarian question",
+  "6753": "environmental and transport policy is not an economic left-right or liberal-authoritarian question",
+  "6766": "environmental and transport policy is not an economic left-right or liberal-authoritarian question",
+  "6887": "environmental and transport policy is not an economic left-right or liberal-authoritarian question",
+  "6888": "environmental and transport policy is not an economic left-right or liberal-authoritarian question",
+  "6928": "environmental and transport policy is not an economic left-right or liberal-authoritarian question",
+  "6699": "environmental and transport policy is not an economic left-right or liberal-authoritarian question",
+  "6802": "environmental and transport policy is not an economic left-right or liberal-authoritarian question",
+  "975": "war and defence are neither economic nor civil-liberty questions",
+  "984": "war and defence are neither economic nor civil-liberty questions",
+  "1049": "war and defence are neither economic nor civil-liberty questions",
+  "6688": "war and defence are neither economic nor civil-liberty questions",
+  "6706": "war and defence are neither economic nor civil-liberty questions",
+  "6757": "war and defence are neither economic nor civil-liberty questions",
+  "1027": "Europe and trade cut across both axes",
+  "1065": "Europe and trade cut across both axes",
+  "6761": "Europe and trade cut across both axes",
+  "6818": "Europe and trade cut across both axes",
+  "6851": "Europe and trade cut across both axes",
+  "6857": "Europe and trade cut across both axes",
+  "842": "how we are governed and who decides, not what is decided",
+  "996": "how we are governed and who decides, not what is decided",
+  "1113": "how we are governed and who decides, not what is decided",
+  "1136": "how we are governed and who decides, not what is decided",
+  "6698": "how we are governed and who decides, not what is decided",
+  "6708": "how we are governed and who decides, not what is decided",
+  "6709": "how we are governed and who decides, not what is decided",
+  "6736": "how we are governed and who decides, not what is decided",
+  "6789": "how we are governed and who decides, not what is decided",
+  "6793": "how we are governed and who decides, not what is decided",
+  "20001": "how we are governed and who decides, not what is decided",
+  "6695": "how we are governed and who decides, not what is decided",
+  "6683": "how we are governed and who decides, not what is decided",
+  "6696": "how we are governed and who decides, not what is decided",
+  "6758": "how we are governed and who decides, not what is decided",
+  "6720": "how we are governed and who decides, not what is decided",
+  "1110": "a tax rise, but one that falls hardest on lower incomes: both left and right claim the other side of it",
+  "1109": "too specific, or about something else (safety, animal welfare, the legacy of the Troubles), to say anything about either axis",
+  "1124": "too specific, or about something else (safety, animal welfare, the legacy of the Troubles), to say anything about either axis",
+  "6705": "too specific, or about something else (safety, animal welfare, the legacy of the Troubles), to say anything about either axis",
+  "6719": "too specific, or about something else (safety, animal welfare, the legacy of the Troubles), to say anything about either axis",
+  "6854": "too specific, or about something else (safety, animal welfare, the legacy of the Troubles), to say anything about either axis",
+  "6862": "too specific, or about something else (safety, animal welfare, the legacy of the Troubles), to say anything about either axis",
+  "6892": "too specific, or about something else (safety, animal welfare, the legacy of the Troubles), to say anything about either axis",
+  "20030": "too specific, or about something else (safety, animal welfare, the legacy of the Troubles), to say anything about either axis",
+  "1050": "too specific, or about something else (safety, animal welfare, the legacy of the Troubles), to say anything about either axis",
+  "6690": "everyone claims to be against tax avoidance, and MPs' votes on it ran opposite to the rest of the economic axis (r = -0.82): it measures who was in government, not left or right",
+  "810": "regulating an industry and restricting a personal activity at once, so it sits on neither axis cleanly; MPs' votes on it ran opposite to the rest of the social axis (r = -0.67)"
+ }
 }

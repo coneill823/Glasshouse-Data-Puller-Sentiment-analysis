@@ -98,5 +98,45 @@ class Selection(unittest.TestCase):
         self.assertEqual(self.select([lords, dropped], {"exclude": {"10": "why"}}), [])
 
 
+class CoreAndMore(unittest.TestCase):
+    """Statements voted on this parliament are asked first; the rest follow."""
+
+    @staticmethod
+    def policy(pid, dates, name="P"):
+        return {"id": pid, "chamber_slug": "commons", "status": "active", "name": name,
+                "context_description": f"statement {pid}.", "policy_description": "",
+                "groups": [{"description": "G"}], "free_vote_parties": [],
+                "division_links": [{"strength": "strong", "alignment": "agree",
+                                    "decision": {"key": f"k{pid}-{i}", "date": d,
+                                                 "division_number": i, "division_name": "D"}}
+                                   for i, d in enumerate(dates)]}
+
+    def setUp(self):
+        self.policies = [self.policy(1, ["2019-01-01", "2025-03-01"]),      # still live
+                         self.policy(2, ["2004-01-01", "2010-01-01"]),      # long settled
+                         self.policy(3, ["2021-06-01"]),
+                         self.policy(4, ["2012-01-01"])]
+
+    def test_a_statement_voted_on_this_parliament_is_core(self):
+        core, more = P._split(self.policies, "2024-07-05", {})
+        self.assertEqual([s["id"] for s in core], [1])
+        self.assertEqual(core[0]["termVotes"], 1)
+
+    def test_the_rest_follow_most_recently_voted_on_first(self):
+        more = P.select_more(self.policies, "2024-07-05", {})
+        self.assertEqual([s["id"] for s in more], [3, 4, 2])
+        self.assertTrue(all(s["termVotes"] == 0 for s in more))
+
+    def test_an_excluded_statement_is_in_neither_list(self):
+        editorial = {"exclude": {"3": "a bundle of unrelated measures"}}
+        core, more = P._split(self.policies, "2024-07-05", editorial)
+        self.assertNotIn(3, [s["id"] for s in core + more])
+
+    def test_compass_tags_apply_to_both_lists(self):
+        editorial = {"compass": {"2": {"econ": 1}, "1": {"social": -1}}}
+        core, more = P._split(self.policies, "2024-07-05", editorial)
+        self.assertEqual((core[0]["social"], more[-1]["econ"]), (-1, 1))
+
+
 if __name__ == "__main__":
     unittest.main()

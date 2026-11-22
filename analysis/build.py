@@ -25,7 +25,7 @@ import shutil
 import time
 from pathlib import Path
 
-from analysis import behaviour, export_app_data, mysociety, positions
+from analysis import behaviour, councils, devolved, export_app_data, mysociety, positions
 
 ROOT = Path(__file__).resolve().parent.parent
 # Legislature folders whose VOTES come from mySociety, so behaviour.py need not
@@ -80,8 +80,9 @@ def main(argv=None):
     else:
         mysociety.fetch(cache)
 
-    print("[2/5] quiz statements and MP positions")
-    positions.build(cache, Path("app/quiz.json"), fetch=not a.no_fetch)
+    print("[2/5] quiz statements and positions: Commons, then each devolved legislature")
+    positions.build(cache, Path("app/quiz.json"), fetch=not a.no_fetch,
+                    chambers=devolved.build(cache, data_dir, fetch=not a.no_fetch))
 
     print("[3/5] speech figures from the scraped corpus")
     scraped = _scraped_legislatures(data_dir)
@@ -92,8 +93,9 @@ def main(argv=None):
         print(f"  reading {', '.join(scraped)}")
         behaviour.analyse(data_dir, out_dir, skip_votes=VOTES_FROM_MYSOCIETY)
 
-    print("[4/5] one record per representative")
-    export_app_data.build(cache, out_dir, Path("app/data.json"), fetch=False)
+    print("[4/5] one record per representative, former members, peers, candidates, councils")
+    export_app_data.build(cache, out_dir, Path("app/data.json"), fetch=not a.no_fetch,
+                          councils=councils.build(data_dir / "_councils", fetch=not a.no_fetch))
 
     print("[5/5] single-file app, and the phone app's copy of the data")
     spec = importlib.util.spec_from_file_location("build_standalone",

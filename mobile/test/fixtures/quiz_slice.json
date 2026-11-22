@@ -1,5 +1,5 @@
 {
- "_about": "A frozen slice of app/quiz.json. `expected` was computed by Python (see the generator in the commit that added this file); the Dart port must reproduce it exactly.",
+ "_about": "A frozen slice of app/quiz.json. `expected` is what analysis/quizmath.py makes of `answers`; the phone app's tests must reproduce it. Regenerate with: python -m analysis.quizmath",
  "quiz": {
   "termStart": "2024-07-05",
   "votesAsOf": "2026-11-22",
@@ -550,61 +550,809 @@
       "alignment": "agree"
      }
     ]
-   },
+   }
+  ],
+  "moreStatements": [
    {
-    "id": 20007,
-    "name": "Great British Energy",
-    "text": "creating a publicly owned energy investment company (Great British Energy)",
-    "sourceText": "creating a publically owned energy investment company (Great British Energy)",
-    "detail": "",
+    "id": 6928,
+    "name": "Environmental Water Quality",
+    "text": "improving environmental water quality",
+    "sourceText": "improving environmental water quality",
+    "detail": "There have been votes in Parliament on enviornmental water quality, including reducing the harm caused by untreated sewage discharges.",
     "link": "",
-    "group": "Miscellaneous Topics",
+    "group": "Environmental Issues",
     "freeVote": false,
-    "econ": -1,
+    "econ": 0,
     "social": 0,
-    "termVotes": 1,
+    "termVotes": 0,
     "divisions": [
      {
-      "key": "pw-2024-10-29-27-commons",
-      "date": "2024-10-29",
-      "number": 27,
-      "title": "Great British Energy Bill: Third Reading",
+      "key": "pw-2012-10-17-75-commons",
+      "date": "2012-10-17",
+      "number": 75,
+      "title": "European Union — Regulation of Emission of Pollutants from Ships",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2021-01-26-213-commons",
+      "date": "2021-01-26",
+      "number": 213,
+      "title": "Environment Bill — New Clause 1 — Environmental Principles: Public Authorities",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2021-10-20-87-commons",
+      "date": "2021-10-20",
+      "number": 87,
+      "title": "Environment Bill — Clause 4 — Environmental Targets: Effect",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2021-10-20-88-commons",
+      "date": "2021-10-20",
+      "number": 88,
+      "title": "Environment Bill — Clause 18 — Policy Statement on Environmental Principles — Exemptions",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2021-10-20-91-commons",
+      "date": "2021-10-20",
+      "number": 91,
+      "title": "Environment Bill — After Clause 78 — Storm Overflows — Sewage",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2024-05-15-153-commons",
+      "date": "2024-05-15",
+      "number": 153,
+      "title": "Criminal Justice Bill Report Stage: New Clause 91",
       "alignment": "agree"
      }
     ]
    },
    {
-    "id": 20008,
-    "name": "Employment rights",
-    "text": "shifting the balance of employment rights towards employees",
-    "sourceText": "shifting the balance of employment rights towards employees",
-    "detail": "Votes that affect employment rights - giving employees more rights.",
+    "id": 6751,
+    "name": "Mass Surveillance",
+    "text": "mass surveillance of people’s communications and activities",
+    "sourceText": "mass surveillance of people’s communications and activities",
+    "detail": "There have been votes in Parliament on whether the state should be permitted, with safeguards, to intercept people’s communications en masse, as well as obtain and use datasets which could include people’s personal banking, travel, and health data. The question of if the state should be able to require the retention of details of people’s internet use has also been voted on.",
     "link": "",
-    "group": "Social Issues",
+    "group": "Home Affairs",
     "freeVote": false,
-    "econ": -1,
-    "social": 0,
-    "termVotes": 3,
+    "econ": 0,
+    "social": 1,
+    "termVotes": 0,
     "divisions": [
      {
-      "key": "pw-2024-10-21-22-commons",
-      "date": "2024-10-21",
-      "number": 22,
-      "title": "Employment Rights Bill: Reasoned Amendment to Second Reading",
-      "alignment": "against"
-     },
-     {
-      "key": "pw-2024-10-21-23-commons",
-      "date": "2024-10-21",
-      "number": 23,
-      "title": "Employment Rights Bill: Second Reading",
+      "key": "pw-2016-03-15-220-commons",
+      "date": "2016-03-15",
+      "number": 220,
+      "title": "Investigatory Powers Bill — Second Reading — Mass Surveillance",
       "alignment": "agree"
      },
      {
-      "key": "pw-2025-03-12-123-commons",
-      "date": "2025-03-12",
-      "number": 123,
-      "title": "Employment Rights Bill: Third Reading",
+      "key": "pw-2016-06-07-12-commons",
+      "date": "2016-06-07",
+      "number": 12,
+      "title": "Investigatory Powers Bill — Clause 78 — Powers to Require Retention of Information on People's Internet Use",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2016-06-07-13-commons",
+      "date": "2016-06-07",
+      "number": 13,
+      "title": "Investigatory Powers Bill — Third Reading — Mass Surveillance",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2024-03-25-116-commons",
+      "date": "2024-03-25",
+      "number": 116,
+      "title": "Investigatory Powers (Amendment) Bill [Lords]: Third Reading",
+      "alignment": "agree"
+     }
+    ]
+   },
+   {
+    "id": 6734,
+    "name": "Tougher on illegal immigration",
+    "text": "stronger laws and enforcement of immigration rules",
+    "sourceText": "stronger laws and enforcement of immigration rules",
+    "detail": "The UK should have stronger laws to tackle illegal immigration",
+    "link": "",
+    "group": "Home Affairs",
+    "freeVote": false,
+    "econ": 0,
+    "social": 1,
+    "termVotes": 0,
+    "divisions": [
+     {
+      "key": "pw-2015-10-13-74-commons",
+      "date": "2015-10-13",
+      "number": 74,
+      "title": "Immigration Bill — Decline Second Reading",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2015-10-13-75-commons",
+      "date": "2015-10-13",
+      "number": 75,
+      "title": "Immigration Bill — Second Reading",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-12-01-133-commons",
+      "date": "2015-12-01",
+      "number": 133,
+      "title": "Immigration Bill — Clause 8 — Offence of Illegal Working",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2015-12-01-134-commons",
+      "date": "2015-12-01",
+      "number": 134,
+      "title": "Immigration Bill — Clauses 13-16 — Residential Tenancies",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2015-12-01-135-commons",
+      "date": "2015-12-01",
+      "number": 135,
+      "title": "Immigration Bill — Support for Failed Asylum Seekers and Illegal Migrants",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2015-12-01-137-commons",
+      "date": "2015-12-01",
+      "number": 137,
+      "title": "Immigation Bill — Third Reading",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2016-04-25-249-commons",
+      "date": "2016-04-25",
+      "number": 249,
+      "title": "Immigration Bill — Immigration Detention of Those Who Are Pregnant and Vulnerable People",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2016-12-14-110-commons",
+      "date": "2016-12-14",
+      "number": 110,
+      "title": "Draft Immigration Act 2014 (Current Accounts) (Excluded Accounts and Notification Requirements) Regulations 2016",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2020-06-30-62-commons",
+      "date": "2020-06-30",
+      "number": 62,
+      "title": "Immigration and Social Security Co-ordination (EU Withdrawal) Bill — New Clause 7 — Time Limit on Immigration Detention for EEA and Swiss Nationals",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2020-10-19-147-commons",
+      "date": "2020-10-19",
+      "number": 147,
+      "title": "Immigration and Social Security Co-ordination (EU Withdrawal) Bill — New Clause — Time Limit on Immigration Detention for EEA and Swiss Nationals",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2021-04-28-282-commons",
+      "date": "2021-04-28",
+      "number": 282,
+      "title": "Immigration (Guidance on Detention of Vulnerable Persons) Regulations 2021 — Motion to Revoke",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2021-07-20-57-commons",
+      "date": "2021-07-20",
+      "number": 57,
+      "title": "Nationality and Borders Bill — Decline Second Reading",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2021-07-20-58-commons",
+      "date": "2021-07-20",
+      "number": 58,
+      "title": "Nationality and Borders Bill — Second Reading",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2021-12-07-136-commons",
+      "date": "2021-12-07",
+      "number": 136,
+      "title": "Nationality and Borders Bill — New Clause 50 — Advertising Assistance for Unlawful Immigration to the United Kingdom",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2021-12-07-139-commons",
+      "date": "2021-12-07",
+      "number": 139,
+      "title": "Nationality and Borders Bill — Schedule 6 — Maritime Enforcement — Use of Powers to Endanger Life at Sea",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2021-12-08-141-commons",
+      "date": "2021-12-08",
+      "number": 141,
+      "title": "Nationality and Borders Bill — New Clause 6 — Exemptions for Child Victims of Modern Slavery, Exploitation or Trafficking",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2021-12-08-142-commons",
+      "date": "2021-12-08",
+      "number": 142,
+      "title": "Nationality and Borders Bill — Clause 58 — Late Compliance with Slavery or Trafficking Information Notice: Damage to Credibility",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2021-12-08-143-commons",
+      "date": "2021-12-08",
+      "number": 143,
+      "title": "Nationality and Borders Bill — Third Reading",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2022-03-22-220-commons",
+      "date": "2022-03-22",
+      "number": 220,
+      "title": "Nationality and Borders Bill — Clause 11 — Differential Treatment of Refugees",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2022-03-22-225-commons",
+      "date": "2022-03-22",
+      "number": 225,
+      "title": "Nationality and Borders Bill — Clause 39 — Illegal Entry and Similar Offences",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2022-03-22-228-commons",
+      "date": "2022-03-22",
+      "number": 228,
+      "title": "Nationality and Borders Bill — Clause 62 — Identified Potential Victims etc: Disqualification from Protection",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2022-04-20-254-commons",
+      "date": "2022-04-20",
+      "number": 254,
+      "title": "Nationality and Borders Bill — Clause 39 — Illegal Entry and Similar Offences",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2023-04-26-226-commons",
+      "date": "2023-04-26",
+      "number": 226,
+      "title": "Illegal Migration Bill - Third Reading",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2024-01-17-52-commons",
+      "date": "2024-01-17",
+      "number": 52,
+      "title": "Draft Immigration Act 2014 (Residential Accommodation) (Maximum Penalty) Order 2023",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2024-01-17-53-commons",
+      "date": "2024-01-17",
+      "number": 53,
+      "title": "Draft Immigration (Employment of Adults Subject to Immigration Control) (Maximum Penalty) (Amendment) Order 2023",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2024-01-17-60-commons",
+      "date": "2024-01-17",
+      "number": 60,
+      "title": "Safety of Rwanda (Asylum and Immigration) Bill Committee: Third reading",
+      "alignment": "agree"
+     }
+    ]
+   },
+   {
+    "id": 6709,
+    "name": "Powers of the Scottish Parliament",
+    "text": "transferring more powers to the Scottish Parliament",
+    "sourceText": "transferring more powers to the Scottish Parliament",
+    "detail": "There have been votes in Parliament on devolving powers to the Scottish Parliament. Specific subjects of these votes have ranged from giving the Scottish Parliament the ability to raise taxes to devolving powers and responsibility relating to the Maritime and Coastguard Agency in Scotland.",
+    "link": "",
+    "group": "Constitutional Reform",
+    "freeVote": false,
+    "econ": 0,
+    "social": 0,
+    "termVotes": 0,
+    "divisions": [
+     {
+      "key": "pw-2011-01-27-184-commons",
+      "date": "2011-01-27",
+      "number": 184,
+      "title": "Scotland Bill — Reject Second Reading — Devolution of Further Powers, Including Tax Raising Powers, to Scotland",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2011-03-07-216-commons",
+      "date": "2011-03-07",
+      "number": 216,
+      "title": "Scotland Bill — Clause 11 — Devolution to Scotland of Powers to Regulate Specially Dangerous Air Weapons",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2011-03-07-217-commons",
+      "date": "2011-03-07",
+      "number": 217,
+      "title": "Scotland Bill — Clause 12 — Return of Certain Insolvency Powers from Scotland to the UK Parliament",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2011-03-07-218-commons",
+      "date": "2011-03-07",
+      "number": 218,
+      "title": "Scotland Bill — Clause 13 — Return Responsibility for Regulating Health Professionals in Scotland to UK Parliament",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2011-03-14-222-commons",
+      "date": "2011-03-14",
+      "number": 222,
+      "title": "Scotland Bill — Clause 24 — Devolution of Power to Tax Quarrying or Mining to Scottish Parliament",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2011-03-15-225-commons",
+      "date": "2011-03-15",
+      "number": 225,
+      "title": "Scotland Bill — New Clause 3 — Devolution — Maritime and Coastguard Agency",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2011-03-15-226-commons",
+      "date": "2011-03-15",
+      "number": 226,
+      "title": "Scotland Bill — New Clause 9 — Devolution of Responsibility for Rail Services to the Scottish Parliament",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2011-03-15-227-commons",
+      "date": "2011-03-15",
+      "number": 227,
+      "title": "Scotland Bill — New Clause 10 — Crown Estate — Devolution of Powers",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2011-03-15-228-commons",
+      "date": "2011-03-15",
+      "number": 228,
+      "title": "Scotland Bill — New Clause 11 — Devolution of Powers Related to Time",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2011-03-15-229-commons",
+      "date": "2011-03-15",
+      "number": 229,
+      "title": "Scotland Bill — New Clause 19 — Devolution of Powers Relating to Food Labelling and Content",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2011-06-21-302-commons",
+      "date": "2011-06-21",
+      "number": 302,
+      "title": "Scotland Bill — Chapter 5 — Empower Scottish Parliament to Tax Company Profits",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-01-26-138-commons",
+      "date": "2015-01-26",
+      "number": 138,
+      "title": "Infrastructure Bill — New Clause 2 — Shale Gas Extraction in Scotland — Devolution of Regulation to Scottish Parliament",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-06-15-8-commons",
+      "date": "2015-06-15",
+      "number": 8,
+      "title": "Scotland Bill — Clause 1 — Consent of Scottish People and Parliament Before Abolition of The Scottish Parliament",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-06-15-10-commons",
+      "date": "2015-06-15",
+      "number": 10,
+      "title": "Scotland Bill — Clause 11 — Full Control Over Taxation, Borrowing and Public Spending for Scottish Parliament",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-06-15-12-commons",
+      "date": "2015-06-15",
+      "number": 12,
+      "title": "Scotland Bill — New Clause 3 — Powers of the Scottish Parliament",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-06-15-13-commons",
+      "date": "2015-06-15",
+      "number": 13,
+      "title": "Scotland Bill — New Clause 5 — Veto for Scottish Parliament on Repeal of Human Rights Act as it Applies to Scotland",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-06-15-14-commons",
+      "date": "2015-06-15",
+      "number": 14,
+      "title": "Scotland Bill — New Clause 10 — Require UK Parliament to Have Consent of Scottish Parliament Before Legislating on Devolved Matters",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-06-29-28-commons",
+      "date": "2015-06-29",
+      "number": 28,
+      "title": "Scotland Bill — New Clause 33 — Full Fiscal Autonomy for Scotland",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-06-29-29-commons",
+      "date": "2015-06-29",
+      "number": 29,
+      "title": "Scotland Bill — New Clause 54 — Devolution of Power Over Income Tax in Scotland",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-06-30-30-commons",
+      "date": "2015-06-30",
+      "number": 30,
+      "title": "Scotland Bill — Clause 19 — Threshold for Disability Benefits",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-06-30-31-commons",
+      "date": "2015-06-30",
+      "number": 31,
+      "title": "Scotland Bill — Clause 19 — Carers Benefit — Scope of Eligibility",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-06-30-32-commons",
+      "date": "2015-06-30",
+      "number": 32,
+      "title": "Scotland Bill — Clause 24 — Power of Scottish Ministers to Change Regulations on Benefits in Respect of Rent",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-06-30-34-commons",
+      "date": "2015-06-30",
+      "number": 34,
+      "title": "Scotland Bill — New Clause 28 — Housing Benefit — Devolving Powers to Scotland",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-06-30-35-commons",
+      "date": "2015-06-30",
+      "number": 35,
+      "title": "Scotland Bill — New Clause 31 — Ability of Scottish Parliament to Create New Benefits",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-06-30-36-commons",
+      "date": "2015-06-30",
+      "number": 36,
+      "title": "Scotland Bill — New Clause 39 — Powers of the Scottish Parliament — National Insurance",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-07-06-39-commons",
+      "date": "2015-07-06",
+      "number": 39,
+      "title": "Scotland Bill — Clause 32 — Gender Balance Among Members of the Scottish Parliament and Members of Boards of Scottish Public Authorities",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-11-09-111-commons",
+      "date": "2015-11-09",
+      "number": 111,
+      "title": "Scotland Bill — New Clause 35 — Consent of the Scottish Parliament to certain Westminster Acts",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-11-09-112-commons",
+      "date": "2015-11-09",
+      "number": 112,
+      "title": "Scotland Bill — New Clause 36 — Power for Scottish Parliament to Call a Scottish Independence Referendum",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-11-09-113-commons",
+      "date": "2015-11-09",
+      "number": 113,
+      "title": "Scotland Bill — New Clause 15 — Abortion",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-11-09-114-commons",
+      "date": "2015-11-09",
+      "number": 114,
+      "title": "Scotland Bill — New Clause 18 — Giving the Scottish Parliament Powers Relating to Tax Credits",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-11-09-115-commons",
+      "date": "2015-11-09",
+      "number": 115,
+      "title": "Scotland Bill — New Clause 27 — Equal Opportunities",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2017-12-04-54-commons",
+      "date": "2017-12-04",
+      "number": 54,
+      "title": "European Union (Withdrawal) Bill — Clause 11 — Power for Devolved Administrations to Amend EU Law Retained as UK Law on Withdrawal",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2017-12-04-56-commons",
+      "date": "2017-12-04",
+      "number": 56,
+      "title": "European Union (Withdrawal) Bill — Clause 11 and Schedule 3 — Power of Devolved Administrations to Amend EU Law Retained as UK Law",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2017-12-06-57-commons",
+      "date": "2017-12-06",
+      "number": 57,
+      "title": "European Union (Withdrawal) Bill — Schedule 2 — Powers for Scottish and Welsh Ministers to Amend Retained EU Law",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2017-12-13-70-commons",
+      "date": "2017-12-13",
+      "number": 70,
+      "title": "European Union (Withdrawal) Bill — Clause 9 — Regulations to Implement Withdrawal Agreement — Report on Reciprocal Healthcare Agreements — Veto for Devolved Administrations",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2018-01-16-94-commons",
+      "date": "2018-01-16",
+      "number": 94,
+      "title": "European Union (Withdrawal) Bill — Schedule 2 — Powers for Ministers in Devolved Administrations",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2018-01-16-95-commons",
+      "date": "2018-01-16",
+      "number": 95,
+      "title": "European Union (Withdrawal) Bill — Clause 11 — Powers of Devolved Administrations to Make Laws Incompatible With EU Law",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2018-06-12-177-commons",
+      "date": "2018-06-12",
+      "number": 177,
+      "title": "European Union (Withdrawal) Bill — Powers of Devolved Administrations",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2018-07-16-210-commons",
+      "date": "2018-07-16",
+      "number": 210,
+      "title": "Taxation (Cross-Border Trade) Bill — New Clause 16 — Consent of the Scottish Parliament — Taxes on International Trade",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2018-07-17-217-commons",
+      "date": "2018-07-17",
+      "number": 217,
+      "title": "Trade Bill — New Clause 20 — Approval of Negotiating Mandates — Devolved Administrations — International Trade Agreements",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2020-07-20-81-commons",
+      "date": "2020-07-20",
+      "number": 81,
+      "title": "Trade Bill — Clause 2 — Implementation of International Trade Agreements — Consent of Devolved Administrations",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2021-11-23-121-commons",
+      "date": "2021-11-23",
+      "number": 121,
+      "title": "Health and Care Bill — Clause 135 — Regulations — Veto for Devolved Governments",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2022-12-14-132-commons",
+      "date": "2022-12-14",
+      "number": 132,
+      "title": "Scotland’s Future",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2023-10-17-328-commons",
+      "date": "2023-10-17",
+      "number": 328,
+      "title": "Devolution (Employment) (Scotland): Ten Minute Rule Motion",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2024-01-16-45-commons",
+      "date": "2024-01-16",
+      "number": 45,
+      "title": "Scotland (Self-Determination): Ten Minute Rule Motion",
+      "alignment": "agree"
+     }
+    ]
+   },
+   {
+    "id": 6731,
+    "name": "Stricter Trade Union Regulation",
+    "text": "more restrictive regulation of trade union activity",
+    "sourceText": "more restrictive regulation of trade union activity",
+    "detail": "There have been votes in Parliament on the way trade unions are regulated, including on the law related to industrial action and strike ballots.",
+    "link": "",
+    "group": "Taxation and Employment",
+    "freeVote": false,
+    "econ": 1,
+    "social": 0,
+    "termVotes": 0,
+    "divisions": [
+     {
+      "key": "pw-2015-09-14-70-commons",
+      "date": "2015-09-14",
+      "number": 70,
+      "title": "Trade Union Bill — Second Reading",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2015-11-10-117-commons",
+      "date": "2015-11-10",
+      "number": 117,
+      "title": "Trade Union Bill — New Clause 2 — Workplace Ballots and Ballots by Electronic Means",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2015-11-10-118-commons",
+      "date": "2015-11-10",
+      "number": 118,
+      "title": "Trade Union Bill — Clause 9 — Union Supervision of Picketing",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2015-11-10-121-commons",
+      "date": "2015-11-10",
+      "number": 121,
+      "title": "Trade Union Bill — Third Reading",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2017-01-24-128-commons",
+      "date": "2017-01-24",
+      "number": 128,
+      "title": "Industrial Action (Protection of Critical National Services) Bill",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2017-02-08-145-commons",
+      "date": "2017-02-08",
+      "number": 145,
+      "title": "Draft Important Public Services (Education) Regulations 2017 — 40% Strike Ballot Threshold for State School Teachers",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2017-02-08-146-commons",
+      "date": "2017-02-08",
+      "number": 146,
+      "title": "Draft Important Public Services (Transport) Regulations 2017 — 40% Strike Ballot Threshold for Key Transport Workers",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2017-02-08-147-commons",
+      "date": "2017-02-08",
+      "number": 147,
+      "title": "Draft Important Public Services (Health) Regulations 2017 — 40% Strike Ballot Threshold for Key Health Workers",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2017-02-08-148-commons",
+      "date": "2017-02-08",
+      "number": 148,
+      "title": "Draft Important Public Services (Health) Regulations 2017 — 40% Strike Ballot Threshold for Border Security Workers",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2017-02-08-149-commons",
+      "date": "2017-02-08",
+      "number": 149,
+      "title": "Draft Important Public Services (Health) Regulations 2017 — 40% Strike Ballot Threshold for Fire Service Workers",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2022-01-26-176-commons",
+      "date": "2022-01-26",
+      "number": 176,
+      "title": "Draft Trade Union (Levy Payable to the Certification Officer) Regulations 2022",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2022-01-26-177-commons",
+      "date": "2022-01-26",
+      "number": 177,
+      "title": "Draft Trade Union (Power of the Certification Officer to Impose Financial Penalties) Regulations 2022",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2022-07-11-33-commons",
+      "date": "2022-07-11",
+      "number": 33,
+      "title": "Draft Conduct of Employment Agencies and Employment Businesses (Amendment) Regulations 2022",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2023-01-30-166-commons",
+      "date": "2023-01-30",
+      "number": 166,
+      "title": "Strikes (Minimum Service Levels) Bill Committee: Third Reading",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2023-11-28-9-commons",
+      "date": "2023-11-28",
+      "number": 9,
+      "title": "Draft Code of Practice on Reasonable Steps to be taken by a Trade Union (Minimum Service Levels)",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2023-11-28-10-commons",
+      "date": "2023-11-28",
+      "number": 10,
+      "title": "Draft Strikes (Minimum Service Levels: Border Security) Regulations 2023",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2023-11-28-11-commons",
+      "date": "2023-11-28",
+      "number": 11,
+      "title": "Draft Strikes (Minimum Service Levels: Passenger Railway Services) Regulations 2023",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2023-11-29-12-commons",
+      "date": "2023-11-29",
+      "number": 12,
+      "title": "Draft Strikes (Minimum Service Levels: NHS Ambulance Services and the NHS Patient Transport Service) Regulations 2023",
+      "alignment": "agree"
+     }
+    ]
+   },
+   {
+    "id": 20001,
+    "name": "Approve reports of Standards Committee",
+    "text": "approving reports and recommendations made by the Standards Committee",
+    "sourceText": "approving reports and recommendations made by the Standards Committee",
+    "detail": "The Standards Committee investigates if MPs have broken rules, and recommends sanctions for MPs to vote on. There have been votes (and decisions without a vote) on sanctions against individual MPs.",
+    "link": "",
+    "group": "Constitutional Reform",
+    "freeVote": false,
+    "econ": 0,
+    "social": 0,
+    "termVotes": 0,
+    "divisions": [
+     {
+      "key": "pw-2021-11-03-99-commons",
+      "date": "2021-11-03",
+      "number": 99,
+      "title": "Committee on Standards — Owen Paterson MP",
+      "alignment": "against"
+     },
+     {
+      "key": "pw-2023-06-06-245-commons",
+      "date": "2023-06-06",
+      "number": 245,
+      "title": "Committee on Standards Motion",
+      "alignment": "agree"
+     },
+     {
+      "key": "pw-2023-06-19-258-commons",
+      "date": "2023-06-19",
+      "number": 258,
+      "title": "Privilege: Conduct of Right Hon. Boris Johnson",
       "alignment": "agree"
      }
     ]
@@ -612,135 +1360,39 @@
   ],
   "members": [
    {
-    "id": 13904,
-    "name": "Paul Maskey",
-    "party": "Sinn Féin",
-    "area": "Belfast West",
+    "id": 26534,
+    "name": "Seamus Logan",
+    "party": "Scottish National Party",
+    "area": "Aberdeenshire North and Moray East",
     "pos": [
      null,
+     1.0,
      null,
-     null,
-     null,
-     null,
-     null,
-     null,
+     -1.0,
+     -1.0,
      null,
      null,
      null
     ],
     "votes": [
      "xxx",
-     "..xx",
-     ".xxx",
-     "xxxx",
-     ".............xxxxxxxxxxxxxxxxxxxxxxxxxxx",
-     "xx",
-     "xxx",
-     "x",
-     "x",
-     "xxx"
-    ]
-   },
-   {
-    "id": 10576,
-    "name": "Graham Stringer",
-    "party": "Labour",
-    "area": "Blackley and Middleton South",
-    "pos": [
-     1.0,
-     -1.0,
-     -1.0,
-     1.0,
-     -0.103,
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     1.0
-    ],
-    "votes": [
-     "fff",
-     "aaax",
-     "xaaa",
-     "ffff",
-     "ffffxffffffffxxxaaxaaaaaaaaaaaaxxxxxaaxf",
-     "ff",
-     "xff",
-     "f",
-     "f",
-     "ffx"
-    ]
-   },
-   {
-    "id": 26379,
-    "name": "Carla Denyer",
-    "party": "Green",
-    "area": "Bristol Central",
-    "pos": [
-     1.0,
-     1.0,
-     1.0,
-     1.0,
-     -1.0,
-     1.0,
-     1.0,
-     -1.0,
-     1.0,
-     1.0
-    ],
-    "votes": [
-     "xxf",
-     "...f",
-     "...f",
-     "ffff",
-     "......................................aa",
-     "ff",
-     "fff",
-     "a",
-     "f",
-     "fff"
-    ]
-   },
-   {
-    "id": 26352,
-    "name": "Nigel Farage",
-    "party": "Reform UK",
-    "area": "Clacton",
-    "pos": [
-     null,
-     1.0,
-     null,
-     -1.0,
-     null,
-     -1.0,
-     -1.0,
-     1.0,
-     -1.0,
-     -1.0
-    ],
-    "votes": [
-     "xxx",
      "...f",
      "...x",
-     "xxxa",
-     "......................................xx",
-     "ax",
-     "xxa",
-     "f",
-     "a",
-     "aaa"
+     "aaaa",
+     "......................................aa",
+     "xx",
+     "xxx",
+     "x"
     ]
    },
    {
-    "id": 26575,
-    "name": "Martin Rhodes",
+    "id": 26535,
+    "name": "Kenneth Stevenson",
     "party": "Labour",
-    "area": "Glasgow North",
+    "area": "Airdrie and Shotts",
     "pos": [
      1.0,
      -1.0,
-     null,
-     1.0,
      1.0,
      1.0,
      1.0,
@@ -751,134 +1403,360 @@
     "votes": [
      "fff",
      "...a",
+     "...f",
+     "ffff",
+     "......................................ff",
+     "fx",
+     "fff",
+     "f"
+    ]
+   },
+   {
+    "id": 26444,
+    "name": "Alex Baker",
+    "party": "Labour",
+    "area": "Aldershot",
+    "pos": [
+     1.0,
+     -1.0,
+     null,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     null
+    ],
+    "votes": [
+     "xxf",
+     "...a",
      "...x",
      "ffff",
      "......................................ff",
      "ff",
      "fff",
-     "f",
-     "f",
+     "x"
+    ]
+   },
+   {
+    "id": 11267,
+    "name": "Mark Tami",
+    "party": "Labour",
+    "area": "Alyn and Deeside",
+    "pos": [
+     1.0,
+     0.0,
+     null,
+     1.0,
+     -0.243,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "votes": [
+     "xxf",
+     "affa",
+     "xxxx",
+     "ffff",
+     "fffffffxfffffaxxaaaaaaaaaaaaaaaaaaaaaaff",
+     "ff",
+     "ffx",
+     "f"
+    ],
+    "morePos": [
+     1.0,
+     1.0,
+     -0.818,
+     0.31,
+     -1.0,
+     1.0
+    ],
+    "moreVotes": [
+     "fffffx",
+     "xxfx",
+     "aaaaaaaxxafaafaaaaaaaaaxxa",
+     "xxxxxafaafaffxxfxaxfffffaffxaaxffffafxxxffxxa",
+     "aaaaaaaaaaaaaaxxxa",
      "fff"
     ]
    },
    {
-    "id": 10162,
-    "name": "David Davis",
-    "party": "Conservative",
-    "area": "Goole and Pocklington",
-    "pos": [
-     null,
-     0.0,
-     -1.0,
-     -1.0,
-     0.444,
-     -1.0,
-     -1.0,
-     null,
-     null,
-     -1.0
-    ],
-    "votes": [
-     "xxx",
-     "xfax",
-     "xaxx",
-     "axxa",
-     "xffxfxxxfxxxxxaxffxafffffxaxfxxaaxxxxfxx",
-     "aa",
-     "axx",
-     "x",
-     "x",
-     "aaa"
-    ]
-   },
-   {
-    "id": 10001,
-    "name": "Diane Abbott",
+    "id": 10086,
+    "name": "Alan Campbell",
     "party": "Labour",
-    "area": "Hackney North and Stoke Newington",
+    "area": "Tynemouth",
     "pos": [
      1.0,
-     1.0,
+     0.0,
      null,
      1.0,
-     -0.789,
+     -0.314,
      1.0,
      1.0,
-     -1.0,
-     null,
      1.0
     ],
     "votes": [
-     "ffx",
-     "fffx",
+     "fff",
+     "affa",
      "xxxx",
-     "xxxf",
-     "xafxxaafaaxxxaxxaaaaaaaaxxxxxaaxxxxxxaxx",
+     "ffff",
+     "fffxfxxffffffaxxaaaaaaaaaaaaaaaaaaaaaaff",
      "xf",
-     "xff",
-     "a",
-     "x",
-     "xxf"
+     "fff",
+     "f"
+    ],
+    "morePos": [
+     1.0,
+     1.0,
+     -0.826,
+     0.188,
+     -1.0,
+     0.333
+    ],
+    "moreVotes": [
+     "fffffx",
+     "xxfx",
+     "aaaaaaaxaafaafaaaaaaaaaxxa",
+     "xaaaxafaafaffxxfxaxfffffaffxaaxffffafxxxffxxa",
+     "aaaaaaaaaaaaxaaaaa",
+     "ffa"
     ]
    },
    {
-    "id": 10155,
-    "name": "Edward Davey",
-    "party": "Liberal Democrat",
-    "area": "Kingston and Surbiton",
+    "id": 10596,
+    "name": "Stephen Timms",
+    "party": "Labour",
+    "area": "East Ham",
     "pos": [
-     null,
-     1.0,
-     -1.0,
-     0.5,
-     -0.941,
      1.0,
      0.0,
+     null,
+     1.0,
+     -0.278,
+     1.0,
+     1.0,
+     null
+    ],
+    "votes": [
+     "fff",
+     "fafa",
+     "xxxx",
+     "ffff",
+     "xxfffffffffffaxxaaaaaaaaaaaaaaaaaaaaaaff",
+     "ff",
+     "fff",
+     "x"
+    ],
+    "morePos": [
+     1.0,
+     1.0,
+     -0.833,
+     0.36,
+     -1.0,
+     1.0
+    ],
+    "moreVotes": [
+     "fffffx",
+     "xxfx",
+     "aaaaaaaaaafaafaaaaaaaaaxxa",
+     "xaaxxaxxxxxffxxfxxxfffffaffxaaxffffafxxxffxxa",
+     "aaaaaaaaaaaaaaaaaa",
+     "fff"
+    ]
+   },
+   {
+    "id": 26288,
+    "name": "Gen Kitchen",
+    "party": "Labour",
+    "area": "Wellingborough and Rushden",
+    "pos": [
+     1.0,
+     -1.0,
+     null,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "votes": [
+     "xxf",
+     "...a",
+     "...x",
+     "ffff",
+     "......................................ff",
+     "ff",
+     "fff",
+     "f"
+    ],
+    "morePos": [
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ],
+    "moreVotes": [
+     ".....x",
+     "...x",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   {
+    "id": 25726,
+    "name": "Órfhlaith Begley",
+    "party": "Sinn Féin",
+    "area": "West Tyrone",
+    "pos": [
+     null,
+     null,
+     null,
+     null,
+     null,
      null,
      null,
      null
     ],
     "votes": [
      "xxx",
-     "ffff",
-     "a..x",
-     "fffa",
-     "faaaaaaaaaaaa...axaaaaaaaaaaaaaaaaaaxaax",
-     "ff",
-     "xfa",
-     "x",
-     "x",
+     "...x",
+     "...x",
+     "xxxx",
+     "................xxxxxxxxxxxxxxxxxxxxxxxx",
+     "xx",
+     "xxx",
+     "x"
+    ],
+    "morePos": [
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ],
+    "moreVotes": [
+     ".xxxxx",
+     "...x",
+     "........xxxxxxxxxxxxxxxxxx",
+     ".....................................xxxxxxxx",
+     "..........xxxxxxxx",
      "xxx"
     ]
    },
    {
-    "id": 25693,
-    "name": "Kemi Badenoch",
+    "id": 26001,
+    "name": "Douglas Lumsden",
     "party": "Conservative",
-    "area": "North West Essex",
+    "area": "Aberdeen South",
     "pos": [
-     -1.0,
      null,
      null,
-     -1.0,
-     1.0,
-     -1.0,
-     -1.0,
+     null,
+     null,
+     null,
      null,
      null,
      null
     ],
     "votes": [
-     "aax",
-     "...x",
-     "...x",
-     "aaax",
-     "................fffxfffxffffffffffffffxx",
-     "aa",
-     "aaa",
-     "x",
-     "x",
-     "xxx"
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   }
+  ],
+  "former": [
+   {
+    "id": 10630,
+    "name": "Alan Whitehead",
+    "party": "Labour",
+    "area": "Southampton, Test",
+    "pos": [
+     null,
+     1.0,
+     null,
+     null,
+     -0.257,
+     null,
+     null,
+     null
+    ],
+    "votes": [
+     "",
+     "fff.",
+     "xxx.",
+     "",
+     "fffffffffffffaxxaaaxaaaaaaaaaaaaaaaaaa..",
+     "",
+     "",
+     ""
+    ],
+    "morePos": [
+     1.0,
+     1.0,
+     -0.905,
+     0.31,
+     -1.0,
+     1.0
+    ],
+    "moreVotes": [
+     "fffffx",
+     "xxfx",
+     "aaaaaaaxaxfaaxaaaaaaaaaxxa",
+     "xxxxxafaafaffxxfxaxfffffaffxaaxffffafxxxffxxa",
+     "aaaaaaaaaaaaaaaaaa",
+     "fff"
+    ]
+   },
+   {
+    "id": 11216,
+    "name": "Andrew Selous",
+    "party": "Conservative",
+    "area": "South West Bedfordshire",
+    "pos": [
+     null,
+     1.0,
+     -1.0,
+     null,
+     0.852,
+     null,
+     null,
+     null
+    ],
+    "votes": [
+     "",
+     "fff.",
+     "axa.",
+     "",
+     "axfxfxfxxxxxxfaffffffffffffffxxfffffff..",
+     "",
+     "",
+     ""
+    ],
+    "morePos": [
+     -0.667,
+     1.0,
+     0.84,
+     -0.814,
+     1.0,
+     0.0
+    ],
+    "moreVotes": [
+     "faaaaa",
+     "ffff",
+     "ffffffffffaffaffffffxfffff",
+     "faaaaaxaaaaaaaaaaaaaaaaaaaaafaaaaaafafaaaaaxa",
+     "ffffffffffffffxxxf",
+     "axf"
     ]
    }
   ]
@@ -917,21 +1795,41 @@
   "20004": {
    "v": 0,
    "skipped": false,
-   "imp": false
+   "imp": true
   },
   "20019": {
    "v": -1,
    "skipped": false,
+   "imp": false
+  },
+  "6928": {
+   "v": 0.5,
+   "skipped": false,
+   "imp": false
+  },
+  "6751": {
+   "v": 1,
+   "skipped": false,
+   "imp": false
+  },
+  "6734": {
+   "v": -0.5,
+   "skipped": false,
    "imp": true
   },
-  "20007": {
+  "6709": {
    "v": 0.5,
+   "skipped": false,
+   "imp": false
+  },
+  "6731": {
+   "v": 1,
    "skipped": false,
    "imp": false
   }
  },
  "expected": {
-  "answered": 8,
+  "answered": 12,
   "order": [
    6,
    3,
@@ -940,21 +1838,110 @@
    5,
    0,
    7,
-   8,
    2,
-   9
+   10,
+   12,
+   11,
+   9,
+   8,
+   13
   ],
   "you": [
-   -0.75,
-   -0.5,
+   0.0,
+   -0.2,
    2.0,
-   3.0
+   5.0
   ],
   "members": {
-   "13904": {
-    "name": "Paul Maskey",
+   "26534": {
+    "pct": 75.0,
+    "overlap": 2,
+    "eligible": 7,
+    "enough": false,
+    "compass": [
+     1.0,
+     -1.0,
+     1.0,
+     1.0
+    ]
+   },
+   "26535": {
+    "pct": 38.888888889,
+    "overlap": 7,
+    "eligible": 7,
+    "enough": true,
+    "compass": [
+     -1.0,
+     0.333333333,
+     2.0,
+     3.0
+    ]
+   },
+   "26444": {
+    "pct": 58.333333333,
+    "overlap": 5,
+    "eligible": 7,
+    "enough": true,
+    "compass": [
+     -1.0,
+     0.0,
+     2.0,
+     2.0
+    ]
+   },
+   "11267": {
+    "pct": 68.911538462,
+    "overlap": 11,
+    "eligible": 12,
+    "enough": true,
+    "compass": [
+     -1.0,
+     -0.0122,
+     3.0,
+     5.0
+    ]
+   },
+   "10086": {
+    "pct": 68.653846154,
+    "overlap": 11,
+    "eligible": 12,
+    "enough": true,
+    "compass": [
+     -1.0,
+     -0.028,
+     3.0,
+     5.0
+    ]
+   },
+   "10596": {
+    "pct": 74.883333333,
+    "overlap": 10,
+    "eligible": 12,
+    "enough": true,
+    "compass": [
+     -1.0,
+     -0.27775,
+     3.0,
+     4.0
+    ]
+   },
+   "26288": {
+    "pct": 50.0,
+    "overlap": 6,
+    "eligible": 9,
+    "enough": true,
+    "compass": [
+     -1.0,
+     0.333333333,
+     2.0,
+     3.0
+    ]
+   },
+   "25726": {
     "pct": null,
     "overlap": 0,
+    "eligible": 12,
+    "enough": false,
     "compass": [
      null,
      null,
@@ -962,92 +1949,40 @@
      0.0
     ]
    },
-   "10576": {
-    "name": "Graham Stringer",
-    "pct": 63.015,
-    "overlap": 8,
+   "26001": {
+    "pct": null,
+    "overlap": 0,
+    "eligible": 0,
+    "enough": false,
     "compass": [
-     -1.0,
-     -0.03433333333333333,
-     4.0,
-     3.0
+     null,
+     null,
+     0.0,
+     0.0
     ]
    },
-   "26379": {
-    "name": "Carla Denyer",
-    "pct": 67.5,
-    "overlap": 8,
-    "compass": [
-     -1.0,
-     -1.0,
-     4.0,
-     3.0
-    ]
-   },
-   "26352": {
-    "name": "Nigel Farage",
-    "pct": 25.0,
-    "overlap": 5,
-    "compass": [
-     1.0,
-     1.0,
-     4.0,
-     2.0
-    ]
-   },
-   "26575": {
-    "name": "Martin Rhodes",
-    "pct": 46.875,
+   "10630": {
+    "pct": 73.48125,
     "overlap": 7,
+    "eligible": 8,
+    "enough": true,
     "compass": [
      -1.0,
-     0.3333333333333333,
-     4.0,
+     -0.054,
+     1.0,
      3.0
     ]
    },
-   "10162": {
-    "name": "David Davis",
-    "pct": 62.96666666666667,
-    "overlap": 5,
+   "11216": {
+    "pct": 64.935,
+    "overlap": 8,
+    "eligible": 8,
+    "enough": true,
     "compass": [
      1.0,
-     0.722,
-     3.0,
-     2.0
-    ]
-   },
-   "10001": {
-    "name": "Diane Abbott",
-    "pct": 87.22142857142858,
-    "overlap": 6,
-    "compass": [
-     -1.0,
-     -0.9296666666666668,
-     3.0,
+     0.897333333,
+     1.0,
      3.0
-    ]
-   },
-   "10155": {
-    "name": "Edward Davey",
-    "pct": 92.15833333333335,
-    "overlap": 5,
-    "compass": [
-     -0.75,
-     -0.4705,
-     2.0,
-     2.0
-    ]
-   },
-   "25693": {
-    "name": "Kemi Badenoch",
-    "pct": 18.75,
-    "overlap": 4,
-    "compass": [
-     1.0,
-     1.0,
-     2.0,
-     2.0
     ]
    }
   }

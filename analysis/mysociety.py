@@ -56,8 +56,9 @@ CHAMBER_ORG = {
     "scotland": "scottish-parliament",
     "senedd": "welsh-parliament",
     "ni": "northern-ireland-assembly",
+    "lords": "house-of-lords",
 }
-# -> the legislature names the Glasshouse scrapers write
+# -> the legislature names the Glasshouse scrapers write (elected chambers only)
 CHAMBER_PARLIAMENT = {
     "commons": "UK Parliament",
     "scotland": "Scottish Parliament",
@@ -287,6 +288,12 @@ class People:
         out.sort(key=lambda r: (r["area"], r["name"]))
         return out
 
+    def sat_on(self, person_id: int, chamber: str, day: str) -> bool:
+        """Whether the person was a member of `chamber` on `day`."""
+        return any(self.chamber_of(m) == chamber
+                   and m.get("start_date", "9999") <= day <= m.get("end_date", "9999")
+                   for m in self.by_person.get(int(person_id), []))
+
     def first_elected(self, person_id: int, chamber: str) -> str:
         """Start of the member's current unbroken spell in the chamber.
 
@@ -326,7 +333,7 @@ def main(argv=None):
     cache = fetch(Path(a.cache), force=a.force)
     people = People(cache)
     print(f"Cache: {cache}  (votes as of {cache_date(cache)})")
-    for chamber in CHAMBER_ORG:
+    for chamber in CHAMBER_PARLIAMENT:
         cur = people.current_members(chamber)
         print(f"  {CHAMBER_PARLIAMENT[chamber]:28} {len(cur):4} sitting | "
               f"last general election {people.term_start(chamber) or 'unknown'}")

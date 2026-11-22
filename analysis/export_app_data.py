@@ -35,7 +35,7 @@ import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
-from analysis import mysociety, record
+from analysis import candidates, mysociety, others, record
 
 MAX_TOPICS = 8
 MAX_RECEIPTS = 25
@@ -196,7 +196,10 @@ def _median(values):
     return round(st.median(vals), 1) if vals else None
 
 
-def build(cache_dir: Path, scraped_dir: Path, out_path: Path, fetch: bool = True) -> dict:
+def build(cache_dir: Path, scraped_dir: Path, out_path: Path, fetch: bool = True,
+          councils: dict = None) -> dict:
+    """Write app/data.json. `councils` is the council pilot's output
+    (analysis/councils.py), carried in the same file."""
     if fetch:
         mysociety.fetch(cache_dir)
     people = mysociety.People(cache_dir)
@@ -209,12 +212,13 @@ def build(cache_dir: Path, scraped_dir: Path, out_path: Path, fetch: bool = True
     fresh_index, previous_index = LegacyIndex(fresh), LegacyIndex(previous)
     used_previous_speech = False
 
-    rows, chambers = [], {}
+    rows, chambers, records = [], {}, {}
     for chamber, parliament in mysociety.CHAMBER_PARLIAMENT.items():
         members = people.current_members(chamber)
         term_start = people.term_start(chamber)
         from_mysociety = chamber in MYSOCIETY_VOTES
         rec = record.chamber_record(cache_dir, chamber, people) if from_mysociety else {}
+        records[chamber] = rec
         sigs = record.signatures(cache_dir, chamber, term_start) if chamber == "commons" else {}
         matched = 0
         group = []
@@ -289,9 +293,25 @@ def build(cache_dir: Path, scraped_dir: Path, out_path: Path, fetch: bool = True
         }
         rows.extend(group)
 
+    # Everyone else with a record: people who used to sit, and the Lords.
+    other_rows = []
+    for chamber, rec in records.items():
+        sitting = {m["person_id"] for m in people.current_members(chamber)}
+        other_rows.extend(others.former_members(people, chamber, rec, sitting))
+    lords, lords_summary = others.peers(cache_dir, people, chambers["UK Parliament"]["termStart"])
+    other_rows.extend(lords)
+    chambers[others.LORDS] = lords_summary
+
+    known = {m["id"] for m in rows} | {m["id"] for m in other_rows}
+    elections = candidates.build(cache_dir.parent / "_democracyclub", fetch=fetch,
+                                 known_ids=known)
+
     carried = used_previous_speech
     speech_as_of = previous_as_of if carried else (fresh_as_of or previous_as_of)
     payload = {
+        # 2: adds others, elections and councils, and a House of Lords entry
+        # under chambers. Nothing a version-1 reader used has changed.
+        "schema": 2,
         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         "sources": {
             "votes": {"name": "TheyWorkForYou Votes (mySociety)",
@@ -302,6 +322,9 @@ def build(cache_dir: Path, scraped_dir: Path, out_path: Path, fetch: bool = True
         "topics": sorted({t[0] for m in rows for t in m.get("topics", [])}),
         "chambers": chambers,
         "members": rows,
+        "others": other_rows,
+        "elections": elections,
+        "councils": councils or {},
     }
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
@@ -313,8 +336,12 @@ def build(cache_dir: Path, scraped_dir: Path, out_path: Path, fetch: bool = True
     print(f"  votes as of {payload['sources']['votes']['asOf']} | speech figures as of "
           f"{speech_as_of or 'n/a'}{' (carried forward from the previous export)' if carried else ''}")
     for parliament, c in chambers.items():
-        print(f"  {parliament:28} {c['members']:4} members | {c['withSpeech']:4} matched to "
+        print(f"  {parliament:28} {c['members']:4} members | {c.get('withSpeech', 0):4} matched to "
               f"speech data | median turnout {c['turnout']}% | votes: {c['votesSource']}")
+    former = sum(1 for m in other_rows if m["status"] == "former")
+    print(f"  plus {former} former members and {len(other_rows) - former} peers with a record")
+    print(f"  {len(elections['ballots'])} ballots coming up, "
+          f"{sum(len(b['candidates']) for b in elections['ballots'])} candidates so far")
     return payload
 
 
