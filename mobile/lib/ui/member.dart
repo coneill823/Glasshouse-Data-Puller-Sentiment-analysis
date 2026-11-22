@@ -25,7 +25,11 @@ List<(String, String)> _tiles(Member m) => [
       m.termKnown
           ? (thousands(m.termVotes), 'of ${thousands(m.eligible)} votes this term')
           : (thousands(m.votesCast), 'votes cast'),
-      (m.partyLineDivisions > 0 ? thousands(m.rebellions) : '—', 'times broke with party'),
+      // This one covers their whole record, not just this term, so it says
+      // how many votes it is out of.
+      m.partyLineDivisions > 0
+          ? (thousands(m.rebellions), 'breaks with party in ${thousands(m.partyLineDivisions)} votes')
+          : ('—', 'breaks with party'),
       (m.spoken == null ? '—' : thousands(m.spoken), 'questions & speeches'),
     ];
 

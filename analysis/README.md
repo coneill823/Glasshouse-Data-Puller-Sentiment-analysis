@@ -13,6 +13,7 @@ python -m analysis.build
 | 3 | `behaviour.py` — what members work on; NI votes (needs the scraped corpus) | `analysis/output/*.csv` |
 | 4 | `export_app_data.py` — one record per sitting representative | `app/data.json` |
 | 5 | `app/build_standalone.py` — the app as a single file | `dist/glasshouse.html` |
+| | `build.sync_mobile` — the same two data files, for the phone app to ship with | `mobile/assets/data/` |
 
 Each step also runs on its own (`python -m analysis.positions`, …). Useful
 flags on `build`: `--no-fetch` (use the cache as it is), `--skip-speech`

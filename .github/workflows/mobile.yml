@@ -58,7 +58,9 @@ jobs:
           cache: true
       # With no release key in the repository this is signed with the debug
       # key: it installs on any Android phone, but Google Play will not take it.
-      - run: flutter build apk --release
+      # Built for phones' two processor types only, which keeps the download
+      # about a third smaller than one that also runs on emulators.
+      - run: flutter build apk --release --target-platform android-arm,android-arm64
       - uses: actions/upload-artifact@v4
         with:
           name: glasshouse-android

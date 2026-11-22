@@ -41,15 +41,18 @@ const saved = JSON.stringify({
   },
 });
 
-// name, viewport, pixel ratio, and how far to scroll for the two lower shots.
+// name, viewport and pixel ratio.
 const devices = [
   // 1290 x 2796: App Store, 6.9-inch iPhone. Also used in the README.
-  { name: 'phone', width: 430, height: 932, ratio: 3, compass: 470, statements: 2040 },
+  { name: 'phone', width: 430, height: 932, ratio: 3 },
   // 1080 x 1920: Google Play (no side may be more than twice the other).
-  { name: 'play', width: 360, height: 640, ratio: 3, compass: 560, statements: 2060 },
+  { name: 'play', width: 360, height: 640, ratio: 3 },
   // 2064 x 2752: App Store, 13-inch iPad.
-  { name: 'tablet', width: 1032, height: 1376, ratio: 2, compass: 300, statements: 1560 },
+  { name: 'tablet', width: 1032, height: 1376, ratio: 2 },
 ];
+
+// Where a panel's label should sit for the panel to start just under the app bar.
+const UNDER_BAR = 84;
 
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json',
   '.wasm': 'application/wasm', '.png': 'image/png', '.ttf': 'font/ttf', '.otf': 'font/otf' };
@@ -101,10 +104,53 @@ function serve() {
       await page.mouse.click((d.width / 4) * (index + 0.5), d.height - 34);
       await page.waitForTimeout(700);
     };
-    const scrollTo = async (y) => {
+
+    // The app draws on a canvas, so there is nothing in the page to scroll to.
+    // Switching on its accessibility tree gives every piece of text a position,
+    // which is enough to steer by.
+    await page.evaluate(() => {
+      const find = (node) => {
+        const hit = node.querySelector('flt-semantics-placeholder');
+        if (hit) return hit;
+        for (const child of node.querySelectorAll('*')) {
+          const inner = child.shadowRoot && find(child.shadowRoot);
+          if (inner) return inner;
+        }
+        return null;
+      };
+      const button = find(document);
+      if (button) button.click();
+    });
+    await page.waitForTimeout(800);
+    const topOf = async (text) => {
+      const found = page.getByText(text).first();
+      if ((await found.count()) === 0) return null;
+      const box = await found.boundingBox();
+      return box ? box.y : null;
+    };
+    const wheel = async (delta) => {
       await page.mouse.move(d.width / 2, d.height / 2);
-      await page.mouse.wheel(0, y);
-      await page.waitForTimeout(600);
+      await page.mouse.wheel(0, delta);
+      await page.waitForTimeout(350);
+    };
+    // How far the page moves for a wheel turn differs between browsers and
+    // pixel ratios, so it is measured rather than assumed.
+    const measure = async (text) => {
+      const before = await topOf(text);
+      await wheel(60);
+      const after = await topOf(text);
+      const moved = before !== null && after !== null ? (before - after) / 60 : 0;
+      return moved > 0.01 ? moved : 1;
+    };
+    // Scrolls until the given text is `at` pixels from the top of the screen.
+    const bring = async (text, at, perUnit) => {
+      for (let i = 0; i < 80; i++) {
+        const y = await topOf(text);
+        const off = y === null ? 300 : y - at;       // not on screen yet: keep going down
+        if (y !== null && Math.abs(off) < 1.5) return;
+        await wheel(off / perUnit);
+      }
+      throw new Error(`could not scroll to "${text}"`);
     };
 
     await shot('1-representatives');
@@ -112,9 +158,10 @@ function serve() {
     await shot('2-quiz');
     await tab(2);
     await shot('3-match');
-    await scrollTo(d.compass);
+    const perUnit = await measure('Based on the');
+    await bring('Where the votes sit', UNDER_BAR, perUnit);
     await shot('4-compass');
-    await scrollTo(d.statements - d.compass);
+    await bring('Statement by statement', UNDER_BAR, perUnit);
     await shot('5-statements');
     await context.close();
     console.log(`${d.name}: ${d.width * d.ratio} x ${d.height * d.ratio}`);

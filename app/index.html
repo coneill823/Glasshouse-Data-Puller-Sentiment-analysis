@@ -844,7 +844,9 @@ function card(m){
   var tiles=el("div","tiles");
   tiles.appendChild(termKnown ? tile(num(m.termVotes),"of "+num(m.eligible)+" votes this term")
                               : tile(num(m.votesCast),"votes cast"));
-  tiles.appendChild(tile(m.partyLineDivisions?num(m.rebellions):"—","times broke with party"));
+  // whole record, not just this term, so it says how many votes it is out of
+  tiles.appendChild(m.partyLineDivisions ? tile(num(m.rebellions),"breaks with party in "+num(m.partyLineDivisions)+" votes")
+                                         : tile("—","breaks with party"));
   tiles.appendChild(tile(has(m.questions)?num((m.questions||0)+(m.speeches||0)):"—","questions & speeches"));
   c.appendChild(tiles);
 

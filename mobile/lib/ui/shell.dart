@@ -1,6 +1,8 @@
 /// The four screens and the bar that moves between them.
 library;
 
+import 'dart:math' as math;
+
 import 'package:material_ui/material_ui.dart';
 
 import '../theme.dart';
@@ -9,6 +11,7 @@ import 'match_page.dart';
 import 'quiz_page.dart';
 import 'reps_page.dart';
 import 'scope.dart';
+import 'widgets.dart';
 
 class Shell extends StatelessWidget {
   const Shell({super.key});
@@ -19,8 +22,11 @@ class Shell extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.glass;
     final state = AppScope.of(context);
+    // On a tablet the name lines up with the column of content below it.
+    final width = MediaQuery.sizeOf(context).width;
+    final side = math.max(kGutter, (width - kMaxContentWidth) / 2);
     return Scaffold(
-      appBar: AppBar(title: const Text('Glasshouse')),
+      appBar: AppBar(titleSpacing: side, title: const Text('Glasshouse')),
       body: SafeArea(
         top: false,
         bottom: false,

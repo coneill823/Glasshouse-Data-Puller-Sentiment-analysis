@@ -102,10 +102,12 @@ class Panel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.glass;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: c.line),
+    // A Material rather than a painted box, so that the ripple from anything
+    // pressed inside is drawn on the panel and not hidden underneath it.
+    return Material(
+      color: c.surface,
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: c.line),
         borderRadius: BorderRadius.circular(14),
       ),
       child: Padding(padding: padding, child: child),

@@ -16,9 +16,9 @@ voted — and works without a connection once installed.
 
 Every change to the app is built automatically. On GitHub open **Actions →
 mobile**, pick the latest run with a green tick, and download
-**glasshouse-android** from the bottom of the page. Unzip it, copy
-`app-release.apk` to your phone and open it; Android will ask you to allow
-installing from that source.
+**glasshouse-android** from the bottom of the page (you need to be signed in
+to GitHub). Unzip it, copy `app-release.apk` to your phone and open it; Android
+will ask you to allow installing from that source.
 
 That build is for trying the app out. It is signed with a throwaway key, so
 Google Play will not accept it — see [Releasing](#releasing-on-google-play).
