@@ -164,7 +164,9 @@ def analyse(data_dir: Path, out_dir: Path, current_only: bool = False):
         sys.exit("pandas and numpy are required: pip install pandas numpy")
 
     members: dict = defaultdict(_blank)
-    parl_dirs = sorted([p for p in data_dir.iterdir() if p.is_dir()]) if data_dir.exists() else []
+    parl_dirs = sorted([p for p in data_dir.iterdir()
+                        if p.is_dir() and not p.name.startswith(("_", "."))]
+                       ) if data_dir.exists() else []
     if not parl_dirs:
         sys.exit(f"No parliament folders under {data_dir}/ — run the scraper first.")
 

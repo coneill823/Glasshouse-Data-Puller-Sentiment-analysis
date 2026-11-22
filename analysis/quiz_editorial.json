@@ -1,0 +1,61 @@
+{
+  "_about": "Every editorial decision Glasshouse makes about the quiz is in this file. The statements themselves, the votes behind them and which way each vote counts are mySociety's (TheyWorkForYou) and are used unchanged. If you disagree with something here, this is the only place you need to look.",
+
+  "wording": {
+    "_about": "Fixes to statement text only where the source has a typo or reads awkwardly as a question. The original is kept in the output as sourceText.",
+    "20005": {"text": "increasing employers' national insurance contributions", "why": "source reads 'increasing in employers'' (typo)"},
+    "20007": {"text": "creating a publicly owned energy investment company (Great British Energy)", "why": "source spells it 'publically'"},
+    "20006": {"text": "means-testing winter fuel payments for pensioners, ending the universal payment", "why": "source uses a slash: 'means-testing/removing universality on'"},
+    "826": {"text": "measures that increase LGBT+ rights and social equality", "why": "source is past tense ('increased'), written to describe votes rather than to ask a question"}
+  },
+
+  "exclude": {
+    "_about": "Statements deliberately left out of the quiz, with the reason. Empty: every policy with a scoring vote this parliament is asked."
+  },
+
+  "compass": {
+    "_about": "Which compass axis a statement moves you on, and in which direction, if you SUPPORT it. econ: -1 = left (more tax, public spending, public ownership, regulation of markets), +1 = right. social: -1 = liberal (personal autonomy, civil liberties, lighter enforcement), +1 = authoritarian (restriction, enforcement, security). A statement with no entry does not move the compass at all — that is the default, and it is used whenever a statement is a package of several things or does not sit cleanly on either axis. The same tags place the user and every MP, so any error here moves everyone identically.",
+
+    "20009": {"econ": -1, "why": "raising a tax on capital"},
+    "20002": {"econ": -1, "why": "raising a tax on company profits"},
+    "20011": {"econ": -1, "why": "ending a tax exemption for private education"},
+    "20003": {"econ": -1, "why": "raising a tax on property purchases"},
+    "20005": {"econ": -1, "why": "raising a tax on employers"},
+    "20031": {"econ": -1, "why": "narrowing a tax relief"},
+    "20032": {"econ": -1, "why": "raising income tax in real terms"},
+    "20008": {"econ": -1, "why": "regulating the labour market in favour of employees"},
+    "20010": {"econ": -1, "why": "regulating the rental market in favour of tenants"},
+    "6746": {"econ": -1, "why": "public ownership"},
+    "20028": {"econ": -1, "why": "public ownership"},
+    "20007": {"econ": -1, "why": "public ownership"},
+    "20025": {"econ": -1, "why": "public control of a privately run service"},
+    "20027": {"econ": -1, "why": "higher welfare spending"},
+    "20023": {"econ": 1, "why": "lower welfare spending on balance; a package, but the cut was the contested part"},
+    "20006": {"econ": 1, "why": "ending a universal benefit"},
+
+    "1087": {"social": 1, "why": "stricter border enforcement"},
+    "20019": {"social": 1, "why": "banning organisations under terrorism law"},
+    "20012": {"social": 1, "why": "new state powers to monitor bank accounts"},
+    "811": {"social": 1, "why": "restricting a personal choice by law"},
+    "20004": {"social": -1, "why": "earlier release from prison"},
+    "826": {"social": -1, "why": "extending individual rights"},
+    "6732": {"social": -1, "why": "personal autonomy over end of life"}
+  },
+
+  "compass_untagged": {
+    "_about": "Why the remaining statements carry no compass tag. They still count fully towards the match.",
+    "1030": "climate policy is not an economic left-right or liberal-authoritarian question",
+    "6704": "as above",
+    "20014": "as above",
+    "6694": "a tax, but argued on public-health grounds rather than left-right ones",
+    "20020": "industry regulation that began under one party and was passed by another",
+    "20015": "a package: academy pay and curriculum, child protection, breakfast clubs",
+    "20016": "planning speed versus local control cuts across both axes",
+    "20017": "a package: new immigration offences AND scrapping the Rwanda scheme",
+    "20021": "its meaning is itself the disagreement: equal treatment vs correcting unequal outcomes",
+    "20029": "specific to the legacy of the Troubles",
+    "837": "constitutional reform is a separate question from either axis",
+    "1079": "as above",
+    "1084": "as above"
+  }
+}
