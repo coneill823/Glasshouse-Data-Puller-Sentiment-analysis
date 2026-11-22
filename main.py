@@ -138,10 +138,19 @@ def _assess(records: List[Dict]) -> List[str]:
     return issues
 
 
+DATA_TYPES = ("members", "register_of_interests", "questions",
+              "plenary_business", "votes_on_division")
+
+
 def run_parliament(parliament_key: str, scraper_class, from_date: Optional[str] = None,
                    to_date: Optional[str] = None,
-                   dry_run: bool = False):
+                   dry_run: bool = False, wanted: Optional[set] = None):
     """Pull one parliament.
+
+    ``wanted`` limits the pull to those data types (``--only`` / ``--skip``).
+    Votes for the Commons, Scottish Parliament and Senedd now come from
+    mySociety's daily bulk file, so the slowest scrape of all — one request per
+    division — is no longer needed there: ``--skip votes_on_division``.
 
     Returns ``(results, dedup_stats)`` where *results* maps data_type → records
     and *dedup_stats* maps data_type → {"new": N, "skipped": N}.
@@ -163,7 +172,9 @@ def run_parliament(parliament_key: str, scraper_class, from_date: Optional[str] 
 
     if dry_run:
         try:
-            results = scraper.fetch_all(from_date=effective_from, to_date=to_date)
+            results = scraper.fetch_all(
+                from_date=effective_from, to_date=to_date,
+                should_skip=lambda dtype: wanted is not None and dtype not in wanted)
         except Exception as e:
             logger.error(f"Pull failed for {cfg['name']}: {e}", exc_info=True)
             return None, {}
@@ -179,6 +190,9 @@ def run_parliament(parliament_key: str, scraper_class, from_date: Optional[str] 
     dedup_stats: Dict[str, Dict[str, int]] = {}
 
     def _should_skip(dtype: str) -> bool:
+        if wanted is not None and dtype not in wanted:
+            logger.info(f"[{cfg['name']}] {dtype}: not requested — skipping")
+            return True
         info = progress.get(dtype) or {}
         done = (info.get("date") == run_date
                 and info.get("from_date") == effective_from
@@ -212,9 +226,10 @@ def run_parliament(parliament_key: str, scraper_class, from_date: Optional[str] 
 
     # Only advance the global resume point once every type is complete for this
     # range; otherwise leave it so the next run re-attempts the unfinished types.
-    all_complete = all((progress.get(dt) or {}).get("complete")
-                       for dt in ("members", "register_of_interests", "questions",
-                                  "plenary_business", "votes_on_division"))
+    # A partial pull (--only / --skip) never advances it either: the types left
+    # out have not been brought up to date.
+    all_complete = wanted is None and all((progress.get(dt) or {}).get("complete")
+                                          for dt in DATA_TYPES)
     if all_complete:
         manifest["last_pulled_from"] = min(to_date, run_start) if to_date else run_start
     manifest["runs"] = manifest.get("runs", []) + [{
@@ -222,8 +237,9 @@ def run_parliament(parliament_key: str, scraper_class, from_date: Optional[str] 
         "counts": {dtype: len(r) for dtype, r in results.items()},
     }]
     write_manifest(cfg["name"], manifest)
-    logger.info(f"Completed pull for {cfg['name']}"
-                f"{'' if all_complete else ' (some types incomplete — re-run to finish)'}")
+    note = ("" if all_complete else " (partial pull, as requested)" if wanted is not None
+            else " (some types incomplete — re-run to finish)")
+    logger.info(f"Completed pull for {cfg['name']}{note}")
     return results, dedup_stats
 
 
@@ -293,7 +309,8 @@ def _summarise(all_results: Dict[str, Dict[str, List[Dict]]],
 
 
 def run_all(from_date: Optional[str] = None, to_date: Optional[str] = None,
-            parliament_filter: Optional[str] = None, dry_run: bool = False):
+            parliament_filter: Optional[str] = None, dry_run: bool = False,
+            wanted: Optional[set] = None):
     keys = [parliament_filter] if parliament_filter else list(SCRAPERS.keys())
     for key in keys:
         if key not in SCRAPERS:
@@ -309,7 +326,7 @@ def run_all(from_date: Optional[str] = None, to_date: Optional[str] = None,
         parl_name = PARLIAMENTS[cfg_key]["name"]
         p0 = time.time()
         results, dedup_stats = run_parliament(key, cls, from_date=from_date, to_date=to_date,
-                                              dry_run=dry_run)
+                                              dry_run=dry_run, wanted=wanted)
         elapsed_by_parliament[parl_name] = time.time() - p0
         if results is not None:
             all_results[parl_name] = results
@@ -356,7 +373,30 @@ def main():
         "--dry-run", action="store_true",
         help="Show what would be pulled without saving any files",
     )
+    parser.add_argument(
+        "--only", metavar="TYPES",
+        help=f"Pull only these data types, comma-separated ({', '.join(DATA_TYPES)})",
+    )
+    parser.add_argument(
+        "--skip", metavar="TYPES",
+        help="Pull everything except these data types, e.g. --skip votes_on_division",
+    )
     args = parser.parse_args()
+
+    wanted = None
+    if args.only and args.skip:
+        parser.error("use --only or --skip, not both")
+    for flag, value in (("--only", args.only), ("--skip", args.skip)):
+        if value:
+            named = {t.strip() for t in value.split(",") if t.strip()}
+            unknown = named - set(DATA_TYPES)
+            if unknown:
+                parser.error(f"{flag}: unknown data type(s) {', '.join(sorted(unknown))}. "
+                             f"Choose from: {', '.join(DATA_TYPES)}")
+            wanted = named if flag == "--only" else set(DATA_TYPES) - named
+    if wanted is not None:
+        # the register of interests is fetched per member, so it needs the roster
+        wanted.add("members")
 
     for arg_name, value in [("--from", args.from_date), ("--to", args.to_date)]:
         if value:
@@ -385,6 +425,7 @@ def main():
             to_date=args.to_date,
             parliament_filter=args.parliament,
             dry_run=args.dry_run,
+            wanted=wanted,
         )
 
 

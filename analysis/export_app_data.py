@@ -201,12 +201,13 @@ def build(cache_dir: Path, scraped_dir: Path, out_path: Path, fetch: bool = True
         mysociety.fetch(cache_dir)
     people = mysociety.People(cache_dir)
 
-    legacy, speech_as_of = load_scraped(scraped_dir)
-    carried = False
-    if not legacy:
-        legacy, speech_as_of = load_previous(out_path)
-        carried = bool(legacy)
-    index = LegacyIndex(legacy)
+    # Fresh scraper output wins; the previous export fills whatever it lacks.
+    # Decided per member AND per kind of figure, because a partial pull is
+    # normal: votes for one legislature, say, with no questions re-read.
+    fresh, fresh_as_of = load_scraped(scraped_dir)
+    previous, previous_as_of = load_previous(out_path)
+    fresh_index, previous_index = LegacyIndex(fresh), LegacyIndex(previous)
+    used_previous_speech = False
 
     rows, chambers = [], {}
     for chamber, parliament in mysociety.CHAMBER_PARLIAMENT.items():
@@ -218,8 +219,16 @@ def build(cache_dir: Path, scraped_dir: Path, out_path: Path, fetch: bool = True
         matched = 0
         group = []
         for m in members:
-            old = index.find(parliament, m["area"], m["name"])
-            matched += old is not None
+            f = fresh_index.find(parliament, m["area"], m["name"])
+            prev = previous_index.find(parliament, m["area"], m["name"])
+            has_speech = lambda x: bool(x) and (x.get("questions") or x.get("speeches")
+                                                or x.get("topics"))
+            speech = f if has_speech(f) else prev if has_speech(prev) else None
+            used_previous_speech |= speech is not None and speech is prev
+            has_votes = lambda x: bool(x) and (x.get("votesCast") or 0) > 0
+            old = f if has_votes(f) else prev if has_votes(prev) else None
+            old_as_of = fresh_as_of if old is f else previous_as_of
+            matched += speech is not None
             row = {
                 "id": m["person_id"],
                 "name": m["name"],
@@ -255,12 +264,12 @@ def build(cache_dir: Path, scraped_dir: Path, out_path: Path, fetch: bool = True
                     if old.get(k) is not None:
                         row[k] = old[k]
                 row["receipts"] = (old.get("receipts") or [])[:MAX_RECEIPTS]
-                row["recordAsOf"] = speech_as_of
+                row["recordAsOf"] = old_as_of
 
-            if old:
-                row["questions"] = old.get("questions", 0)
-                row["speeches"] = old.get("speeches", 0)
-                row["topics"] = (old.get("topics") or [])[:MAX_TOPICS]
+            if speech:
+                row["questions"] = speech.get("questions", 0)
+                row["speeches"] = speech.get("speeches", 0)
+                row["topics"] = (speech.get("topics") or [])[:MAX_TOPICS]
             if m["person_id"] in sigs:
                 row["motions"] = sigs[m["person_id"]]
             group.append(row)
@@ -280,6 +289,8 @@ def build(cache_dir: Path, scraped_dir: Path, out_path: Path, fetch: bool = True
         }
         rows.extend(group)
 
+    carried = used_previous_speech
+    speech_as_of = previous_as_of if carried else (fresh_as_of or previous_as_of)
     payload = {
         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         "sources": {

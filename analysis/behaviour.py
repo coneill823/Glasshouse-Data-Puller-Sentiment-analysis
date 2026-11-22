@@ -159,7 +159,15 @@ def _division_key(rec: dict) -> str:
     return (rec.get("date", "")[:10] + "|" + (rec.get("title", "") or "")[:120]).strip()
 
 
-def analyse(data_dir: Path, out_dir: Path, current_only: bool = False):
+def analyse(data_dir: Path, out_dir: Path, current_only: bool = False,
+            skip_votes=()):
+    """Compute the record from scraped CSVs.
+
+    `skip_votes` names legislature folders whose votes should NOT be read —
+    used when their voting record comes from mySociety instead, which saves
+    two passes over the largest files. Their questions and speeches are
+    still read: nothing else supplies what members work on.
+    """
     if pd is None or np is None:
         sys.exit("pandas and numpy are required: pip install pandas numpy")
 
@@ -251,7 +259,8 @@ def analyse(data_dir: Path, out_dir: Path, current_only: bool = False):
 
         # ---- votes: two passes so we know each division's party lines ----
         vote_path = parl_dir / "votes_on_division" / "votes_on_division_master.csv"
-        if not vote_path.exists():
+        if not vote_path.exists() or parl_slug in skip_votes:
+            _fill_display_name(members, parl_slug)
             continue
 
         # Pass 1 — tally each division by party and overall.
@@ -399,13 +408,7 @@ def analyse(data_dir: Path, out_dir: Path, current_only: bool = False):
             m["divisions_eligible"] = max(m["divisions_eligible"], m["term_votes"])
             m["spell_start"] = start
 
-        # Fill the legislature's display name onto members seeded from the roster
-        # that never appeared in a record.
-        display = next((m["parliament"] for k, m in members.items()
-                        if k.startswith(f"{parl_slug}:") and m["parliament"]), parl_slug)
-        for key, m in members.items():
-            if key.startswith(f"{parl_slug}:") and not m["parliament"]:
-                m["parliament"] = display
+        _fill_display_name(members, parl_slug)
 
         # ---- ideal points (#3) ----
         # Only members who sit together can be placed on one axis. Pooling every
@@ -417,6 +420,19 @@ def analyse(data_dir: Path, out_dir: Path, current_only: bool = False):
             [t for t in vote_triples if t[0] in cohort])
 
     _write_outputs(members, rebellion_rows, scaling, out_dir, current_only)
+
+
+def _fill_display_name(members: dict, parl_slug: str):
+    """Give members seeded from the roster the legislature's display name.
+
+    They only pick it up from a record, so one who never appears in any
+    record would otherwise be left with none.
+    """
+    display = next((m["parliament"] for k, m in members.items()
+                    if k.startswith(f"{parl_slug}:") and m["parliament"]), parl_slug)
+    for key, m in members.items():
+        if key.startswith(f"{parl_slug}:") and not m["parliament"]:
+            m["parliament"] = display
 
 
 def _service_spells(dates, division_dates=()):

@@ -11,9 +11,9 @@
     --paper:#F2F4F7; --surface:#FFFFFF; --surface-2:#E9ECF1;
     --ink:#11151C; --ink-2:#39414F; --muted:#67707F; --line:#D8DDE5;
     --accent:#2F5FA8; --accent-ink:#FFFFFF;
-    /* one hue for every magnitude bar; a neutral tick for the chamber median.
-       No good/bad colour anywhere — the data carries no such judgement. */
-    --data:#2F5FA8; --track:#DDE2E9; --ref:#67707F;
+    /* one hue for every mark; a neutral tick for the chamber median. No
+       good/bad colour anywhere — the data carries no such judgement. */
+    --data:#2F5FA8; --track:#DDE2E9; --ref:#67707F; --dot:#9AA4B4;
     --radius:10px; --gutter:clamp(16px,4vw,40px);
     --f-display:"Fraunces",Georgia,"Times New Roman",serif;
     --f-body:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
@@ -24,14 +24,14 @@
       --paper:#11151C; --surface:#171C26; --surface-2:#1F2632;
       --ink:#EEF1F6; --ink-2:#C2C9D6; --muted:#8F98A8; --line:#2A3240;
       --accent:#8FA8D8; --accent-ink:#11151C;
-      --data:#5A8AE0; --track:#2A3240; --ref:#8F98A8;
+      --data:#5A8AE0; --track:#2A3240; --ref:#8F98A8; --dot:#5B6678;
     }
   }
   :root[data-theme="dark"]{
     --paper:#11151C; --surface:#171C26; --surface-2:#1F2632;
     --ink:#EEF1F6; --ink-2:#C2C9D6; --muted:#8F98A8; --line:#2A3240;
     --accent:#8FA8D8; --accent-ink:#11151C;
-    --data:#5A8AE0; --track:#2A3240; --ref:#8F98A8;
+    --data:#5A8AE0; --track:#2A3240; --ref:#8F98A8; --dot:#5B6678;
   }
 
   *{box-sizing:border-box}
@@ -39,26 +39,48 @@
        font-family:var(--f-body); font-size:16px; line-height:1.55;
        -webkit-font-smoothing:antialiased}
   .wrap{max-width:1120px; margin:0 auto; padding-inline:var(--gutter)}
-  h1,h2{font-family:var(--f-display); text-wrap:balance; margin:0}
-  h3,h4{margin:0}
+  h1,h2,h3,h4,p{margin:0}
+  h1,h2,.display{font-family:var(--f-display); text-wrap:balance}
   a{color:var(--accent)}
   :focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:4px}
+  .eyebrow{font-family:var(--f-mono); font-size:11px; letter-spacing:.09em;
+           text-transform:uppercase; color:var(--muted)}
+  .muted{color:var(--muted)}
+  .small{font-size:13.5px}
 
-  header{border-bottom:1px solid var(--line); background:var(--surface)}
-  .head{display:flex; flex-wrap:wrap; gap:18px 32px; align-items:flex-end;
-        justify-content:space-between; padding-block:28px 24px}
-  h1{font-size:clamp(28px,4.4vw,40px); font-weight:700; letter-spacing:-.01em}
-  .tagline{color:var(--ink-2); max-width:54ch; margin:6px 0 0; font-size:15px}
-  .counts{display:flex; flex-wrap:wrap; gap:10px 22px; font-family:var(--f-mono);
-          font-size:12.5px; color:var(--muted)}
-  .counts b{display:block; font-family:var(--f-body); font-size:20px; font-weight:700;
-            color:var(--ink); line-height:1.2}
+  /* ---- header + navigation ---- */
+  header{position:sticky; top:0; z-index:10; background:var(--surface);
+         border-bottom:1px solid var(--line)}
+  .head{display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between;
+        gap:8px 24px; padding-block:12px}
+  h1{font-size:22px; font-weight:700; letter-spacing:-.01em}
+  .nav{display:flex; flex-wrap:wrap; gap:4px}
+  .tab{font:inherit; font-size:14px; font-weight:600; padding:8px 14px; border-radius:999px;
+       border:1px solid transparent; background:none; color:var(--ink-2); cursor:pointer}
+  .tab:hover{background:var(--surface-2)}
+  .tab[aria-current="page"]{background:var(--accent); color:var(--accent-ink)}
+  .tab .n{font-family:var(--f-mono); font-size:11px; font-weight:400; margin-left:6px; opacity:.85}
 
-  .searchbar{padding-block:22px 10px}
-  .field{max-width:620px}
-  .field label{display:block; font-family:var(--f-mono); font-size:11.5px;
-    letter-spacing:.09em; text-transform:uppercase; color:var(--muted); margin-bottom:7px}
-  input[type="search"]{width:100%; padding:13px 15px; font:inherit; font-size:16px;
+  main{padding-block:28px 64px}
+  .view>h2{font-size:clamp(24px,3.6vw,32px); font-weight:700; letter-spacing:-.01em}
+  .lede{color:var(--ink-2); max-width:62ch; margin-top:8px}
+
+  /* ---- buttons ---- */
+  .btn{font:inherit; font-size:15px; font-weight:600; padding:12px 18px; cursor:pointer;
+       border-radius:var(--radius); border:1.5px solid var(--accent);
+       background:var(--accent); color:var(--accent-ink)}
+  .btn.ghost{background:none; color:var(--accent)}
+  .btn.quiet{background:none; border-color:var(--line); color:var(--ink-2)}
+  .btn:disabled{opacity:.45; cursor:not-allowed}
+  .linkbtn{background:none; border:none; padding:0; cursor:pointer; font:inherit;
+           font-size:13.5px; color:var(--accent); text-decoration:underline}
+  .row{display:flex; flex-wrap:wrap; gap:10px; align-items:center}
+
+  /* ---- search ---- */
+  .finder{margin-top:20px}
+  .finder label{display:block; margin-bottom:7px}
+  .searchrow{display:flex; gap:8px; max-width:640px}
+  input[type="search"]{flex:1; min-width:0; padding:13px 15px; font:inherit; font-size:16px;
     color:var(--ink); background:var(--surface); border:1.5px solid var(--line);
     border-radius:var(--radius)}
   input[type="search"]::placeholder{color:var(--muted)}
@@ -69,394 +91,1214 @@
     padding:7px 12px; border:1px solid var(--line); border-radius:999px;
     background:var(--surface); color:var(--ink); font:inherit; font-size:13.5px}
   .hit:hover{border-color:var(--accent); color:var(--accent)}
-  .hit[aria-current="true"]{background:var(--accent); border-color:var(--accent);
-    color:var(--accent-ink)}
   .hit .legis{font-family:var(--f-mono); font-size:11px; color:var(--muted)}
-  .hit[aria-current="true"] .legis{color:var(--accent-ink); opacity:.85}
-  .nohits{color:var(--muted); font-size:14px; margin-top:12px}
+  .msg{margin-top:10px; font-size:14px; color:var(--ink-2); max-width:68ch}
 
-  main{padding-block:26px 56px}
-  .area-head{display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 14px; margin-bottom:18px}
-  .area-head h2{font-size:clamp(21px,3vw,27px); font-weight:600}
-  .area-head .legis{font-family:var(--f-mono); font-size:12px; color:var(--muted)}
-
-  .cards{display:grid; gap:18px; justify-content:start;
+  /* ---- a place and its representatives ---- */
+  .place{margin-top:30px}
+  .place-head{display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 14px}
+  .place-head h3{font-family:var(--f-display); font-size:clamp(21px,3vw,27px); font-weight:600}
+  .chamber{margin-top:22px}
+  .chamber>h4{font-size:13px; font-weight:600; color:var(--ink-2); margin-bottom:10px}
+  .chamber>h4 span{font-family:var(--f-mono); font-size:11.5px; font-weight:400; color:var(--muted)}
   /* auto-fit counts repetitions from the MAX track size when it is definite,
      so this cap is what decides how many columns fit, not the 320px floor. */
-         grid-template-columns:repeat(auto-fit,minmax(320px,500px))}
-  .card{background:var(--surface); border:1px solid var(--line);
-        border-radius:var(--radius); padding:20px; display:flex;
-        flex-direction:column; gap:18px}
-  .who{display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 10px}
-  .who h3{font-family:var(--f-display); font-size:20px; font-weight:600}
+  .cards{display:grid; gap:18px; justify-content:start;
+         grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),500px))}
+  .card{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+        padding:20px; display:flex; flex-direction:column; gap:16px; min-width:0}
+  .who{display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 10px}
+  .cname{font-family:var(--f-display); font-size:20px; font-weight:600}
   .role{font-family:var(--f-mono); font-size:11px; letter-spacing:.08em;
     padding:3px 7px; border-radius:4px; background:var(--surface-2); color:var(--ink-2)}
-  .party{font-size:13.5px; color:var(--ink-2)}
+  .csub{font-size:13.5px; color:var(--ink-2); margin-top:-10px}
+  .matchbtn{align-self:flex-start; font:inherit; font-size:13.5px; font-weight:600;
+    padding:7px 12px; border-radius:999px; cursor:pointer; color:var(--accent);
+    border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);
+    background:color-mix(in srgb,var(--accent) 9%,transparent)}
 
   /* hero figures — body face, no tabular-nums on large standalone numbers */
-  .tiles{display:flex; flex-wrap:wrap; gap:14px 26px;
-         border-block:1px solid var(--line); padding-block:13px}
-  .tile b{display:block; font-family:var(--f-body); font-size:23px; font-weight:700;
-          color:var(--ink); line-height:1.15}
+  .tiles{display:flex; flex-wrap:wrap; gap:12px 26px; border-block:1px solid var(--line);
+         padding-block:13px}
+  .tile b{display:block; font-size:23px; font-weight:700; line-height:1.15}
   .tile span{font-family:var(--f-mono); font-size:11.5px; color:var(--muted)}
 
-  section h4{font-family:var(--f-mono); font-size:11px; letter-spacing:.09em;
-    text-transform:uppercase; color:var(--muted); margin-bottom:10px}
+  .sect>h5,.sect>summary{font-family:var(--f-mono); font-size:11px; font-weight:400;
+    letter-spacing:.09em; text-transform:uppercase; color:var(--muted); margin:0 0 10px}
+  details.sect>summary{cursor:pointer; margin-bottom:0}
+  details.sect[open]>summary{margin-bottom:10px}
 
   /* bullet bars: value + chamber-median reference tick */
-  .metric{display:grid; grid-template-columns:minmax(0,132px) minmax(0,1fr) 58px;
-          gap:12px; align-items:center; margin-bottom:8px}
-  .mlabel{font-size:13px; color:var(--ink-2)}
+  .metric,.topic{display:grid; gap:12px; align-items:center; margin-bottom:8px;
+    grid-template-columns:minmax(0,132px) minmax(0,1fr) 58px}
+  .topic{grid-template-columns:minmax(0,152px) minmax(0,1fr) 58px; cursor:default}
+  .mlabel,.tlabel{font-size:13px; color:var(--ink-2); line-height:1.25}
   .mtrack{position:relative; height:10px; background:var(--track); border-radius:3px}
-  .mfill{position:absolute; left:0; top:0; bottom:0; background:var(--data);
-         border-radius:3px}
-  .mref{position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--ref);
-        border-radius:1px}
-  .mval{font-family:var(--f-mono); font-size:12px; color:var(--ink);
-        font-variant-numeric:tabular-nums; text-align:right}
-  .mnote{font-family:var(--f-mono); font-size:11px; color:var(--muted); margin-top:4px}
-  .mnote i{display:inline-block; width:2px; height:9px; background:var(--ref);
-           vertical-align:-1px; margin-right:5px}
+  .mfill{position:absolute; left:0; top:0; bottom:0; background:var(--data); border-radius:3px}
+  .mref{position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--ref); border-radius:1px}
+  .mval{font-family:var(--f-mono); font-size:12px; font-variant-numeric:tabular-nums; text-align:right}
+  .keyline{font-family:var(--f-mono); font-size:11px; color:var(--muted); margin-top:4px}
+  .keyline i{display:inline-block; width:2px; height:9px; background:var(--ref);
+             vertical-align:-1px; margin-right:5px}
+  .note{font-size:13px; color:var(--muted); line-height:1.45}
 
-  /* ranked salience bars — one flat hue, never a value ramp */
-  .topic{display:grid; grid-template-columns:minmax(0,152px) minmax(0,1fr) 62px;
-         gap:12px; align-items:center; margin-bottom:7px; cursor:default}
-  /* wrap rather than truncate — a clipped category name is unreadable, and the
-     value beside it is no help if you can't tell which subject it belongs to */
-  .tlabel{font-size:13px; color:var(--ink-2); line-height:1.25}
-  .ttrack{position:relative; height:10px; background:var(--track); border-radius:3px}
-  .tfill{position:absolute; left:0; top:0; bottom:0; background:var(--data);
-         border-radius:3px}
-  .tval{font-family:var(--f-mono); font-size:12px; color:var(--ink);
-        font-variant-numeric:tabular-nums; text-align:right}
-
-  .more{align-self:flex-start; background:none; border:none; padding:0; cursor:pointer;
-        font:inherit; font-size:13px; color:var(--accent); text-decoration:underline}
-  .receipts{width:100%; border-collapse:collapse; font-size:12.5px; margin-top:4px}
-  .receipts th{text-align:left; font-family:var(--f-mono); font-size:10.5px;
-    letter-spacing:.07em; text-transform:uppercase; color:var(--muted);
-    font-weight:400; padding:5px 8px 5px 0; border-bottom:1px solid var(--line)}
+  .receipts{width:100%; border-collapse:collapse; font-size:12.5px}
+  .receipts th{text-align:left; font-family:var(--f-mono); font-size:10.5px; letter-spacing:.07em;
+    text-transform:uppercase; color:var(--muted); font-weight:400; padding:5px 8px 5px 0;
+    border-bottom:1px solid var(--line)}
   .receipts td{padding:6px 8px 6px 0; border-bottom:1px solid var(--line);
                color:var(--ink-2); vertical-align:top}
   .receipts td:first-child{font-family:var(--f-mono); font-size:11.5px;
     font-variant-numeric:tabular-nums; white-space:nowrap; color:var(--muted)}
   .receipts td:last-child{font-family:var(--f-mono); font-size:11.5px; white-space:nowrap}
-  .rwrap{overflow-x:auto}
-  .empty{color:var(--muted); font-size:13px}
+  .scroll{overflow-x:auto}
+  .links{font-size:13px; display:flex; flex-wrap:wrap; gap:6px 16px}
 
-  #tip{position:fixed; z-index:20; pointer-events:none; opacity:0; transition:opacity .12s;
+  /* ---- a position on one statement: against <-> for ---- */
+  .axis{position:relative; height:18px; min-width:120px}
+  .axis::before{content:""; position:absolute; left:0; right:0; top:8px; height:2px;
+                background:var(--track); border-radius:1px}
+  .axis .mid{position:absolute; left:50%; top:4px; width:1px; height:10px; background:var(--ref)}
+  .axis .join{position:absolute; top:8px; height:2px; background:var(--ink-2); opacity:.45}
+  .axis .them{position:absolute; top:3px; width:12px; height:12px; margin-left:-6px;
+              border-radius:50%; background:var(--data); box-shadow:0 0 0 2px var(--surface)}
+  /* hollow, and a little larger than the dot: where you and they coincide the
+     dot sits inside the diamond instead of vanishing behind it */
+  .axis .you{position:absolute; top:2px; width:14px; height:14px; margin-left:-7px;
+             border:2px solid var(--ink); transform:rotate(45deg)}
+  .legend{display:flex; flex-wrap:wrap; gap:6px 18px; font-size:12.5px; color:var(--ink-2)}
+  .legend span{display:inline-flex; align-items:center; gap:7px}
+  .k-them{width:11px; height:11px; border-radius:50%; background:var(--data)}
+  .k-you{width:9px; height:9px; border:2px solid var(--ink); transform:rotate(45deg); margin-inline:2px}
+  .k-all{width:6px; height:6px; border-radius:50%; background:var(--dot)}
+  .ends{display:flex; justify-content:space-between; font-family:var(--f-mono);
+        font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted)}
+
+  .issue{display:grid; grid-template-columns:minmax(0,1fr) 120px; gap:4px 14px;
+         align-items:center; padding:7px 0; border-bottom:1px solid var(--line)}
+  .issue .iname{font-size:13px; color:var(--ink)}
+  .issue .iband{grid-column:1/-1; font-size:12px; color:var(--muted)}
+
+  /* ---- quiz ---- */
+  .panel{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+         padding:clamp(18px,3.4vw,30px); margin-top:22px; max-width:780px}
+  .panel>*+*{margin-top:14px}
+  .qmeta{display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center}
+  .chip{font-size:12px; padding:3px 9px; border-radius:999px; background:var(--surface-2);
+        color:var(--ink-2)}
+  .progress{height:6px; background:var(--track); border-radius:3px; overflow:hidden}
+  .progress i{display:block; height:100%; background:var(--data); border-radius:3px}
+  .qlead{font-size:15px; color:var(--muted)}
+  .qtext{font-family:var(--f-display); font-size:clamp(21px,3.2vw,28px); font-weight:600;
+         line-height:1.25; text-wrap:balance}
+  .qmore summary{cursor:pointer; font-size:13.5px; color:var(--accent)}
+  .qmore[open] summary{margin-bottom:8px}
+  .qmore p,.qmore li{font-size:13.5px; color:var(--ink-2)}
+  .qmore ul{margin:6px 0 0; padding-left:18px}
+  .answers{display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px}
+  .ans{font:inherit; font-size:14px; font-weight:600; line-height:1.2; padding:14px 6px;
+       min-height:58px; border-radius:var(--radius); border:1.5px solid var(--line);
+       background:var(--surface); color:var(--ink); cursor:pointer}
+  .ans:hover{border-color:var(--accent)}
+  .ans[aria-checked="true"]{background:var(--accent); border-color:var(--accent);
+                            color:var(--accent-ink)}
+  .check{display:inline-flex; align-items:center; gap:8px; font-size:14px; color:var(--ink-2);
+         cursor:pointer}
+  .check input{width:17px; height:17px; accent-color:var(--accent)}
+  .qnav{display:flex; flex-wrap:wrap; justify-content:space-between; gap:10px;
+        border-top:1px solid var(--line); padding-top:14px}
+
+  /* ---- match ---- */
+  .hero{display:flex; flex-wrap:wrap; gap:14px 28px; align-items:center}
+  .big{font-size:52px; font-weight:700; line-height:1; letter-spacing:-.02em}
+  .hero h3{font-family:var(--f-display); font-size:22px; font-weight:600}
+  .grid2{display:grid; gap:22px; margin-top:22px; align-items:start;
+         grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))}
+  .grid2>.panel{margin-top:0; max-width:none}
+  .compass{display:block; width:100%; max-width:440px; height:auto; margin-inline:auto}
+  .compass text{font-family:var(--f-mono); font-size:9.5px; fill:var(--muted);
+                letter-spacing:.05em; text-transform:uppercase}
+  .compass .plab{font-family:var(--f-body); font-size:10.5px; font-weight:600; fill:var(--ink-2);
+                 text-transform:none; letter-spacing:0; paint-order:stroke;
+                 stroke:var(--surface); stroke-width:3px; stroke-linejoin:round}
+  .compass .mp{fill:var(--dot)}
+  .compass .frame{fill:none; stroke:var(--line)}
+  .compass .cross{stroke:var(--line)}
+  .rank{list-style:none; margin:0; padding:0}
+  .rank li{display:grid; grid-template-columns:minmax(0,1fr) 54px; gap:10px; align-items:baseline;
+           padding:8px 0; border-bottom:1px solid var(--line); font-size:14px}
+  .rank .sub{display:block; font-size:12.5px; color:var(--muted)}
+  .rank .v{font-family:var(--f-mono); font-size:13px; text-align:right;
+           font-variant-numeric:tabular-nums}
+  .pbar{display:grid; grid-template-columns:minmax(0,150px) minmax(0,1fr) 46px; gap:12px;
+        align-items:center; margin-bottom:8px}
+  .cmpgroup{margin-top:20px}
+  .cmpgroup>.ghead{display:grid; grid-template-columns:minmax(0,1fr) 170px; gap:18px;
+                   align-items:end; margin-bottom:2px}
+  .cmpgroup h4{font-size:15px; font-weight:600}
+  .cmp{border-bottom:1px solid var(--line)}
+  .cmp>summary{list-style:none; cursor:pointer; display:grid; gap:6px 18px; align-items:center;
+               grid-template-columns:minmax(0,1fr) 170px; padding:12px 0}
+  .cmp>summary::-webkit-details-marker{display:none}
+  .cmp .st{font-size:14.5px}
+  .cmp .who2{grid-column:1/-1; font-size:12.5px; color:var(--muted)}
+  .cmp .body{padding:0 0 14px}
+
+  #tip{position:fixed; z-index:30; pointer-events:none; opacity:0; transition:opacity .12s;
     background:var(--ink); color:var(--paper); font-size:12.5px; line-height:1.4;
-    padding:7px 10px; border-radius:6px; max-width:270px}
+    padding:7px 10px; border-radius:6px; max-width:280px}
   #tip.on{opacity:1}
 
-  .note{margin-top:38px; padding-top:22px; border-top:1px solid var(--line);
-        color:var(--muted); font-size:13.5px; max-width:74ch}
-  .note h4{font-family:var(--f-display); font-size:16px; color:var(--ink-2);
-           margin:0 0 8px; text-transform:none; letter-spacing:0}
-  .note p{margin:0 0 10px}
+  .prose{max-width:72ch; color:var(--ink-2)}
+  .prose h3{font-family:var(--f-display); font-size:19px; font-weight:600; color:var(--ink);
+            margin:26px 0 8px}
+  .prose p{margin-bottom:11px}
+  .prose ul{margin:0 0 11px; padding-left:20px}
+  .prose li{margin-bottom:5px}
+  footer{margin-top:44px; padding-top:18px; border-top:1px solid var(--line);
+         font-size:12.5px; color:var(--muted); max-width:86ch}
 
-  @media (max-width:560px){
+  @media (max-width:640px){
+    header{position:static}
+    .head{padding-block:10px 8px}
+    .nav{flex-wrap:nowrap; overflow-x:auto; max-width:100%; padding-bottom:2px}
+    .tab{white-space:nowrap; padding:7px 11px; font-size:13.5px}
+    .cmpgroup>.ghead{grid-template-columns:1fr}
+    .cmpgroup>.ghead .ends{display:none}
+    .answers{grid-template-columns:1fr}
+    .ans{min-height:48px; padding:12px}
     .metric,.topic{grid-template-columns:minmax(0,104px) minmax(0,1fr) 52px; gap:9px}
+    .cmp>summary{grid-template-columns:1fr}
+    .issue{grid-template-columns:1fr}
+    .pbar{grid-template-columns:minmax(0,104px) minmax(0,1fr) 44px}
+    .big{font-size:44px}
   }
   @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
 <header>
   <div class="wrap head">
-    <div>
-      <h1>Glasshouse Record</h1>
-      <p class="tagline">What the representatives for your area actually did — how often they
-        turned up to vote, when they broke with their party, and what they spend their time on.
-        Counted from the record, not interpreted.</p>
-    </div>
-    <div class="counts">
-      <div><b id="c-reps">—</b>representatives</div>
-      <div><b id="c-areas">—</b>areas</div>
-      <div><b id="c-legis">—</b>legislatures</div>
-    </div>
+    <h1>Glasshouse</h1>
+    <nav class="nav" aria-label="Sections">
+      <button class="tab" type="button" data-view="reps">Your representatives</button>
+      <button class="tab" type="button" data-view="quiz">Quiz<span class="n" id="nav-quiz"></span></button>
+      <button class="tab" type="button" data-view="match">Your match</button>
+      <button class="tab" type="button" data-view="method">How it works</button>
+    </nav>
   </div>
 </header>
 
-<div class="wrap searchbar">
-  <div class="field">
-    <label for="area-search">Search your constituency, region, or a representative</label>
-    <input id="area-search" type="search" autocomplete="off" spellcheck="false"
-           placeholder="e.g. Glasgow, Aberafan Maesteg, Bangor Conwy Môn…">
-  </div>
-  <ul class="hits" id="hits"></ul>
-  <p class="nohits" id="nohits" hidden>No matching area or representative.</p>
-</div>
-
 <main class="wrap">
-  <div class="area-head">
-    <h2 id="area-name">—</h2>
-    <span class="legis" id="area-legis"></span>
-  </div>
-  <div class="cards" id="cards"></div>
 
-  <div class="note">
-    <h4>What these numbers are, and what they are not</h4>
-    <p>Every figure here is arithmetic over recorded acts. There are no word lists, no opinion
-      about which side of a vote is the good one, and no score for whether someone is “pro” or
-      “anti” anything. <b>Turnout</b> is divisions they voted in. <b>Broke with party</b> counts
-      the divisions where they voted against their own party's majority — each one listed, so you
-      can check it. <b>Works on</b> counts which subjects their questions and speeches mention.</p>
-    <p>The most important thing the data shows is how little room there is between members:
-      the typical representative votes with their party on <b>99–100%</b> of divisions in all
-      four legislatures. Party agreement is shown for completeness, but it separates almost
-      nobody — voting is whipped, and that is the finding, not a flaw in the measurement.
-      What people choose to spend their time on varies far more than how they vote.</p>
-    <p>Two honest limits. <b>Turnout covers a member's current spell in the chamber only.</b>
-      Plenty of them served, lost their seat and returned years later; counting the whole span
-      would charge them for divisions held when they were not members at all. Genuine absence
-      still shows — illness, leave, a suspension — because the count runs to the most recent
-      division, not to their own last vote. And sorting a speech into a subject uses keyword
-      lists we wrote: that is categorisation rather than political judgement, but it is the one
-      place a human list still touches these numbers. <span id="stamp"></span></p>
-  </div>
+  <!-- ================= representatives ================= -->
+  <section class="view" id="v-reps">
+    <h2>Who represents you, and what have they done?</h2>
+    <p class="lede">Find your representatives and see their record: how often they vote, when
+      they have broken with their party, and what they spend their time on. Then
+      <button class="linkbtn" type="button" data-go="quiz" style="font-size:inherit">take the quiz</button>
+      to see how closely your MP's votes match your own views.</p>
+
+    <div class="finder">
+      <label class="eyebrow" for="place-search">Postcode, constituency, or a representative's name</label>
+      <form class="searchrow" id="place-form">
+        <input id="place-search" type="search" autocomplete="off" spellcheck="false"
+               placeholder="e.g. BT7 1NN, Glasgow North, Ynys Môn">
+        <button class="btn" type="submit" id="place-go">Find</button>
+      </form>
+      <ul class="hits" id="hits"></ul>
+      <p class="msg" id="search-msg" role="status" aria-live="polite"></p>
+    </div>
+
+    <div class="place" id="place"></div>
+  </section>
+
+  <!-- ================= quiz ================= -->
+  <section class="view" id="v-quiz" hidden>
+    <h2>Where do you stand?</h2>
+    <p class="lede" id="quiz-lede"></p>
+
+    <div class="panel" id="quiz-intro">
+      <p>Every statement is something MPs have <b>actually voted on</b> in this parliament. Say how
+        you feel about each one, and we compare your answers with how each MP used their vote —
+        not with what they have said.</p>
+      <p class="small muted">Your answers stay in this browser. Nothing you choose is sent or
+        stored anywhere else. You can skip any statement and stop whenever you like; more answers
+        make the match more reliable.</p>
+      <div class="row"><button class="btn" type="button" id="quiz-start">Start the quiz</button></div>
+    </div>
+
+    <div class="panel" id="quiz-card" hidden>
+      <div class="qmeta">
+        <span class="eyebrow" id="q-count"></span>
+        <span class="chip" id="q-group"></span>
+        <span class="chip" id="q-free" hidden>Free vote: parties did not instruct their MPs</span>
+      </div>
+      <div class="progress" aria-hidden="true"><i id="q-bar" style="width:0"></i></div>
+      <div>
+        <p class="qlead">I support…</p>
+        <p class="qtext" id="q-text"></p>
+      </div>
+      <details class="qmore" id="q-more">
+        <summary>What did MPs vote on?</summary>
+        <div id="q-detail"></div>
+      </details>
+      <div class="answers" id="q-answers" role="radiogroup" aria-labelledby="q-text"></div>
+      <div class="row" style="justify-content:space-between">
+        <label class="check" for="q-imp"><input type="checkbox" id="q-imp"> This one matters a lot to me</label>
+        <button class="linkbtn" type="button" id="q-skip">Skip this one</button>
+      </div>
+      <div class="qnav">
+        <button class="btn quiet" type="button" id="q-back">← Back</button>
+        <div class="row">
+          <button class="btn ghost" type="button" id="q-next">Next →</button>
+          <button class="btn" type="button" id="q-done" disabled>See my match</button>
+        </div>
+      </div>
+      <p class="small muted" id="q-hint"></p>
+    </div>
+  </section>
+
+  <!-- ================= match ================= -->
+  <section class="view" id="v-match" hidden>
+    <h2>How your views line up with how they voted</h2>
+    <p class="lede" id="match-lede"></p>
+    <div id="match-body"></div>
+  </section>
+
+  <!-- ================= method ================= -->
+  <section class="view" id="v-method" hidden>
+    <h2>How this works, and what it cannot tell you</h2>
+    <div class="prose">
+      <h3>Actions, not words</h3>
+      <p>Everything here is built from what representatives did, weighted by how directly the act
+        changes anything:</p>
+      <ul>
+        <li><b>Votes that use the powers of Parliament</b> — passing a stage of a bill, amending
+          it, approving an order — decide your match. These are the only votes the quiz counts.</li>
+        <li><b>Motions that only express a view</b> (“this House regrets…”) are left out of the
+          match, however heated the debate.</li>
+        <li><b>Motions signed</b> are shown as activity. Signing one is entirely the member's own
+          choice, but it changes no law, so it never feeds a score.</li>
+        <li><b>Questions and speeches</b> tell you what a member spends time on, never which side
+          they are on. Words are too easy to misread, so they are counted and not interpreted.</li>
+      </ul>
+
+      <h3>Whose judgement is in the quiz</h3>
+      <p>Deciding that a vote was “for” or “against” something is a judgement, and it is not ours.
+        The <span id="m-n">36</span> statements, the votes behind each one and which way each vote
+        counts are the published policy groupings of
+        <a href="https://votes.theyworkforyou.com/policies" target="_blank" rel="noopener">TheyWorkForYou</a>,
+        run by the non-partisan charity mySociety. Every score on this site can be traced to the
+        named divisions behind it — open any statement in your results to see them.</p>
+      <p>A member's position on a statement is simply their votes on it: votes for, minus votes
+        against, over the votes they cast. Absences count for nothing either way, and decisions
+        made without a recorded vote are excluded, because nobody individually did anything.</p>
+
+      <h3>What a vote does and does not mean</h3>
+      <p>A vote is not an opinion. Most votes are whipped: the typical member votes with their
+        party about 99% of the time, so on most statements your MP's record is their party's.
+        And MPs vote against things for different reasons — an opposition MP may oppose a bill
+        because it goes too far, or not far enough. What the record does show, without
+        interpretation, is how each MP used the power you gave them.</p>
+      <p>Because the statements must have been voted on in this parliament, they mostly follow
+        the government's programme. Subjects Parliament has not voted on are not here.</p>
+
+      <h3>The compass</h3>
+      <p>The compass is the one interpretive layer we add. Each statement that sits clearly on an
+        economic (left–right) or social (liberal–authoritarian) axis is tagged with one; thirteen
+        that do not are left untagged. You and every MP are placed with the same tags, so any
+        mistake in them moves everyone identically. As a check, the tags were compared with the
+        structure of the voting record itself: with no tagging at all, the leading pattern in
+        MPs' positions lines up with our economic axis (correlation 0.98) and the second with our
+        social axis (0.76). It shows where votes sit, not what anyone believes.</p>
+
+      <h3>The record</h3>
+      <p><b>Turnout</b> is the share of divisions a member voted in this term, out of those they
+        were eligible for. Missing a vote is not always a choice: ministers are often excused,
+        members are “paired” with an opponent so both can be absent, and illness or parental leave
+        leaves a gap. <b>Broke with party</b> counts divisions where a member did something
+        different from most of their party at the time — each one is listed.
+        <b>Works on</b> counts which subjects their questions and speeches mention, sorted with
+        keyword lists; that is categorisation rather than opinion, but it is the one place a
+        list we wrote touches these numbers.</p>
+
+      <h3>What is missing</h3>
+      <ul>
+        <li>The quiz covers the <b>House of Commons only</b>. Nobody publishes an independent
+          vote-by-vote policy mapping for the Scottish Parliament, the Senedd or the Northern
+          Ireland Assembly, and we will not invent one quietly. Their members' records are shown
+          without a match.</li>
+        <li>Postcode lookup uses the open postcodes.io service and needs this page to be hosted
+          on the web. Northern Ireland Assembly seats still use pre-2024 boundaries, so near an
+          edge the lookup can return the neighbouring seat.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer id="foot"></footer>
 </main>
 
 <div id="tip" role="tooltip"></div>
 
 <script id="app-data" type="application/json">null</script>
+<script id="quiz-data" type="application/json">null</script>
 <script>
 (function(){
-  var ROLE={"UK Parliament":"MP","Scottish Parliament":"MSP",
-            "Welsh Parliament (Senedd)":"MS","NI Assembly":"MLA"};
-  var CHAMBER={"UK Parliament":"House of Commons","Scottish Parliament":"Scottish Parliament",
-               "Welsh Parliament (Senedd)":"Senedd Cymru","NI Assembly":"NI Assembly"};
-  var DATA=null, AREAS=[], byArea={}, selected=null, open={};
-  var elHits=document.getElementById("hits"), elNo=document.getElementById("nohits"),
-      elCards=document.getElementById("cards"), elName=document.getElementById("area-name"),
-      elLegis=document.getElementById("area-legis"), elSearch=document.getElementById("area-search"),
-      tip=document.getElementById("tip");
+"use strict";
+var D=null, Q=null;
+var AREAS=[], areaByKey={}, areaByGss={}, areaByName={}, quizById={};
+var ORDER=[], COMPASS={}, EXAMPLE=null;
+var S={place:null, answers:{}, at:0, mp:null, started:false};
+var STORE="glasshouse.quiz.v1";
+var VIEWS=["reps","quiz","match","method"];
+var MIN_ANSWERS=5;
+var PC_RE=/^[A-Za-z]{1,2}\d[A-Za-z\d]?\s*\d[A-Za-z]{2}$/;
+var ANSWERS=[["Strongly agree",1],["Agree",0.5],["Neutral",0],["Disagree",-0.5],["Strongly disagree",-1]];
+var CODE={f:"For",a:"Against",b:"Abstained",x:"Absent",".":"Not an MP then"};
+var UK="UK Parliament";
+var tip=document.getElementById("tip");
 
-  function keyOf(m){ return m.parliament+"||"+m.area; }
-  function num(v){ return (v===null||v===undefined||v==="") ? null : v; }
-  function fmt(v,suffix){ return v===null ? "—" : v.toLocaleString()+(suffix||""); }
+function $(id){ return document.getElementById(id); }
+function el(tag,cls,text){
+  var e=document.createElement(tag);
+  if(cls) e.className=cls;
+  if(text!==undefined&&text!==null) e.textContent=text;
+  return e;
+}
+function norm(s){
+  return (s||"").normalize("NFKD").replace(/[̀-ͯ]/g,"").toLowerCase()
+    .replace(/&/g," and ").replace(/[^a-z0-9 ]/g," ").replace(/\s+/g," ").trim();
+}
+function has(v){ return v!==null&&v!==undefined&&v!==""; }
+function num(n){ return has(n) ? Number(n).toLocaleString() : "—"; }
+function chamber(p){ return (D.chambers||{})[p]||{}; }
+function cap(s){ return s ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
 
-  function init(data){
-    DATA=data;
-    data.members.forEach(function(m){
-      var k=keyOf(m);
-      if(!byArea[k]){ byArea[k]={area:m.area,parliament:m.parliament,members:[]}; AREAS.push(byArea[k]); }
-      byArea[k].members.push(m);
-    });
-    AREAS.sort(function(a,b){ return a.area.localeCompare(b.area); });
-    document.getElementById("c-reps").textContent=data.members.length.toLocaleString();
-    document.getElementById("c-areas").textContent=AREAS.length.toLocaleString();
-    document.getElementById("c-legis").textContent=Object.keys(data.benchmarks||{}).length;
-    var stamp=document.getElementById("stamp");
-    if(stamp&&data.generated) stamp.textContent="Record current to "+data.generated+".";
-    var start=AREAS.find(function(a){ return a.parliament==="UK Parliament"; })||AREAS[0];
-    if(start){ select(start); render(""); }
-  }
-
-  function matches(q){
-    q=q.trim().toLowerCase();
-    if(!q) return AREAS.slice(0,14);
-    var out=AREAS.filter(function(a){ return a.area.toLowerCase().indexOf(q)>-1; });
-    var seen={}; out.forEach(function(a){ seen[a.area+a.parliament]=1; });
-    DATA.members.forEach(function(m){
-      if(m.name.toLowerCase().indexOf(q)>-1){
-        var a=byArea[keyOf(m)];
-        if(a&&!seen[a.area+a.parliament]){ seen[a.area+a.parliament]=1; out.push(a); }
-      }
-    });
-    return out.slice(0,40);
-  }
-
-  function render(q){
-    var list=matches(q); elHits.innerHTML="";
-    list.forEach(function(a){
-      var li=document.createElement("li"), b=document.createElement("button");
-      b.className="hit"; b.type="button";
-      b.setAttribute("aria-current", selected&&selected.area===a.area&&
-        selected.parliament===a.parliament ? "true":"false");
-      var n=document.createElement("span"); n.textContent=a.area;
-      var r=document.createElement("span"); r.className="legis"; r.textContent=ROLE[a.parliament]||"";
-      b.append(n,r);
-      b.addEventListener("click",function(){ select(a); render(elSearch.value); });
-      li.appendChild(b); elHits.appendChild(li);
-    });
-    elNo.hidden=list.length>0;
-  }
-
-  function select(a){
-    selected=a; open={};
-    elName.textContent=a.area;
-    elLegis.textContent=(CHAMBER[a.parliament]||a.parliament)+" · "+a.members.length+" sitting "+
-      (ROLE[a.parliament]||"member")+(a.members.length===1?"":"s");
-    draw();
-  }
-
-  function draw(){
-    elCards.innerHTML="";
-    selected.members.slice().sort(function(x,y){
-      return (y.votesCast||0)-(x.votesCast||0);
-    }).forEach(function(m){ elCards.appendChild(card(m)); });
-  }
-
-  function el(tag,cls,text){
-    var e=document.createElement(tag);
-    if(cls) e.className=cls;
-    if(text!==undefined) e.textContent=text;
-    return e;
-  }
-
-  function tile(value,label){
-    var d=el("div","tile"); d.appendChild(el("b",null,value));
-    d.appendChild(el("span",null,label)); return d;
-  }
-
-  /* one bullet bar: the member's value, with the chamber median as a reference tick */
-  function metric(label,value,median,suffix,explain){
-    var row=el("div","metric");
-    row.appendChild(el("div","mlabel",label));
-    var track=el("div","mtrack");
-    if(value!==null){
-      var fill=el("div","mfill"); fill.style.width=Math.max(0,Math.min(value,100))+"%";
-      track.appendChild(fill);
+/* ---------- saved state: this browser only ---------- */
+function save(){
+  try{ localStorage.setItem(STORE, JSON.stringify(S)); }catch(e){}
+}
+function load(){
+  try{
+    var j=JSON.parse(localStorage.getItem(STORE)||"null");
+    if(j&&typeof j==="object"){
+      S.answers=j.answers||{}; S.at=j.at||0; S.place=j.place||null;
+      S.mp=j.mp||null; S.started=!!j.started;
     }
-    if(median!==null&&median!==undefined){
-      var ref=el("div","mref"); ref.style.left=Math.max(0,Math.min(median,100))+"%";
-      track.appendChild(ref);
-    }
-    row.appendChild(track);
-    row.appendChild(el("div","mval", value===null?"—":value.toFixed(1)+(suffix||"")));
-    if(explain) bindTip(row,explain);
-    return row;
-  }
+  }catch(e){}
+}
+function isAnswered(id){ var a=S.answers[id]; return !!a&&typeof a.v==="number"; }
+function answeredCount(){
+  return Q ? Q.statements.filter(function(s){ return isAnswered(s.id); }).length : 0;
+}
 
-  function bindTip(node,html){
-    node.addEventListener("mouseenter",function(e){
-      tip.textContent=html; tip.classList.add("on"); moveTip(e);
+/* ---------- tooltips ---------- */
+function bindTip(node,text){
+  node.addEventListener("mouseenter",function(e){ tip.textContent=text; tip.classList.add("on"); moveTip(e); });
+  node.addEventListener("mousemove",moveTip);
+  node.addEventListener("mouseleave",function(){ tip.classList.remove("on"); });
+}
+function moveTip(e){
+  var pad=14, w=tip.offsetWidth, h=tip.offsetHeight;
+  var x=Math.max(8,Math.min(e.clientX+pad, window.innerWidth-w-8));
+  var y=e.clientY-h-pad; if(y<8) y=e.clientY+pad;
+  tip.style.left=x+"px"; tip.style.top=y+"px";
+}
+
+/* ---------- setup ---------- */
+function init(data,quiz){
+  D=data; Q=quiz&&quiz.statements ? quiz : null;
+  D.members.forEach(function(m){
+    var k=m.parliament+"||"+m.area, a=areaByKey[k];
+    if(!a){ a=areaByKey[k]={key:k,area:m.area,parliament:m.parliament,members:[]}; AREAS.push(a); }
+    a.members.push(m);
+    if(m.gss&&m.parliament===UK) areaByGss[m.gss]=a;
+  });
+  AREAS.forEach(function(a){
+    areaByName[a.parliament+"||"+norm(a.area)]=a;
+    a.region = a.parliament==="Scottish Parliament" && a.members.length>1;
+  });
+  AREAS.sort(function(a,b){ return a.area.localeCompare(b.area); });
+  EXAMPLE=AREAS.filter(function(a){ return a.parliament===UK; })[0]||AREAS[0];
+
+  if(Q){
+    Q.members.forEach(function(m){ quizById[m.id]=m; });
+    ORDER=askingOrder();
+    Q.members.forEach(function(m){ COMPASS[m.id]=place(function(i){ return m.pos[i]; }); });
+  }
+  load();
+  // forget anything saved that no longer exists in the data
+  if(S.place&&S.place.keys){
+    S.place.keys=S.place.keys.filter(function(k){ return areaByKey[k]; });
+    if(!S.place.keys.length) S.place=null;
+  }
+  if(Q){
+    var ids={}; Q.statements.forEach(function(s){ ids[s.id]=1; });
+    Object.keys(S.answers).forEach(function(k){ if(!ids[k]) delete S.answers[k]; });
+    if(S.at>=ORDER.length) S.at=0;
+  }
+  footer();
+  wire();
+  show((location.hash||"#reps").slice(1));
+}
+
+/* The order statements are asked in. Three lanes are taken in turn — those
+   that place you on the social axis, on the economic axis, and the rest — so
+   that nine answers are enough for a compass position; and within a lane
+   subjects rotate, best-evidenced first, so that stopping early still leaves a
+   spread rather than seven questions on tax. */
+function askingOrder(){
+  var lanes=[[],[],[]];
+  Q.statements.forEach(function(s,i){ lanes[s.social?0:s.econ?1:2].push(i); });
+  lanes=lanes.map(rotateSubjects);
+  var out=[], left=true;
+  while(left){
+    left=false;
+    lanes.forEach(function(l){ if(l.length){ out.push(l.shift()); left=true; } });
+  }
+  return out;
+}
+function rotateSubjects(indices){
+  var groups={}, names=[];
+  indices.forEach(function(i){
+    var s=Q.statements[i];
+    if(!groups[s.group]){ groups[s.group]=[]; names.push(s.group); }
+    groups[s.group].push(i);
+  });
+  names.forEach(function(g){
+    groups[g].sort(function(a,b){
+      return Q.statements[b].termVotes-Q.statements[a].termVotes ||
+             Q.statements[b].divisions.length-Q.statements[a].divisions.length;
     });
-    node.addEventListener("mousemove",moveTip);
-    node.addEventListener("mouseleave",function(){ tip.classList.remove("on"); });
+  });
+  names.sort(function(a,b){ return groups[b].length-groups[a].length || a.localeCompare(b); });
+  var out=[], left=true;
+  while(left){
+    left=false;
+    names.forEach(function(g){ if(groups[g].length){ out.push(groups[g].shift()); left=true; } });
   }
-  function moveTip(e){
-    var pad=14, w=tip.offsetWidth, h=tip.offsetHeight;
-    var x=Math.min(e.clientX+pad, window.innerWidth-w-8);
-    var y=e.clientY-h-pad; if(y<8) y=e.clientY+pad;
-    tip.style.left=x+"px"; tip.style.top=y+"px";
+  return out;
+}
+
+/* Where a set of positions sits on the two axes. The SAME function places the
+   user (from their answers) and every MP (from their votes). */
+function place(valueAt){
+  var e=0,en=0,s=0,sn=0;
+  Q.statements.forEach(function(st,i){
+    var v=valueAt(i);
+    if(v===null||v===undefined) return;
+    if(st.econ){ e+=st.econ*v; en+=Math.abs(st.econ); }
+    if(st.social){ s+=st.social*v; sn+=Math.abs(st.social); }
+  });
+  return {e:en?e/en:null, s:sn?s/sn:null, en:en, sn:sn};
+}
+function userValue(i){
+  var a=S.answers[Q.statements[i].id];
+  return a&&typeof a.v==="number" ? a.v : null;
+}
+
+/* Agreement between the user's answers and one MP's votes, as a percentage.
+   Each statement both have a view on scores 1 - |you - them| / 2. */
+function matchFor(qm){
+  var sum=0,weight=0,k=0;
+  Q.statements.forEach(function(st,i){
+    var a=S.answers[st.id];
+    if(!a||typeof a.v!=="number") return;
+    var p=qm.pos[i];
+    if(p===null||p===undefined) return;
+    var w=a.imp?2:1;
+    sum+=w*(1-Math.abs(a.v-p)/2); weight+=w; k++;
+  });
+  return {pct:weight?100*sum/weight:null, k:k};
+}
+function enoughOverlap(m){
+  var n=answeredCount();
+  return m.pct!==null && m.k>=Math.min(n,MIN_ANSWERS) && m.k*2>=n;
+}
+
+/* ---------- navigation ---------- */
+function go(v){
+  if(location.hash==="#"+v) show(v); else location.hash=v;
+}
+function show(v){
+  if(VIEWS.indexOf(v)<0) v="reps";
+  VIEWS.forEach(function(x){ $("v-"+x).hidden = x!==v; });
+  document.querySelectorAll(".tab").forEach(function(t){
+    if(t.dataset.view===v) t.setAttribute("aria-current","page"); else t.removeAttribute("aria-current");
+  });
+  tip.classList.remove("on");
+  if(v==="reps") renderPlace();
+  if(v==="quiz") renderQuiz();
+  if(v==="match") renderMatch();
+  navCount();
+  window.scrollTo(0,0);
+}
+function navCount(){
+  var n=answeredCount();
+  $("nav-quiz").textContent = Q&&n ? n+"/"+Q.statements.length : "";
+}
+function wire(){
+  document.querySelectorAll(".tab").forEach(function(t){
+    t.addEventListener("click",function(){ go(t.dataset.view); });
+  });
+  document.addEventListener("click",function(e){
+    var g=e.target.closest&&e.target.closest("[data-go]");
+    if(g){ e.preventDefault(); go(g.dataset.go); }
+  });
+  window.addEventListener("hashchange",function(){ show((location.hash||"#reps").slice(1)); });
+  $("place-search").addEventListener("input",onSearchInput);
+  $("place-form").addEventListener("submit",function(e){ e.preventDefault(); onSearchSubmit(); });
+  if(Q) wireQuiz();
+}
+
+/* ---------- finding a place ---------- */
+function setMsg(t){ $("search-msg").textContent=t||""; }
+function matches(q){
+  q=norm(q);
+  if(q.length<2) return [];
+  var out=AREAS.filter(function(a){ return norm(a.area).indexOf(q)>-1; });
+  var seen={}; out.forEach(function(a){ seen[a.key]=1; });
+  D.members.forEach(function(m){
+    if(norm(m.name).indexOf(q)>-1){
+      var a=areaByKey[m.parliament+"||"+m.area];
+      if(a&&!seen[a.key]){ seen[a.key]=1; out.push(a); }
+    }
+  });
+  return out.slice(0,36);
+}
+function renderHits(list){
+  var ul=$("hits"); ul.innerHTML="";
+  list.forEach(function(a){
+    var li=el("li"), b=el("button","hit"); b.type="button";
+    b.appendChild(el("span",null,a.area));
+    b.appendChild(el("span","legis",(chamber(a.parliament).role||"")+(a.region?" · region":"")));
+    b.addEventListener("click",function(){ chooseArea(a); });
+    li.appendChild(b); ul.appendChild(li);
+  });
+}
+function onSearchInput(){
+  var q=$("place-search").value;
+  if(PC_RE.test(q.trim())){ renderHits([]); setMsg("Press Enter to look up "+q.trim().toUpperCase()+"."); return; }
+  var list=matches(q);
+  renderHits(list);
+  setMsg(norm(q).length>=2&&!list.length ? "No constituency or representative matches that." : "");
+}
+function onSearchSubmit(){
+  var q=$("place-search").value.trim();
+  if(PC_RE.test(q)){ lookupPostcode(q); return; }
+  var list=matches(q);
+  if(list.length===1) chooseArea(list[0]);
+  else if(!list.length&&q) setMsg("No constituency or representative matches that. Try a postcode.");
+}
+function chooseArea(a){
+  setPlace({label:a.area, keys:[a.key], notes:[]});
+  renderHits([]); setMsg("");
+}
+function setPlace(p){
+  S.place=p; S.mp=null; save(); renderPlace();
+  var h=$("place"); if(h.scrollIntoView) h.scrollIntoView({behavior:"smooth",block:"start"});
+}
+
+/* Postcode -> constituencies, via the open postcodes.io service. This cannot
+   run inside a sandboxed preview, so every failure falls back to name search. */
+function lookupPostcode(raw){
+  var pc=raw.replace(/\s+/g,"").toUpperCase();
+  setMsg("Looking up "+pc+"…");
+  var base="https://api.postcodes.io/";
+  fetch(base+"postcodes/"+encodeURIComponent(pc)).then(function(r){
+    if(r.status===404) throw {notFound:true};
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    return r.json();
+  }).then(function(j){
+    var res=j.result||{}, keys=[], notes=[];
+    var uk=areaByGss[(res.codes||{}).parliamentary_constituency_2024];
+    if(uk) keys.push(uk.key);
+    var extra=Promise.resolve();
+    if(res.country==="Scotland"){
+      extra=fetch(base+"scotland/postcodes/"+encodeURIComponent(pc)).then(function(r){ return r.json(); })
+        .then(function(s){
+          var r2=s.result||{};
+          [r2.scottish_parliamentary_constituency, r2.scottish_parliamentary_region].forEach(function(n){
+            var a=areaByName["Scottish Parliament||"+norm(n)];
+            if(a) keys.push(a.key);
+          });
+        }).catch(function(){ notes.push("We found your MP but could not look up your MSPs. Search for your Scottish Parliament constituency by name."); });
+    } else if(res.country==="Wales"){
+      notes.push("We cannot yet match a postcode to a Senedd constituency. Search for yours by name to see your Members of the Senedd.");
+    } else if(res.country==="Northern Ireland"){
+      var name=(res.parliamentary_constituency_2024||"").replace(/ and Mid Down$/,"");
+      var ni=areaByName["NI Assembly||"+norm(name)] ||
+             areaByName["NI Assembly||"+norm(name).split(" ").reverse().join(" ")];
+      if(ni){ keys.push(ni.key); notes.push("Assembly seats still use the pre-2024 boundaries, so near a boundary your MLAs may be those of the neighbouring constituency."); }
+    }
+    return extra.then(function(){
+      if(!keys.length){ setMsg("We could not match "+(res.postcode||pc)+" to a constituency. Search by name instead."); return; }
+      setPlace({label:res.postcode||pc, keys:keys, notes:notes});
+      setMsg("");
+    });
+  }).catch(function(err){
+    setMsg(err&&err.notFound ? "That postcode was not recognised. Check it, or search by constituency name."
+      : "Postcode lookup is not available here — it needs this page to be hosted on the web. Search by constituency or representative name instead.");
+  });
+}
+
+/* ---------- a place ---------- */
+function placeAreas(p){
+  var order={}; order[UK]=0;
+  return p.keys.map(function(k){ return areaByKey[k]; }).filter(Boolean).sort(function(a,b){
+    var x=(a.parliament===UK?0:1)+(a.region?1:0), y=(b.parliament===UK?0:1)+(b.region?1:0);
+    return x-y;
+  });
+}
+function renderPlace(){
+  var host=$("place"); host.innerHTML="";
+  var p=S.place, example=false;
+  if(!p){ p={label:EXAMPLE.area, keys:[EXAMPLE.key], notes:[]}; example=true; }
+  var areas=placeAreas(p);
+  var head=el("div","place-head");
+  head.appendChild(el("h3",null,p.label));
+  var total=areas.reduce(function(n,a){ return n+a.members.length; },0);
+  head.appendChild(el("span","eyebrow", example ? "An example — search above for yours"
+    : total+" representative"+(total===1?"":"s")));
+  host.appendChild(head);
+  (p.notes||[]).forEach(function(n){ var x=el("p","msg",n); host.appendChild(x); });
+  areas.forEach(function(a){
+    var ch=chamber(a.parliament), sec=el("div","chamber"), h=el("h4",null,(ch.house||a.parliament)+" ");
+    h.appendChild(el("span",null,"· "+a.area+(a.region?" (regional list)":"")));
+    sec.appendChild(h);
+    var grid=el("div","cards");
+    a.members.slice().sort(function(x,y){ return x.name.localeCompare(y.name); })
+      .forEach(function(m){ grid.appendChild(card(m)); });
+    sec.appendChild(grid); host.appendChild(sec);
+  });
+}
+
+function tile(value,label){
+  var d=el("div","tile"); d.appendChild(el("b",null,value)); d.appendChild(el("span",null,label)); return d;
+}
+/* one bullet bar: the member's value, with the chamber median as a tick */
+function metric(label,value,median,explain){
+  var row=el("div","metric");
+  row.appendChild(el("div","mlabel",label));
+  var track=el("div","mtrack");
+  if(has(value)){ var f=el("div","mfill"); f.style.width=Math.max(0,Math.min(value,100))+"%"; track.appendChild(f); }
+  if(has(median)){ var r=el("div","mref"); r.style.left=Math.max(0,Math.min(median,100))+"%"; track.appendChild(r); }
+  row.appendChild(track);
+  row.appendChild(el("div","mval", has(value) ? value.toFixed(1)+"%" : "—"));
+  if(explain) bindTip(row,explain);
+  return row;
+}
+function band(p,n){
+  if(n===1) return p>0 ? "voted for (1 vote)" : p<0 ? "voted against (1 vote)" : "abstained (1 vote)";
+  var w = p>=0.9 ? "consistently voted for" : p>=0.7 ? "almost always voted for"
+        : p>=0.2 ? "generally voted for" : p>-0.2 ? "voted a mixture of for and against"
+        : p>-0.7 ? "generally voted against" : p>-0.9 ? "almost always voted against"
+        : "consistently voted against";
+  return w+" ("+n+" votes)";
+}
+function castCount(codes){ return (codes.match(/[fab]/g)||[]).length; }
+function axis(them,you){
+  var a=el("div","axis"); a.appendChild(el("span","mid"));
+  var x=function(v){ return (Math.max(-1,Math.min(1,v))+1)*50; };
+  if(has(them)&&has(you)){
+    var j=el("span","join"), lo=Math.min(x(them),x(you)), hi=Math.max(x(them),x(you));
+    j.style.left=lo+"%"; j.style.width=(hi-lo)+"%"; a.appendChild(j);
+  }
+  if(has(them)){ var t=el("span","them"); t.style.left=x(them)+"%"; a.appendChild(t); }
+  if(has(you)){ var y=el("span","you"); y.style.left=x(you)+"%"; a.appendChild(y); }
+  return a;
+}
+function divisionUrl(d){
+  return "https://votes.theyworkforyou.com/decisions/division/commons/"+d.date+"/"+d.number;
+}
+function receiptUrl(parliament,key){
+  var m=/^pw-(\d{4}-\d{2}-\d{2})-(\d+)-([a-z]+)$/.exec(key||"");
+  return m ? "https://votes.theyworkforyou.com/decisions/division/"+m[3]+"/"+m[1]+"/"+m[2] : "";
+}
+function ext(href,text){
+  var a=el("a",null,text); a.href=href; a.target="_blank"; a.rel="noopener"; return a;
+}
+
+function card(m){
+  var ch=chamber(m.parliament), c=el("article","card"), qm=quizById[m.id];
+  var who=el("div","who");
+  who.appendChild(el("h4","cname",m.name));
+  who.appendChild(el("span","role",ch.role||"Member"));
+  c.appendChild(who);
+  c.appendChild(el("p","csub",(m.party||"No party")+(m.since?" · "+(ch.role||"member")+" since "+m.since:"")));
+
+  if(qm&&m.parliament===UK&&answeredCount()>=MIN_ANSWERS){
+    var mt=matchFor(qm);
+    if(enoughOverlap(mt)){
+      var mb=el("button","matchbtn",Math.round(mt.pct)+"% match with your answers →"); mb.type="button";
+      mb.addEventListener("click",function(){ S.mp=m.id; save(); go("match"); });
+      c.appendChild(mb);
+    }
   }
 
-  function card(m){
-    var bm=(DATA.benchmarks||{})[m.parliament]||{};
-    var c=el("article","card");
-    var role=ROLE[m.parliament]||"Member";
+  var termKnown=has(m.termVotes)&&m.eligible>0;
+  var neverVoted=termKnown&&m.termVotes===0;
+  var tiles=el("div","tiles");
+  tiles.appendChild(termKnown ? tile(num(m.termVotes),"of "+num(m.eligible)+" votes this term")
+                              : tile(num(m.votesCast),"votes cast"));
+  tiles.appendChild(tile(m.partyLineDivisions?num(m.rebellions):"—","times broke with party"));
+  tiles.appendChild(tile(has(m.questions)?num((m.questions||0)+(m.speeches||0)):"—","questions & speeches"));
+  c.appendChild(tiles);
 
-    var who=el("div","who");
-    who.appendChild(el("h3",null,m.name));
-    who.appendChild(el("span","role",role));
-    who.appendChild(el("span","party",m.party||"—"));
-    c.appendChild(who);
+  // --- voting record ---
+  var s1=el("div","sect"); s1.appendChild(el("h5",null,"Voting record"));
+  if(neverVoted){
+    var why = /sinn/i.test(m.party) ? "Sinn Féin MPs do not take their seats at Westminster, so they do not vote."
+      : /speaker/i.test(m.party) ? "The Speaker does not vote."
+      : "Has not voted this term. Some members do not vote by convention, such as Deputy Speakers.";
+    s1.appendChild(el("p","note",why));
+  } else {
+    if(termKnown) s1.appendChild(metric("Turnout",m.turnout,ch.turnout,
+      "Voted in "+num(m.termVotes)+" of the "+num(m.eligible)+" divisions they were eligible for since "+
+      (ch.termStart||"the election")+". Chamber median "+(has(ch.turnout)?ch.turnout+"%":"—")+
+      ". Absence is not always a choice: ministers are often excused and members can be paired."));
+    s1.appendChild(metric("With their party",m.partyAgreement,ch.partyAgreement,
+      "Did the same as most of their party at the time in "+(has(m.partyAgreement)?m.partyAgreement+"%":"—")+
+      " of "+num(m.partyLineDivisions)+" divisions across their whole record. Almost every member sits near 99%."));
+    s1.appendChild(metric("With the result",m.chamberAgreement,ch.chamberAgreement,
+      "How often they were on the winning side. This mostly reflects being in government or opposition."));
+    var kl=el("div","keyline"); kl.appendChild(el("i")); kl.appendChild(document.createTextNode("chamber median"));
+    s1.appendChild(kl);
+    if(m.recordAsOf) s1.appendChild(el("p","note","From the "+m.recordAsOf+" data pull."+
+      (termKnown?"":" Turnout is shown once it has been recomputed for the current term.")));
+  }
+  c.appendChild(s1);
 
-    var tiles=el("div","tiles");
-    tiles.appendChild(tile(fmt(num(m.votesCast)),"votes cast"));
-    tiles.appendChild(tile(fmt(num(m.rebellions)),"times broke with party"));
-    tiles.appendChild(tile(fmt(num(m.questions)+num(m.speeches)),"questions & speeches"));
-    c.appendChild(tiles);
-
-    // --- voting record -----------------------------------------------------
-    var s1=el("section");
-    s1.appendChild(el("h4",null,"Voting record"));
-    s1.appendChild(metric("Turnout",num(m.turnout),bm.turnout,"%",
-      "Voted in "+fmt(num(m.termVotes))+" of "+fmt(num(m.eligible))+
-      " divisions since "+(m.spellFrom||"they took their seat")+
-      (m.spells>1 ? " (their current spell — they have served "+m.spells+
-                    " separate times, and the earlier ones are not counted here)" : "")+
-      ". Chamber median "+(bm.turnout||"—")+"%."));
-    s1.appendChild(metric("With their party",num(m.partyAgreement),bm.partyAgreement,"%",
-      "Voted with their own party's majority on "+(num(m.partyAgreement)===null?"—":
-      m.partyAgreement+"%")+" of "+fmt(num(m.partyLineDivisions))+
-      " whipped divisions. Almost every member sits at 99–100%."));
-    s1.appendChild(metric("With the result",num(m.chamberAgreement),bm.chamberAgreement,"%",
-      "How often they were on the winning side. This mostly reflects being in "+
-      "government or opposition, not an individual choice."));
-    var note=el("div","mnote"); note.appendChild(el("i"));
-    note.appendChild(document.createTextNode(" chamber median"));
-    s1.appendChild(note);
-    c.appendChild(s1);
-
-    // --- salience ----------------------------------------------------------
-    var s2=el("section");
-    s2.appendChild(el("h4",null,"What they work on"));
-    var topics=(m.topics||[]).filter(function(t){ return t[1]>0; });
-    if(topics.length){
-      var peak=topics[0][1];
-      var lim=open["t"+m.name]?topics.length:Math.min(5,topics.length);
-      topics.slice(0,lim).forEach(function(t){
-        var row=el("div","topic");
-        row.appendChild(el("div","tlabel",t[0]));
-        var track=el("div","ttrack"), fill=el("div","tfill");
-        fill.style.width=(peak?Math.max(2,100*t[1]/peak):0)+"%";
-        track.appendChild(fill); row.appendChild(track);
-        row.appendChild(el("div","tval",t[2].toFixed(1)+"%"));
-        bindTip(row,t[0]+" — mentioned in "+t[1].toLocaleString()+
-          " of their questions and speeches ("+t[2].toFixed(1)+"%).");
-        s2.appendChild(row);
+  // --- positions on the quiz statements (MPs) ---
+  if(qm){
+    var rows=[];
+    Q.statements.forEach(function(st,i){ if(has(qm.pos[i])) rows.push({st:st,i:i,p:qm.pos[i],n:castCount(qm.votes[i])}); });
+    if(rows.length){
+      rows.sort(function(a,b){ return b.p-a.p || b.n-a.n; });
+      var s4=el("details","sect");
+      s4.appendChild(el("summary",null,"How they voted on "+rows.length+" issues"));
+      var ends=el("div","ends"); ends.appendChild(el("span",null,"Against")); ends.appendChild(el("span",null,"For"));
+      var wrapEnds=el("div","issue"); wrapEnds.style.borderBottom="none"; wrapEnds.style.padding="0";
+      wrapEnds.appendChild(el("span")); wrapEnds.appendChild(ends); s4.appendChild(wrapEnds);
+      rows.forEach(function(r){
+        var row=el("div","issue");
+        row.appendChild(el("div","iname",cap(r.st.text)));
+        row.appendChild(axis(r.p,null));
+        row.appendChild(el("div","iband",cap(band(r.p,r.n))));
+        s4.appendChild(row);
       });
-      if(topics.length>5){
-        var b=el("button","more",open["t"+m.name]?"Show fewer subjects":
-          "Show all "+topics.length+" subjects");
-        b.type="button";
-        b.addEventListener("click",function(){ open["t"+m.name]=!open["t"+m.name]; draw(); });
-        s2.appendChild(b);
-      }
-    } else {
-      s2.appendChild(el("p","empty","No questions or speeches recorded."));
+      c.appendChild(s4);
     }
+  }
+
+  // --- what they work on ---
+  var topics=(m.topics||[]).filter(function(t){ return t[1]>0; });
+  if(topics.length){
+    var s2=el("div","sect"); s2.appendChild(el("h5",null,"What they work on"));
+    var peak=topics[0][1];
+    topics.slice(0,5).forEach(function(t){
+      var row=el("div","topic");
+      row.appendChild(el("div","tlabel",t[0]));
+      var track=el("div","mtrack"), fill=el("div","mfill");
+      fill.style.width=Math.max(2,100*t[1]/peak)+"%"; track.appendChild(fill); row.appendChild(track);
+      row.appendChild(el("div","mval",t[2].toFixed(1)+"%"));
+      bindTip(row,t[0]+" — mentioned in "+t[1].toLocaleString()+" of their questions and speeches ("+t[2].toFixed(1)+"%).");
+      s2.appendChild(row);
+    });
     c.appendChild(s2);
-
-    // --- receipts ----------------------------------------------------------
-    var s3=el("section");
-    s3.appendChild(el("h4",null,"When they broke with their party"));
-    var rec=m.receipts||[];
-    if(!num(m.rebellions)){
-      s3.appendChild(el("p","empty",
-        num(m.partyLineDivisions) ? "Never — voted the party line every time."
-                                  : "Sits without a party whip, so there is no party line."));
-    } else {
-      var shown=open["r"+m.name]?rec.length:Math.min(3,rec.length);
-      var wrap=el("div","rwrap"), t=el("table","receipts");
-      t.innerHTML="<thead><tr><th>Date</th><th>Division</th><th>Vote</th></tr></thead>";
-      var tb=document.createElement("tbody");
-      rec.slice(0,shown).forEach(function(r){
-        var tr=document.createElement("tr");
-        tr.appendChild(el("td",null,r[0]));
-        tr.appendChild(el("td",null,r[1]||"(untitled division)"));
-        tr.appendChild(el("td",null,r[2]+" · party "+r[3]));
-        tb.appendChild(tr);
-      });
-      t.appendChild(tb); wrap.appendChild(t); s3.appendChild(wrap);
-      if(rec.length>3){
-        var rb=el("button","more",open["r"+m.name]?"Show fewer":
-          "Show all "+rec.length+" listed");
-        rb.type="button";
-        rb.addEventListener("click",function(){ open["r"+m.name]=!open["r"+m.name]; draw(); });
-        s3.appendChild(rb);
-      }
-      if(m.rebellions>rec.length){
-        s3.appendChild(el("p","empty","Showing the "+rec.length+" most recent of "+
-          m.rebellions.toLocaleString()+"."));
-      }
-    }
-    c.appendChild(s3);
-    return c;
+  }
+  if(m.motions){
+    c.appendChild(el("p","note","Motions this parliament: proposed "+num(m.motions.proposed)+
+      ", signed "+num(m.motions.signed)+". Signing is unwhipped but changes no law."));
   }
 
-  elSearch.addEventListener("input",function(){ render(elSearch.value); });
-
-  var inline=document.getElementById("app-data").textContent.trim();
-  var parsed=null; try{ parsed=JSON.parse(inline); }catch(e){}
-  if(parsed&&parsed.members){ init(parsed); }
-  else{
-    fetch("data.json").then(function(r){ return r.json(); }).then(init).catch(function(){
-      elName.textContent="Data not loaded";
-      elLegis.textContent="Run: python -m analysis.behaviour && python -m analysis.export_app_data";
+  // --- receipts ---
+  var rec=m.receipts||[];
+  if(m.partyLineDivisions&&!m.rebellions){
+    c.appendChild(el("p","note","Has never voted differently from most of their party."));
+  } else if(rec.length){
+    var s3=el("details","sect");
+    s3.appendChild(el("summary",null,"When they broke with their party"+
+      (m.rebellions>rec.length?" · latest "+rec.length+" of "+num(m.rebellions):" · "+rec.length)));
+    var sc=el("div","scroll"), t=el("table","receipts");
+    t.innerHTML="<thead><tr><th>Date</th><th>Division</th><th>Vote</th></tr></thead>";
+    var tb=el("tbody");
+    rec.forEach(function(r){
+      var tr=el("tr"); tr.appendChild(el("td",null,r[0]));
+      var td=el("td"), url=receiptUrl(m.parliament,r[4]);
+      if(url) td.appendChild(ext(url,r[1]||"(untitled division)")); else td.textContent=r[1]||"(untitled division)";
+      tr.appendChild(td);
+      tr.appendChild(el("td",null,r[2]+" · party "+r[3]));
+      tb.appendChild(tr);
     });
+    t.appendChild(tb); sc.appendChild(t); s3.appendChild(sc); c.appendChild(s3);
   }
+
+  var links=el("div","links"), slug={commons:"mp",scotland:"msp",senedd:"ms",ni:"mla"}[ch.slug];
+  if(slug&&m.id) links.appendChild(ext("https://www.theyworkforyou.com/"+slug+"/"+m.id,"Full record on TheyWorkForYou"));
+  if(m.mnis) links.appendChild(ext("https://members.parliament.uk/member/"+m.mnis+"/contact","Contact"));
+  if(links.children.length) c.appendChild(links);
+  return c;
+}
+
+/* ---------- quiz ---------- */
+function wireQuiz(){
+  $("quiz-start").addEventListener("click",function(){ S.started=true; save(); renderQuiz(); });
+  var box=$("q-answers");
+  ANSWERS.forEach(function(a,i){
+    var b=el("button","ans",a[0]); b.type="button"; b.setAttribute("role","radio");
+    b.dataset.v=a[1]; b.title="Press "+(i+1);
+    b.addEventListener("click",function(){ answer(a[1]); });
+    box.appendChild(b);
+  });
+  $("q-skip").addEventListener("click",function(){
+    var st=current(); S.answers[st.id]={v:null,imp:false}; step(1);
+  });
+  $("q-imp").addEventListener("change",function(){
+    var st=current(), a=S.answers[st.id]||{};
+    a.imp=$("q-imp").checked; S.answers[st.id]=a; save();
+  });
+  $("q-back").addEventListener("click",function(){ step(-1); });
+  $("q-next").addEventListener("click",function(){ step(1); });
+  $("q-done").addEventListener("click",function(){ go("match"); });
+  document.addEventListener("keydown",function(e){
+    if($("v-quiz").hidden||$("quiz-card").hidden) return;
+    if(e.target&&/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+    if(e.metaKey||e.ctrlKey||e.altKey) return;
+    if(e.key>="1"&&e.key<="5"){ answer(ANSWERS[Number(e.key)-1][1]); }
+    else if(e.key==="ArrowLeft"){ step(-1); }
+    else if(e.key==="ArrowRight"){ step(1); }
+  });
+}
+function current(){ return Q.statements[ORDER[S.at]]; }
+function answer(v){
+  var st=current(), a=S.answers[st.id]||{};
+  a.v=v; a.imp=!!a.imp; S.answers[st.id]=a; save();
+  renderQuiz();
+  setTimeout(function(){ if(current()===st) step(1); },170);
+}
+function step(d){
+  var n=S.at+d;
+  if(n<0) return;
+  if(n>=ORDER.length){ save(); if(answeredCount()>=MIN_ANSWERS) go("match"); else renderQuiz(); return; }
+  S.at=n; save(); renderQuiz();
+}
+function renderQuiz(){
+  if(!Q){ $("quiz-lede").textContent="The quiz data has not been built yet."; $("quiz-intro").hidden=true; return; }
+  $("quiz-lede").textContent=Q.statements.length+" statements, all of them voted on by MPs since "+
+    Q.termStart.slice(0,4)+". The quiz covers the House of Commons.";
+  $("quiz-intro").hidden=S.started; $("quiz-card").hidden=!S.started;
+  navCount();
+  if(!S.started) return;
+  var st=current(), a=S.answers[st.id]||{}, n=answeredCount();
+  $("q-count").textContent="Statement "+(S.at+1)+" of "+ORDER.length;
+  $("q-group").textContent=st.group||"";
+  $("q-free").hidden=!st.freeVote;
+  $("q-bar").style.width=(100*(S.at+1)/ORDER.length)+"%";
+  $("q-text").textContent=st.text+".";
+  $("q-imp").checked=!!a.imp;
+  document.querySelectorAll("#q-answers .ans").forEach(function(b){
+    b.setAttribute("aria-checked", typeof a.v==="number"&&Number(b.dataset.v)===a.v ? "true":"false");
+  });
+  // detail: what was actually voted on
+  var d=$("q-detail"); d.innerHTML=""; $("q-more").open=false;
+  if(st.detail&&norm(st.detail)!==norm(st.text)) d.appendChild(el("p",null,st.detail));
+  d.appendChild(el("p",null,st.divisions.length+" vote"+(st.divisions.length===1?"":"s")+" in all, "+
+    st.termVotes+" in this parliament. The most recent:"));
+  var ul=el("ul");
+  st.divisions.slice(-3).reverse().forEach(function(dv){
+    var li=el("li"); li.appendChild(document.createTextNode(dv.date+" — "));
+    li.appendChild(ext(divisionUrl(dv),dv.title));
+    li.appendChild(document.createTextNode(dv.alignment==="agree" ? " (voting aye supported it)" : " (voting no supported it)"));
+    ul.appendChild(li);
+  });
+  d.appendChild(ul);
+  if(st.link){ var p=el("p"); p.appendChild(ext(st.link,"The legislation on Parliament's website")); d.appendChild(p); }
+  $("q-back").disabled=S.at===0;
+  $("q-next").textContent=S.at===ORDER.length-1 ? "Finish" : "Next →";
+  $("q-done").disabled=n<MIN_ANSWERS;
+  $("q-hint").textContent = n<MIN_ANSWERS
+    ? "Answer "+(MIN_ANSWERS-n)+" more to see a match. Keys 1–5 answer; arrow keys move."
+    : n+" answered. You can see your match now, or keep going for a more reliable one.";
+}
+
+/* ---------- match ---------- */
+function focusMember(ranked){
+  var mine=null;
+  if(S.place){
+    var areas=placeAreas(S.place).filter(function(a){ return a.parliament===UK; });
+    if(areas.length&&quizById[areas[0].members[0].id]) mine=quizById[areas[0].members[0].id];
+  }
+  if(S.mp&&quizById[S.mp]) return {qm:quizById[S.mp], why:mine&&mine.id===S.mp?"yours":"chosen"};
+  if(mine) return {qm:mine, why:"yours"};
+  return ranked.length ? {qm:ranked[0].qm, why:"closest"} : null;
+}
+function partyLabel(p){ return /^labour/i.test(p) ? "Labour" : p; }
+/* Sitting as an independent, or as Speaker, is the absence of a party. */
+function isParty(p){ return !!p && !/^(independent|speaker)/i.test(p); }
+var SHORT={"Scottish National Party":"SNP","Liberal Democrat":"Lib Dem",
+  "Social Democratic and Labour Party":"SDLP","Traditional Unionist Voice":"TUV"};
+function renderMatch(){
+  var host=$("match-body"); host.innerHTML="";
+  if(!Q){ $("match-lede").textContent="The quiz data has not been built yet."; return; }
+  var n=answeredCount();
+  if(n<MIN_ANSWERS){
+    $("match-lede").textContent="Answer at least "+MIN_ANSWERS+" statements and your match appears here.";
+    var p=el("div","panel"); var b=el("button","btn",n?"Continue the quiz":"Take the quiz"); b.type="button";
+    b.addEventListener("click",function(){ S.started=true; save(); go("quiz"); });
+    p.appendChild(el("p",null,"You have answered "+n+" so far.")); p.appendChild(b); host.appendChild(p);
+    return;
+  }
+  $("match-lede").textContent="Based on the "+n+" statement"+(n===1?"":"s")+" you answered, compared with how each MP voted on the same things.";
+
+  var ranked=Q.members.map(function(qm){ var m=matchFor(qm); return {qm:qm,pct:m.pct,k:m.k}; })
+    .filter(enoughOverlap).sort(function(a,b){ return b.pct-a.pct || b.k-a.k; });
+  var focus=focusMember(ranked);
+
+  // --- headline ---
+  if(focus){
+    var fm=matchFor(focus.qm), panel=el("div","panel"), hero=el("div","hero");
+    panel.style.maxWidth="none";
+    var ok=enoughOverlap(fm);
+    hero.appendChild(el("div","big", ok ? Math.round(fm.pct)+"%" : "—"));
+    var txt=el("div");
+    txt.appendChild(el("p","eyebrow", focus.why==="yours" ? "Your MP" : focus.why==="chosen" ? "Selected MP" : "Your closest match in the House"));
+    txt.appendChild(el("h3",null,focus.qm.name));
+    txt.appendChild(el("p","small muted",partyLabel(focus.qm.party)+" · "+focus.qm.area));
+    hero.appendChild(txt); panel.appendChild(hero);
+    panel.appendChild(el("p","small", ok
+      ? "Agreement across the "+fm.k+" statement"+(fm.k===1?"":"s")+" you answered that "+focus.qm.name+
+        " has voted on. 100% would mean they always voted the way you feel; 50% is no relationship either way."
+      : focus.qm.name+" has voted on too few of the statements you answered to give a match."+
+        (/sinn/i.test(focus.qm.party)?" Sinn Féin MPs do not take their seats, so they have no voting record.":"")));
+    var act=el("div","row");
+    var b1=el("button","btn ghost","Change my answers"); b1.type="button";
+    b1.addEventListener("click",function(){ S.started=true; save(); go("quiz"); });
+    act.appendChild(b1);
+    if(focus.why!=="yours"){
+      var b2=el("button","btn quiet",S.place?"Back to my MP":"Find my MP"); b2.type="button";
+      b2.addEventListener("click",function(){ S.mp=null; save(); if(S.place) renderMatch(); else go("reps"); });
+      act.appendChild(b2);
+    }
+    var b3=el("button","linkbtn","Clear my answers and start again"); b3.type="button";
+    b3.addEventListener("click",function(){ S.answers={}; S.at=0; S.started=false; S.mp=null; save(); go("quiz"); });
+    act.appendChild(b3);
+    panel.appendChild(act);
+    host.appendChild(panel);
+  }
+
+  // --- compass + context ---
+  var grid=el("div","grid2");
+  grid.appendChild(compassPanel(focus&&focus.qm));
+  var side=el("div","panel");
+  side.appendChild(el("p","eyebrow","MPs who voted most like you"));
+  var ol=el("ol","rank");
+  ranked.slice(0,6).forEach(function(r){
+    var li=el("li"), left=el("div"), nb=el("button","linkbtn",r.qm.name); nb.type="button";
+    nb.style.fontSize="14px";
+    nb.addEventListener("click",function(){ S.mp=r.qm.id; save(); renderMatch(); window.scrollTo(0,0); });
+    left.appendChild(nb); left.appendChild(el("span","sub",partyLabel(r.qm.party)+" · "+r.qm.area));
+    li.appendChild(left); li.appendChild(el("span","v",Math.round(r.pct)+"%")); ol.appendChild(li);
+  });
+  side.appendChild(ol);
+  var byParty={};
+  ranked.forEach(function(r){ var p=partyLabel(r.qm.party); (byParty[p]=byParty[p]||[]).push(r.pct); });
+  var parties=Object.keys(byParty).filter(function(p){ return isParty(p)&&byParty[p].length>=4; }).map(function(p){
+    var v=byParty[p]; return {p:p,n:v.length,avg:v.reduce(function(a,b){return a+b;},0)/v.length};
+  }).sort(function(a,b){ return b.avg-a.avg; });
+  if(parties.length){
+    side.appendChild(el("p","eyebrow","Average match by party"));
+    var pb=el("div");
+    parties.forEach(function(x){
+      var row=el("div","pbar"); row.appendChild(el("div","mlabel",x.p));
+      var tr=el("div","mtrack"), f=el("div","mfill"); f.style.width=x.avg+"%"; tr.appendChild(f); row.appendChild(tr);
+      row.appendChild(el("div","mval",Math.round(x.avg)+"%"));
+      bindTip(row,x.p+": average match "+x.avg.toFixed(1)+"% across "+x.n+" MPs. Individual MPs differ — see the list above.");
+      pb.appendChild(row);
+    });
+    side.appendChild(pb);
+    side.appendChild(el("p","note","Parties with at least four MPs. Because most votes are whipped, your MP's match is usually close to their party's."));
+  }
+  grid.appendChild(side);
+  host.appendChild(grid);
+
+  // --- statement by statement ---
+  if(focus) host.appendChild(breakdown(focus.qm));
+
+  // --- devolved representatives ---
+  if(S.place){
+    var dev=placeAreas(S.place).filter(function(a){ return a.parliament!==UK; });
+    if(dev.length){
+      var note=el("div","panel"); note.style.maxWidth="none";
+      note.appendChild(el("p","eyebrow","Your other representatives"));
+      note.appendChild(el("p","small","There is no match yet for "+dev.map(function(a){
+        return a.members.length+" "+(chamber(a.parliament).role||"member")+(a.members.length===1?"":"s")+" for "+a.area; }).join(", ")+
+        ". Nobody publishes an independent mapping of votes to policies for the devolved legislatures, and we will not invent one quietly. Their voting records are under Your representatives."));
+      host.appendChild(note);
+    }
+  }
+}
+
+function compassPanel(focusQm){
+  var panel=el("div","panel");
+  panel.appendChild(el("p","eyebrow","Where the votes sit"));
+  var you=place(userValue);
+  var NS="http://www.w3.org/2000/svg", P=36, W=300, size=W+2*P;
+  var svg=document.createElementNS(NS,"svg");
+  svg.setAttribute("viewBox","0 0 "+size+" "+size); svg.setAttribute("class","compass");
+  svg.setAttribute("role","img");
+  svg.setAttribute("aria-label","Compass: economic left to right across, social liberal at the bottom to authoritarian at the top.");
+  var X=function(e){ return P+(e+1)/2*W; }, Y=function(s){ return P+(1-(s+1)/2)*W; };
+  function node(tag,attrs,text){
+    var n=document.createElementNS(NS,tag);
+    Object.keys(attrs).forEach(function(k){ n.setAttribute(k,attrs[k]); });
+    if(text!==undefined) n.textContent=text;
+    svg.appendChild(n); return n;
+  }
+  node("rect",{x:P,y:P,width:W,height:W,"class":"frame"});
+  node("line",{x1:P,y1:P+W/2,x2:P+W,y2:P+W/2,"class":"cross"});
+  node("line",{x1:P+W/2,y1:P,x2:P+W/2,y2:P+W,"class":"cross"});
+  node("text",{x:P+W/2,y:P-12,"text-anchor":"middle"},"Authoritarian");
+  node("text",{x:P+W/2,y:P+W+22,"text-anchor":"middle"},"Liberal");
+  node("text",{x:P,y:P+W+22,"text-anchor":"start"},"← Left");
+  node("text",{x:P+W,y:P+W+22,"text-anchor":"end"},"Right →");
+  // every MP with enough tagged votes to place
+  var sums={};
+  Q.members.forEach(function(m){
+    var c=COMPASS[m.id];
+    if(c.e===null||c.s===null||c.en<4||c.sn<3) return;
+    // Many MPs have identical records and would sit on one point; a small
+    // fixed nudge per member lets the crowd show without moving anyone far.
+    var jx=((m.id*9301+49297)%233280)/233280-0.5, jy=((m.id*4099+7919)%104729)/104729-0.5;
+    var dot=node("circle",{cx:(X(c.e)+jx*6).toFixed(1),cy:(Y(c.s)+jy*6).toFixed(1),r:2.2,"class":"mp",opacity:.55});
+    bindTip(dot,m.name+" — "+partyLabel(m.party)+", "+m.area);
+    var p=partyLabel(m.party), a=sums[p]=sums[p]||{e:0,s:0,n:0}; a.e+=c.e; a.s+=c.s; a.n++;
+  });
+  // party names at each party's average, largest first, each moved to the
+  // nearest spot that doesn't sit on a name already placed
+  var boxes=[];
+  Object.keys(sums).filter(function(p){ return isParty(p)&&sums[p].n>=4; })
+    .sort(function(a,b){ return sums[b].n-sums[a].n; }).forEach(function(p){
+      var a=sums[p], name=SHORT[p]||p, w=name.length*6+8, h=13;
+      var cx=X(a.e/a.n), cy=Y(a.s/a.n);
+      var tries=[[0,-9],[0,18],[w/2+7,4],[-w/2-7,4],[0,-23],[0,32],[w/2+7,-12],[-w/2-7,-12],[w/2+7,20],[-w/2-7,20]];
+      var pick=null;
+      for(var i=0;i<tries.length&&!pick;i++){
+        var x=Math.max(P+w/2,Math.min(P+W-w/2,cx+tries[i][0])), y=Math.max(P+h,Math.min(P+W-3,cy+tries[i][1]));
+        var b={x0:x-w/2,x1:x+w/2,y0:y-h+2,y1:y+3,x:x,y:y};
+        var clash=boxes.some(function(o){ return b.x0<o.x1&&b.x1>o.x0&&b.y0<o.y1&&b.y1>o.y0; });
+        if(!clash) pick=b;
+      }
+      if(!pick) return;                    // no room: better no label than a collision
+      boxes.push(pick);
+      node("text",{x:pick.x.toFixed(1),y:pick.y.toFixed(1),"text-anchor":"middle","class":"plab"},name);
+    });
+  var fc=focusQm&&COMPASS[focusQm.id];
+  if(fc&&fc.e!==null&&fc.s!==null){
+    var f=node("circle",{cx:X(fc.e).toFixed(1),cy:Y(fc.s).toFixed(1),r:6.5,fill:"var(--data)",stroke:"var(--surface)","stroke-width":2});
+    bindTip(f,focusQm.name+" — from "+fc.en+" economic and "+fc.sn+" social statements they have voted on.");
+  }
+  var placed=you.e!==null&&you.s!==null&&you.en>=3&&you.sn>=3;
+  if(placed){
+    var cx=X(you.e), cy=Y(you.s), r=7;
+    var dia=node("path",{d:"M"+cx+" "+(cy-r)+"L"+(cx+r)+" "+cy+"L"+cx+" "+(cy+r)+"L"+(cx-r)+" "+cy+"Z",
+      fill:"var(--surface)",stroke:"var(--ink)","stroke-width":2.2});
+    bindTip(dia,"You — from "+you.en+" economic and "+you.sn+" social statements you answered.");
+  }
+  panel.appendChild(svg);
+  var lg=el("div","legend");
+  function key(cls,text){ var s=el("span"); s.appendChild(el("i",cls)); s.appendChild(document.createTextNode(text)); lg.appendChild(s); }
+  key("k-you","You"); if(focusQm) key("k-them",focusQm.name); key("k-all","Every other MP");
+  panel.appendChild(lg);
+  panel.appendChild(el("p","note", placed
+    ? "Placed from votes, not beliefs: a dot shows where an MP's votes sit on the statements we could tag, which reflects government and opposition as well as conviction. Party names mark each party's average; dots are nudged slightly so MPs with identical records don't hide one another."
+    : "Answer at least three statements on each axis to place yourself. The tags behind this compass are ours; see How it works."));
+  return panel;
+}
+
+function answerLabel(v){
+  for(var i=0;i<ANSWERS.length;i++) if(ANSWERS[i][1]===v) return ANSWERS[i][0].toLowerCase();
+  return "";
+}
+function breakdown(qm){
+  var wrap=el("div","panel"); wrap.style.maxWidth="none";
+  wrap.appendChild(el("p","eyebrow","Statement by statement · "+qm.name));
+  var lg=el("div","legend");
+  var s1=el("span"); s1.appendChild(el("i","k-you")); s1.appendChild(document.createTextNode("Your answer")); lg.appendChild(s1);
+  var s2=el("span"); s2.appendChild(el("i","k-them")); s2.appendChild(document.createTextNode("Their votes")); lg.appendChild(s2);
+  lg.appendChild(el("span","muted","Open a statement to see every vote behind it."));
+  wrap.appendChild(lg);
+
+  var groups=[["You agree",[]],["Somewhere in between",[]],["You disagree",[]],["No voting record on these",[]]];
+  Q.statements.forEach(function(st,i){
+    var a=S.answers[st.id];
+    if(!a||typeof a.v!=="number") return;
+    var p=qm.pos[i], row={st:st,i:i,v:a.v,imp:a.imp,p:p};
+    if(!has(p)){ groups[3][1].push(row); return; }
+    row.agree=1-Math.abs(a.v-p)/2;
+    groups[row.agree>=0.75?0:row.agree>0.25?1:2][1].push(row);
+  });
+  groups.forEach(function(g,gi){
+    if(!g[1].length) return;
+    g[1].sort(function(a,b){ return (b.imp?1:0)-(a.imp?1:0) || (gi===2 ? a.agree-b.agree : (b.agree||0)-(a.agree||0)); });
+    var sec=el("div","cmpgroup"), gh=el("div","ghead");
+    gh.appendChild(el("h4",null,g[0]+" · "+g[1].length));
+    var ge=el("div","ends"); ge.appendChild(el("span",null,"Against")); ge.appendChild(el("span",null,"For"));
+    gh.appendChild(ge); sec.appendChild(gh);
+    g[1].forEach(function(r){
+      var d=el("details","cmp"), sm=el("summary");
+      sm.appendChild(el("div","st",cap(r.st.text)+(r.imp?"  ★":"")));
+      sm.appendChild(axis(r.p,r.v));
+      var n=castCount(qm.votes[r.i]);
+      sm.appendChild(el("div","who2","You "+answerLabel(r.v)+(r.imp?" (matters a lot)":"")+" · "+
+        (has(r.p) ? qm.name+" "+band(r.p,n) : qm.name+" has not voted on this")));
+      d.appendChild(sm);
+      var body=el("div","body"), sc=el("div","scroll"), t=el("table","receipts");
+      t.innerHTML="<thead><tr><th>Date</th><th>Division</th><th>On this statement</th></tr></thead>";
+      var tb=el("tbody"), codes=qm.votes[r.i];
+      r.st.divisions.forEach(function(dv,j){
+        var tr=el("tr"); tr.appendChild(el("td",null,dv.date));
+        var td=el("td"); td.appendChild(ext(divisionUrl(dv),dv.title)); tr.appendChild(td);
+        tr.appendChild(el("td",null,CODE[codes.charAt(j)]||"—")); tb.appendChild(tr);
+      });
+      // newest first reads better; the table was built oldest first
+      Array.prototype.slice.call(tb.children).reverse().forEach(function(x){ tb.appendChild(x); });
+      t.appendChild(tb); sc.appendChild(t); body.appendChild(sc);
+      if(r.st.freeVote) body.appendChild(el("p","note","A free vote: parties did not instruct their MPs."));
+      d.appendChild(body);
+      sec.appendChild(d);
+    });
+    wrap.appendChild(sec);
+  });
+  var skipped=Q.statements.length-answeredCount();
+  if(skipped) wrap.appendChild(el("p","note",skipped+" statement"+(skipped===1?" is":"s are")+" not counted because you skipped or have not reached "+(skipped===1?"it":"them")+"."));
+  return wrap;
+}
+
+function footer(){
+  var f=$("foot"); f.innerHTML="";
+  var src=D.sources||{}, v=src.votes||{}, sp=src.speech||{};
+  var line="Votes and memberships: TheyWorkForYou Votes and the parlparse register, by mySociety (CC BY 4.0)"+
+    (v.asOf?", as of "+v.asOf:"")+". ";
+  if(sp.asOf) line+="Questions, speeches and Northern Ireland Assembly votes: Glasshouse's own collection from the four legislatures, as of "+sp.asOf+". ";
+  line+="Contains Parliamentary information licensed under the Open Parliament Licence v3.0, and information from the Scottish Parliament, Senedd Cymru and the Northern Ireland Assembly under their open licences. Not affiliated with any of them, or with mySociety.";
+  f.textContent=line;
+  if(Q){ var n=$("m-n"); if(n) n.textContent=Q.statements.length; }
+}
+
+/* ---------- load ---------- */
+function inline(id){
+  try{ var t=$(id).textContent.trim(); return t&&t!=="null" ? JSON.parse(t) : null; }catch(e){ return null; }
+}
+var data=inline("app-data"), quiz=inline("quiz-data");
+if(data&&data.members){ init(data,quiz); }
+else{
+  Promise.all([
+    fetch("data.json").then(function(r){ return r.json(); }),
+    fetch("quiz.json").then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; })
+  ]).then(function(x){ init(x[0],x[1]); }).catch(function(){
+    $("place").textContent="The data could not be loaded. Build it with: python -m analysis.build";
+  });
+}
 })();
 </script>

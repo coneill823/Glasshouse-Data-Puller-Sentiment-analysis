@@ -1,93 +1,89 @@
-# Representative grading (lexicon-based)
+# analysis/
 
-Grades every representative from the pulled data using simple, transparent word
-lists — no machine learning. Four signals per representative:
-
-1. **Tone** — positive/negative language across their questions & speeches.
-2. **Topic stance** — a Pro/Con word list per policy category, applied to what
-   they say (gated so a topic only scores when its keywords actually appear).
-3. **Activity** — how much they participate (questions + speeches + votes).
-4. **Voting** — each division motion is scored for topic + lean, then combined
-   with how the member voted (aye/no) to give a voting stance per topic.
-
-## Run
+Turns raw data into what the app shows. One command runs all of it:
 
 ```bash
-# after pulling data with main.py
-python -m analysis.grade                 # grade everyone (current + historical)
-python -m analysis.grade --current-only  # only sitting members
-python -m analysis.grade --data-dir data --out analysis/output
+python -m analysis.build
 ```
 
-Reads the cumulative `*_master.csv` files under `data/<parliament>/…` and joins
-to `members_master.csv` for each member's party, constituency and status.
+| Step | Module | Output |
+|---|---|---|
+| 1 | `mysociety.py` — download / refresh mySociety's open data | `data/_mysociety/` (cache) |
+| 2 | `positions.py` — quiz statements and every MP's position | `app/quiz.json` |
+| 3 | `behaviour.py` — what members work on; NI votes (needs the scraped corpus) | `analysis/output/*.csv` |
+| 4 | `export_app_data.py` — one record per sitting representative | `app/data.json` |
+| 5 | `app/build_standalone.py` — the app as a single file | `dist/glasshouse.html` |
 
-## Output (in `analysis/output/`)
+Each step also runs on its own (`python -m analysis.positions`, …). Useful
+flags on `build`: `--no-fetch` (use the cache as it is), `--skip-speech`
+(don't re-read the scraped corpus).
 
-`member_grades.csv` — one row per member:
-`parliament, member, party, constituency, status, n_questions, n_speeches,
-n_votes, activity_total, tone_score, topics_engaged, top_pro_topic, top_con_topic`
+## The modules
 
-`member_topic_scores.csv` — one row per member × topic:
-`… topic, mentions, spoken_pro, spoken_con, spoken_stance, vote_pro, vote_con,
-vote_stance, combined_stance`
+**`mysociety.py`** — the source for who sits where, every vote, the
+vote-to-policy mapping and motions signed. `People` reads the member register:
+sitting members, party *at the time of a vote*, and the date of the last
+general election, which is read off the register rather than hardcoded.
 
-Stance columns run **-1 (con) … +1 (pro)**. Categories are named **`Pro-<topic>`**
-so a positive score always means the member leans to that category's supportive
-side (see `topics.py` for the axis of each — e.g. `Pro-Crime & justice` =
-pro-law-and-order). `constituency` lets the app group by area (“show and grade the
-representatives for my area”). Filter `status=current` for sitting members.
+**`positions.py`** — a statement is a mySociety policy with at least one
+scoring vote this parliament; a position is
+`(for − against) / (for + against + abstained)` over scoring votes only.
+Checked against mySociety's own published counts: all 23,217 identical.
 
-**How stance is scored:**
-- `spoken_stance` / `vote_stance` / `combined_stance` = `(pro − con) / (pro + con + K)`
-  with a shrink constant `K` (default 4), so **one hit doesn't saturate to ±1** —
-  only strong, consistent evidence approaches the extremes.
-- `combined_stance` is a **weighted** blend of the two signals present, with
-  **votes weighted more than speech** (votes are unambiguous and negation-proof).
-- `top_pro_topic` / `top_con_topic` are chosen only from topics with at least
-  `MIN_STANCE_HITS` (default 3) pro+con hits, so a one-off blip can't win.
-- Tune `STANCE_SHRINK_K`, `VOTE_WEIGHT`, `SPEECH_WEIGHT`, `MIN_STANCE_HITS` at the
-  top of `grade.py`.
+**`quiz_editorial.json`** — everything *we* decide: wording fixes, and which
+compass axis each statement belongs to, each with a reason. If you disagree
+with the quiz, this is the only file you need to read.
 
-## Tuning
+**`record.py`** — turnout, voting with the party, breaking with it, being on
+the winning side, from mySociety's tables (Commons, Scottish Parliament,
+Senedd). Eligibility is known and party is the party at the time.
 
-Everything gradeable lives in **`analysis/topics.py`** — edit it freely:
+**`behaviour.py`** — the same record computed from scraped CSVs, where
+eligibility has to be reconstructed. Still the source for the NI Assembly,
+which mySociety does not cover, and for what members ask and speak about.
 
-- `TOPICS[name]["keywords"]` decide when a statement is *about* a topic. Keep
-  them specific; a too-generic keyword (e.g. bare "rights") creates false hits.
-- `TOPICS[name]["pro"]` / `["con"]` define the stance axis for that topic. This
-  is a political judgement — make the lists mean what you intend.
-- `GENERAL_POSITIVE` / `GENERAL_NEGATIVE` drive the topic-independent tone score.
+**`export_app_data.py`** — the member list always comes from the register, so
+the app is current to the day. Speech figures are joined by legislature +
+area + name; where the scraped corpus is absent they are carried forward from
+the previous export and dated.
 
-## Who gets graded
+**`topics.py`** — keyword lists that sort a question or speech into subjects.
+Only the `keywords` are used now.
 
-Members are canonicalised to the roster, so a person with both id-bearing and
-name-only records is counted once (not duplicated). Speakers that aren't
-gradeable members — the chair (`Mr Speaker`, `The Presiding Officer`, `Y
-Llywydd`) and plenary parsing artifacts (`13:3`, `level 1`) — are excluded.
-`--current-only` further restricts to sitting members. Note the artifacts still
-exist in the raw plenary data; the grader just doesn't grade them.
+**`grade.py`** — the original lexicon stance scorer. **Superseded and no longer
+part of the build**: it inferred positions from word lists and could not tell
+a member attacking a policy from one supporting it. Kept as a record of what
+was tried; see docs/METHODS.md §18.
 
-## Caveats
+## Outputs the app reads
 
-- **Vote stance is heuristic**: it infers a motion's lean from its wording and
-  combines it with the member's vote. Motions with neutral wording contribute
-  nothing; genuinely mis-worded motions can mislead. Treat it as a signal.
-- **Negation is partially handled**: a stance term is flipped if a negation cue
-  ("not", "never", "against", "oppose"…) appears in the few tokens *before* it
-  ("we will not fund the NHS" → con). But a *post-modified* attack ("net zero is
-  a disaster") isn't caught — an inherent limit of lexicon scoring. This is why
-  votes are weighted above speech. Sarcasm is likewise invisible.
-- The final "grade" is intentionally left to the app: the CSVs expose the
-  components (tone, activity, per-topic stance) so you can weight them however
-  the product needs.
+`app/quiz.json`
 
-## Feeding the app
+```jsonc
+{
+  "termStart": "2024-07-05", "votesAsOf": "2026-11-22",
+  "statements": [{
+    "id": 20011, "name": "Private School VAT",
+    "text": "charging VAT on private school fees",   // "I support …"
+    "group": "Taxation", "freeVote": false,
+    "econ": -1, "social": 0,                         // from quiz_editorial.json
+    "divisions": [{"date": "2024-11-27", "number": 51, "title": "…", "alignment": "agree"}]
+  }],
+  "members": [{
+    "id": 10001, "name": "Diane Abbott", "party": "Labour", "area": "…",
+    "pos":   [1.0, null, -0.33, …],                  // one per statement
+    "votes": ["fff", "..", "afa", …]                 // one character per division:
+  }]                                                 // f for · a against · b abstained
+}                                                    // x absent · . not an MP then
+```
+
+`app/data.json` — `chambers` (medians and term dates per legislature) and
+`members` (identity, voting record, break-with-party receipts, subjects,
+motions). `sources` carries the date of the vote data and of the speech data
+separately, because they refresh on different schedules.
+
+## Tests
 
 ```bash
-python -m analysis.export_app_data       # CSVs -> app/data.json
+python -m unittest discover -s tests -t .
 ```
-
-Keeps sitting members that have a constituency (`--all` to include the rest),
-strips the `Pro-` prefix, and writes one compact JSON the front end loads. See
-`app/README.md`.
