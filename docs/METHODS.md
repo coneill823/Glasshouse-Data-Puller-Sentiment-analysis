@@ -164,7 +164,11 @@ against, abstained, absent or not-a-member, and
     position = (for − against) / (for + against + abstained)
 
 giving +1 for always voting for it, −1 for always against, and no position if
-they never voted. Absences are not evidence either way. Decisions taken
+they never voted. A statement must have a scoring vote in the current
+parliament to be asked, but every scoring vote on that policy counts, including
+those from earlier parliaments — so a long-serving member's position rests on
+more votes than a new member's, and the app shows the number beside each one.
+Absences are not evidence either way. Decisions taken
 without a division ("agreements") are excluded because nobody individually did
 anything — the one place our numbers deliberately differ from mySociety's,
 who include a small number.

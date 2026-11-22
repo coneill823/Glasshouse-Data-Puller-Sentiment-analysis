@@ -392,7 +392,10 @@
         named divisions behind it — open any statement in your results to see them.</p>
       <p>A member's position on a statement is simply their votes on it: votes for, minus votes
         against, over the votes they cast. Absences count for nothing either way, and decisions
-        made without a recorded vote are excluded, because nobody individually did anything.</p>
+        made without a recorded vote are excluded, because nobody individually did anything.
+        Where the same policy was voted on in earlier parliaments those votes count too, so a
+        long-serving MP's position rests on more votes than a new one's; each match shows how
+        many.</p>
 
       <h3>What a vote does and does not mean</h3>
       <p>A vote is not an opinion. Most votes are whipped: the typical member votes with their
@@ -859,12 +862,15 @@ function card(m){
       ". Absence is not always a choice: ministers are often excused and members can be paired."));
     s1.appendChild(metric("With their party",m.partyAgreement,ch.partyAgreement,
       "Did the same as most of their party at the time in "+(has(m.partyAgreement)?m.partyAgreement+"%":"—")+
-      " of "+num(m.partyLineDivisions)+" divisions across their whole record. Almost every member sits near 99%."));
+      " of "+num(m.partyLineDivisions)+" divisions on record. Almost every member sits near 99%."));
     s1.appendChild(metric("With the result",m.chamberAgreement,ch.chamberAgreement,
       "How often they were on the winning side. This mostly reflects being in government or opposition."));
     var kl=el("div","keyline"); kl.appendChild(el("i")); kl.appendChild(document.createTextNode("chamber median"));
     s1.appendChild(kl);
-    if(m.recordAsOf) s1.appendChild(el("p","note","From the "+m.recordAsOf+" data pull."+
+    // A very low figure nearly always has a reason other than not turning up.
+    if(termKnown&&has(m.turnout)&&m.turnout<20) s1.appendChild(el("p","note",
+      "Turnout this low usually has a reason other than absence: presiding officers do not vote, and ministers are often excused."));
+    if(m.recordAsOf) s1.appendChild(el("p","note","Votes collected by Glasshouse from the legislature's own records, "+m.recordAsOf+"."+
       (termKnown?"":" Turnout is shown once it has been recomputed for the current term.")));
   }
   c.appendChild(s1);
