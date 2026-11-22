@@ -33,6 +33,7 @@ flutter pub get
 flutter run            # on a connected phone or an emulator
 flutter test           # 66 tests, about fifteen seconds
 flutter analyze
+flutter test integration_test   # drives the real app on the attached phone
 ```
 
 | Where | What |
@@ -42,6 +43,7 @@ flutter analyze
 | `lib/theme.dart` | Colours and type, light and dark. |
 | `assets/data/` | The two data files the app ships with. |
 | `test/` | Unit tests and tests that drive the whole app. |
+| `integration_test/` | The same, on a real phone or emulator, with nothing faked. |
 | `tool/make_icons.py` | Redraws the app icon at every size. |
 
 ### The same numbers as the website
@@ -87,9 +89,9 @@ These are yours to decide or do; none of them can be done from here.
   government body. The About screen already does; put the same sentence and
   the source links in the shop description.
 - **mySociety's terms.** The votes are CC BY 4.0, which permits this with the
-  credit the app already gives. I found no explicit licence for their policy
-  groupings — the mapping of votes to quiz statements — so ask them before
-  launch (see `docs/METHODS.md`).
+  credit the app already gives. Their policy groupings — the mapping of votes
+  to quiz statements — carry no explicit licence that we could find, so ask
+  them before launch (see `docs/METHODS.md`).
 - **Shop listing.** A name, descriptions, a category and a support email.
   [`store/listing.md`](store/listing.md) is a draft of the wording, and
   [`store/`](store/) holds the icons, the Play banner and screenshots at the
@@ -151,13 +153,15 @@ Mac. If you do not have one, a hosted Mac build service does the same job
 5. Try it through TestFlight, complete the privacy questions with the same
    facts as above, and submit for review.
 
-Each push already proves the iPhone app compiles: the **ios** job in the
-**mobile** workflow builds it unsigned.
+Each push already proves the iPhone app builds and runs: the **ios** job in
+the **mobile** workflow builds it unsigned, then drives it on an iPhone
+simulator.
 
 ## What it does not do yet
 
 - A Welsh postcode finds your MP but not your Senedd constituency; search for
-  that by name. (No open postcode service returns the 2026 Senedd seats yet.)
+  that by name. (postcodes.io, which the app uses, does not return Senedd
+  seats.)
 - The quiz covers the House of Commons only, for the reason given on the About
   screen.
 - English only.
