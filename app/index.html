@@ -2,6 +2,18 @@
      local file there is no charset header, and Môn / Sinéad decode as mojibake
      without it. The browser's encoding prescan reads the first 1024 bytes. -->
 <meta charset="utf-8">
+<!-- Without this a phone lays the page out 980 pixels wide and shrinks it to
+     fit. The lines after it are for a phone's home screen: Share, then Add to
+     Home Screen, gives the page its own icon and opens it without the
+     browser's bars. -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#F2F4F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#11151C" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Glasshouse">
+<link rel="icon" type="image/png" href="apple-touch-icon.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>Glasshouse Record</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -550,8 +562,8 @@
         <li>A Welsh postcode finds your MP but not yet your Senedd constituency: search for that
           by name. Northern Ireland Assembly seats still use pre-2024 boundaries, so near an
           edge the lookup can return the neighbouring seat.</li>
-        <li>Postcode lookup needs this page to be hosted on the web; opened as a file, search by
-          name instead.</li>
+        <li>Inside a preview that blocks requests to other sites, postcode lookup cannot run:
+          search by name there. On a website, or opened as a file, it works.</li>
       </ul>
 
       <h3>What this site knows about you</h3>
@@ -1062,8 +1074,9 @@ function renderOpened(){
   if(OPENED.kind==="ballot") host.appendChild(el("p","note lim",candidatesNote()));
 }
 
-/* Postcode -> constituencies, via the open postcodes.io service. This cannot
-   run inside a sandboxed preview, so every failure falls back to name search.
+/* Postcode -> constituencies, via the open postcodes.io service. It works on a
+   website and from the single file opened from disk. It cannot run inside a
+   sandboxed preview, so every failure falls back to name search.
    The reply also names the postcode's ward and council and gives every area's
    official code; elections and councillors are found by those, in this page. */
 function lookupPostcode(raw){
@@ -1110,7 +1123,7 @@ function lookupPostcode(raw){
     });
   }).catch(function(err){
     setMsg(err&&err.notFound ? "That postcode was not recognised. Check it, or search by constituency name."
-      : "Postcode lookup is not available here — it needs this page to be hosted on the web. Search by constituency or representative name instead.");
+      : "Postcode lookup could not be reached from here. Check your connection, or search by constituency or representative name instead.");
   });
 }
 

@@ -43,8 +43,12 @@ const upper = (s) => s.toUpperCase();
   const errors = [];
   const pc = want.postcode.postcode.replace(/\s+/g, '');
 
-  const context = async (viewport) => {
-    const ctx = await browser.newContext({ viewport });
+  const context = async (viewport, phone) => {
+    // A phone's browser honours the page's viewport tag; a narrow desktop
+    // window does not need one. Only the first shows what a phone will show.
+    const ctx = await browser.newContext(phone
+      ? { viewport, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }
+      : { viewport });
     // postcodes.io, as far as the page can tell; and no typefaces from the network
     await ctx.route('https://api.postcodes.io/**', (route) =>
       route.request().url().endsWith('/postcodes/' + pc)
@@ -206,10 +210,13 @@ const upper = (s) => s.toUpperCase();
   await open(page, 'quiz');
   ok(upper(await page.locator('#q-count').innerText()) === `STATEMENT 4 OF ${want.coreCount}`, 'an older save resumes in the Commons part');
 
-  // ---- nothing wider than a phone
-  const small = await (await context({ width: 360, height: 740 })).newPage();
+  // ---- on a phone: laid out at the phone's own width, and nothing wider
+  const PHONE = 390;
+  const small = await (await context({ width: PHONE, height: 844 }, true)).newPage();
   small.on('pageerror', (e) => errors.push('phone: ' + e));
   await open(small, 'reps');
+  ok(await small.evaluate(() => document.documentElement.clientWidth) === PHONE,
+    'a phone lays the page out at its own width, not as a shrunken desktop page');
   await small.evaluate(([key, saved]) => localStorage.setItem(key, JSON.stringify(saved)), [STORE, want.saved]);
   for (const view of ['reps', 'quiz', 'match', 'method']) {
     await open(small, view);

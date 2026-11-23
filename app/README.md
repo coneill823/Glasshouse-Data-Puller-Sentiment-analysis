@@ -54,9 +54,13 @@ them.
 
 Nothing runs on a server, so any static host works:
 
-- **A folder on your host**: upload `index.html`, `data.json` and `quiz.json`
-  together.
-- **GitHub Pages**: Settings → Pages → deploy from a branch, folder `/app`.
+- **A folder on your host**: upload `index.html`, `data.json`, `quiz.json` and
+  `apple-touch-icon.png` together.
+- **GitHub Pages**: its "deploy from a branch" option can only publish a
+  branch's root or its `/docs` folder, not `/app`. Choose Settings → Pages →
+  Source: GitHub Actions instead, with a workflow that uploads the `app/`
+  folder (GitHub's "Static HTML" starter workflow, with its `path` set to
+  `app`).
 - **One file**: upload `dist/glasshouse.html` anywhere.
 - **Inside an existing page** (WordPress, Squarespace, Wix): host it one of
   the ways above, then embed it:
@@ -66,14 +70,34 @@ Nothing runs on a server, so any static host works:
   ```
 
 **Postcode lookup** calls the open [postcodes.io](https://postcodes.io) service
-from the visitor's browser, so it works on any real website and not inside a
-sandboxed preview, where the app falls back to searching by name. It resolves
+from the visitor's browser. It works on any real website and from the
+single-file build opened from disk, and not inside a sandboxed preview that
+blocks requests to other sites, where the app falls back to searching by name.
+It resolves
 MPs everywhere and MSPs in Scotland. Senedd constituencies cannot yet be
 resolved from a postcode, and NI Assembly seats still use pre-2024 boundaries,
 so near an edge the lookup can return the neighbouring seat; the app says so.
 The same reply names the postcode's ward and council and gives every area's
 official code. Elections and councillors are found from those inside the
 page: the postcode goes nowhere else.
+
+## On a phone, without an app shop
+
+The page is built to fit a phone and can be kept on its home screen like an
+app. Once it is at a web address, open it in Safari (iPhone) or Chrome
+(Android), then Share → Add to Home Screen. Answers are still kept on that
+phone only.
+
+To try that at home before putting it anywhere public, serve it from a
+computer on the same Wi-Fi and open the computer's address on the phone:
+
+```bash
+python3 -m http.server 8000 --directory app
+hostname -I                                   # the computer's address, e.g. 192.168.1.23
+# on the phone: http://192.168.1.23:8000
+```
+
+If the phone cannot reach it, the computer's firewall is blocking port 8000.
 
 **Checking it.** The page has no build step and no test runner of its own.
 Its arithmetic follows `analysis/quizmath.py`, and `app/check/` holds it to
