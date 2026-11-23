@@ -102,7 +102,10 @@ function serve() {
     await page.waitForTimeout(3500);
 
     const shot = async (label) => {
-      await page.waitForTimeout(800);
+      // A phone has no pointer. Park it on the title bar, where nothing
+      // lights up under it, before the picture is taken.
+      await page.mouse.move(d.width / 2, 20);
+      await page.waitForTimeout(900);
       await page.screenshot({ path: path.join(out, `${d.name}-${label}.png`) });
     };
     // The four destinations share the width of the bar at the bottom.
@@ -110,7 +113,7 @@ function serve() {
       await page.mouse.click((d.width / 4) * (index + 0.5), d.height - 34);
       // A pointer left resting on the bar brings up its tooltip, which a
       // phone never shows. Move it away and let the tooltip go.
-      await page.mouse.move(d.width / 2, d.height / 3);
+      await page.mouse.move(d.width / 2, 20);
       await page.waitForTimeout(1600);
     };
 
