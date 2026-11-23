@@ -32,7 +32,7 @@ Install [Flutter](https://docs.flutter.dev/get-started/install) 3.50 or newer, t
 cd mobile
 flutter pub get
 flutter run            # on a connected phone or an emulator
-flutter test           # 122 tests, about a minute
+flutter test           # 127 tests, about a minute
 flutter analyze
 flutter test integration_test   # drives the real app on the attached phone
 ```
